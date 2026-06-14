@@ -10,16 +10,27 @@ import {
   GitBranch,
   GitCommit,
 } from "lucide-react";
-import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
+import {
+  DashboardShell,
+  PageHeader,
+} from "@/components/layout/dashboard-shell";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
+import { DeployPanel } from "@/components/projects/deploy-panel";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { CreateDeploymentForm } from "@/components/workspace/create-deployment-form";
 import {
   getProjectDeployments,
   getProjectEnvironments,
 } from "@/lib/data/workspace-modules";
 import { updateDeploymentStatusAction } from "@/app/actions/workspace-modules";
+import { getDeploymentConfig } from "@/lib/projects/deployment-config";
 import { db } from "@/lib/db";
 import { DeploymentStatus } from "@prisma/client";
 
@@ -28,7 +39,7 @@ export const dynamic = "force-dynamic";
 
 type Props = { params: Promise<{ projectId: string }> };
 
-// ── Status UI ─────────────────────────────────────────────────────────────────
+// ── Status UI helpers ─────────────────────────────────────────────────────────
 
 type StatusMeta = {
   icon: React.ReactNode;
@@ -88,12 +99,22 @@ function formatRelative(date: Date) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatDuration(ms: number | null | undefined) {
+  if (!ms) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${s % 60}s`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default async function ProjectPublishingPage({ params }: Props) {
   const { projectId } = await params;
 
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { id: true, name: true, liveUrl: true },
+    select: { id: true, name: true, liveUrl: true, slug: true },
   });
   if (!project) notFound();
 
@@ -101,6 +122,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
     getProjectDeployments(projectId),
     getProjectEnvironments(projectId),
   ]);
+
+  const deployConfig = getDeploymentConfig(project.slug);
+  const hasDeployConfig = !!deployConfig;
 
   const latest = deployments[0] ?? null;
   const successDeploy = deployments.find(
@@ -113,17 +137,33 @@ export default async function ProjectPublishingPage({ params }: Props) {
       <DashboardShell>
         <PageHeader
           title="Publishing"
-          description="Create deployment records and track the history for this project."
+          description={
+            hasDeployConfig
+              ? "Live deployment controls and history for this project."
+              : "Create deployment records and track history."
+          }
         />
 
         <div className="space-y-6 max-w-3xl">
-          {/* Create form */}
-          <CreateDeploymentForm
-            projectId={projectId}
-            environments={environments}
-          />
+          {/* ── Real deploy controls (projects with VPS config) ── */}
+          {hasDeployConfig && deployConfig && (
+            <DeployPanel
+              projectId={projectId}
+              domain={deployConfig.domain}
+              branch={deployConfig.branch}
+              pm2Apps={deployConfig.pm2Apps}
+            />
+          )}
 
-          {/* Live URL banner */}
+          {/* ── Manual deployment record form (no deploy config, or supplemental) ── */}
+          {!hasDeployConfig && (
+            <CreateDeploymentForm
+              projectId={projectId}
+              environments={environments}
+            />
+          )}
+
+          {/* ── Live URL banner ── */}
           {(successDeploy?.url ?? project.liveUrl) && (
             <div className="flex items-center gap-2 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-3">
               <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
@@ -145,7 +185,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
             </div>
           )}
 
-          {/* Latest deployment card */}
+          {/* ── Latest deployment card ── */}
           {latest && (
             <Card>
               <CardHeader className="pb-3">
@@ -179,7 +219,17 @@ export default async function ProjectPublishingPage({ params }: Props) {
                         <span>{latest.environment.name}</span>
                       )}
                       <span>{formatRelative(latest.startedAt)}</span>
+                      {latest.duration && (
+                        <span>{formatDuration(latest.duration)}</span>
+                      )}
                     </div>
+                    {/* Error snippet */}
+                    {latest.status === DeploymentStatus.FAILED &&
+                      latest.errorMessage && (
+                        <pre className="mt-2 text-xs font-mono text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded p-2 overflow-x-auto max-h-24 whitespace-pre-wrap">
+                          {latest.errorMessage.slice(0, 500)}
+                        </pre>
+                      )}
                   </div>
                   {latest.url && (
                     <a
@@ -196,7 +246,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
             </Card>
           )}
 
-          {/* History */}
+          {/* ── Deployment history ── */}
           {deployments.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center text-center py-10 gap-3">
@@ -204,7 +254,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <div>
                   <p className="text-sm font-medium">No deployments yet</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Create a deployment record above.
+                    {hasDeployConfig
+                      ? "Deploy from the controls above to create the first record."
+                      : "Create a deployment record above."}
                   </p>
                 </div>
               </CardContent>
@@ -215,9 +267,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <CardTitle className="text-sm">
                   Deployment History ({deployments.length})
                 </CardTitle>
-                <CardDescription>
-                  Metadata records only — no build pipeline runs in Phase 6.
-                </CardDescription>
+                {!hasDeployConfig && (
+                  <CardDescription>
+                    Metadata records — no live pipeline connected for this project.
+                  </CardDescription>
+                )}
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y">
@@ -251,6 +305,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
                               <span>{dep.environment.name}</span>
                             )}
                             <span>{formatRelative(dep.startedAt)}</span>
+                            {dep.duration && (
+                              <span>{formatDuration(dep.duration)}</span>
+                            )}
                           </div>
                         </div>
 
@@ -265,7 +322,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
                           </a>
                         )}
 
-                        {/* Status update (only for non-terminal) */}
+                        {/* Status update for in-flight records */}
                         {!isTerminal && (
                           <form
                             action={updateDeploymentStatusAction.bind(
@@ -281,7 +338,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
                               className={SELECT_CLASS}
                               onChange={(e) => {
                                 const form =
-                                  e.target.closest("form") as HTMLFormElement;
+                                  e.target.closest(
+                                    "form"
+                                  ) as HTMLFormElement;
                                 form?.requestSubmit();
                               }}
                             >
@@ -294,7 +353,10 @@ export default async function ProjectPublishingPage({ params }: Props) {
                           </form>
                         )}
 
-                        <Badge variant={meta.variant} className="shrink-0 text-xs">
+                        <Badge
+                          variant={meta.variant}
+                          className="shrink-0 text-xs"
+                        >
                           {meta.label}
                         </Badge>
                       </div>
