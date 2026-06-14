@@ -3,7 +3,10 @@
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ProjectType, Visibility } from "@prisma/client";
+import { promises as fs } from "fs";
+import path from "path";
+import { ProjectType, Visibility, LogLevel, LogSource } from "@prisma/client";
+import { db } from "@/lib/db";
 import {
   createProject,
   updateProject,
@@ -14,6 +17,17 @@ import {
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
 const slugPattern = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+const blankSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name too long"),
+  slug: z
+    .string()
+    .min(1, "Slug is required")
+    .max(100, "Slug too long")
+    .regex(slugPattern, "Lowercase letters, numbers, and hyphens only"),
+  description: z.string().max(500, "Description too long").optional().or(z.literal("")),
+  type: z.nativeEnum(ProjectType).default(ProjectType.APP),
+});
 
 const createSchema = z.object({
   name: z.string().min(1, "Name is required").max(100, "Name too long"),
@@ -110,6 +124,68 @@ export async function createProjectAction(
   }
 
   redirect(`/projects/${projectId}`);
+}
+
+// ── Create Blank Project ──────────────────────────────────────────────────────
+
+/**
+ * Creates a blank project (no template, no zip).
+ * - Creates Project row + DEVELOPMENT + PRODUCTION environments.
+ * - Creates storage/projects/<slug>/ folder on disk.
+ * - Writes a ProjectLog entry.
+ * - Redirects to /projects/[id]/files.
+ */
+export async function createBlankProjectAction(
+  _prevState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const raw = Object.fromEntries(formData.entries());
+  const parsed = blankSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    return {
+      error: "Please fix the errors below.",
+      fieldErrors: parsed.error.flatten().fieldErrors as Record<string, string[]>,
+    };
+  }
+
+  const d = parsed.data;
+
+  let projectId: string;
+  let slug: string;
+  try {
+    const project = await createProject({
+      name: d.name,
+      slug: d.slug,
+      description: d.description || undefined,
+      type: d.type,
+      visibility: Visibility.PRIVATE,
+    });
+    projectId = project.id;
+    slug = project.slug;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Failed to create project.";
+    if (msg.toLowerCase().includes("unique constraint")) {
+      return { error: "A project with this slug already exists in your workspace." };
+    }
+    return { error: msg };
+  }
+
+  // Create the storage folder so the files page has somewhere to look
+  const storageDir = path.join(process.cwd(), "storage", "projects", slug);
+  await fs.mkdir(storageDir, { recursive: true });
+
+  // Record creation in the project log
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level: LogLevel.INFO,
+      source: LogSource.SYSTEM,
+      message: "Blank project created",
+    },
+  });
+
+  redirect(`/projects/${projectId}/files`);
 }
 
 export async function updateProjectAction(

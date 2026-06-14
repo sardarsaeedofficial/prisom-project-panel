@@ -8,7 +8,7 @@ import {
   Github,
   Upload,
   Sparkles,
-  Layers,
+  FolderPlus,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -27,25 +27,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { createProjectAction } from "@/app/actions/projects";
+import { createProjectAction, createBlankProjectAction } from "@/app/actions/projects";
 import { slugify } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Mode = "template" | "github" | "upload" | "ai";
+type Mode = "blank" | "github" | "upload" | "ai";
 
-// ── Templates ─────────────────────────────────────────────────────────────────
-
-const TEMPLATES = [
-  { id: "next",      name: "Next.js",      description: "Full-stack React with App Router",           tag: "Popular", framework: "Next.js",   language: "TypeScript" },
-  { id: "fastapi",   name: "FastAPI",       description: "High-performance Python API",                tag: null,      framework: "FastAPI",   language: "Python"     },
-  { id: "go-fiber",  name: "Go + Fiber",    description: "Lightweight and fast Go web framework",      tag: null,      framework: "Fiber",     language: "Go"         },
-  { id: "astro",     name: "Astro",         description: "Content-first web with island architecture", tag: null,      framework: "Astro",     language: "TypeScript" },
-  { id: "sveltekit", name: "SvelteKit",     description: "Full-stack Svelte with file-based routing",  tag: null,      framework: "SvelteKit", language: "TypeScript" },
-  { id: "blank",     name: "Blank Project", description: "Start from scratch, no template",            tag: null,      framework: "",          language: ""           },
-];
-
-// ── Type/Visibility selects (shared) ─────────────────────────────────────────
+// ── Shared sub-components ─────────────────────────────────────────────────────
 
 const SELECT_CLS =
   "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -54,7 +43,9 @@ function TypeSelect({ defaultValue = "APP" }: { defaultValue?: string }) {
   return (
     <select id="type" name="type" defaultValue={defaultValue} className={SELECT_CLS}>
       {["APP", "API", "LIBRARY", "STATIC", "SERVICE", "OTHER"].map((t) => (
-        <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
+        <option key={t} value={t}>
+          {t.charAt(0) + t.slice(1).toLowerCase()}
+        </option>
       ))}
     </select>
   );
@@ -69,8 +60,6 @@ function VisibilitySelect() {
     </select>
   );
 }
-
-// ── Shared name/slug row ──────────────────────────────────────────────────────
 
 function NameSlugRow({
   name,
@@ -90,7 +79,9 @@ function NameSlugRow({
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-1.5">
-        <Label htmlFor="name">Project name <span className="text-destructive">*</span></Label>
+        <Label htmlFor="name">
+          Project name <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="name"
           name="name"
@@ -103,7 +94,9 @@ function NameSlugRow({
         {nameError && <p className="text-xs text-destructive">{nameError}</p>}
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="slug">Slug <span className="text-destructive">*</span></Label>
+        <Label htmlFor="slug">
+          Slug <span className="text-destructive">*</span>
+        </Label>
         <Input
           id="slug"
           name="slug"
@@ -125,8 +118,6 @@ function NameSlugRow({
   );
 }
 
-// ── Error banner ──────────────────────────────────────────────────────────────
-
 function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
@@ -136,36 +127,50 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
+// ── Mode descriptor ───────────────────────────────────────────────────────────
+
+const MODES: Array<{
+  id: Mode;
+  label: string;
+  sub: string;
+  Icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: "blank",  label: "Blank Project",      sub: "Start with an empty project",  Icon: FolderPlus },
+  { id: "github", label: "Import from GitHub", sub: "Link a repository",             Icon: Github     },
+  { id: "upload", label: "Upload ZIP",          sub: "Upload a .zip archive",         Icon: Upload     },
+  { id: "ai",     label: "AI Generate",         sub: "Describe what to build",        Icon: Sparkles   },
+];
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boolean }) {
   const router = useRouter();
 
   // ── State ───────────────────────────────────────────────────────────────────
-  const [mode, setMode] = useState<Mode>("template");
+  const [mode, setMode] = useState<Mode>("blank");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Shared name/slug (persist across mode switches)
+  // Shared name/slug — persists when switching modes
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
 
-  // Template mode
-  const [framework, setFramework] = useState("");
-  const [language, setLanguage] = useState("");
-
   // Upload mode
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI mode
   const [aiPrompt, setAiPrompt] = useState("");
 
+  // Hidden file input ref — MUST be at root level so the Upload button
+  // can call .click() even before the upload form section is rendered.
+  const zipInputRef = useRef<HTMLInputElement>(null);
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
+
   const clearErrors = () => {
     setError(null);
     setFieldErrors({});
@@ -186,29 +191,67 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     clearErrors();
   };
 
+  /** Open the OS file picker. Safe to call before upload mode is active. */
+  const openFilePicker = () => {
+    clearErrors();
+    zipInputRef.current?.click();
+  };
+
+  /** Called when the hidden file input fires onChange. */
+  const handleZipSelected = (f: File | null) => {
+    if (!f) return;
+    setZipFile(f);
+    setMode("upload"); // switch into upload mode (highlights the button, shows form)
+    // Auto-derive name/slug from filename if the user hasn't typed anything yet
+    if (!name.trim() || !slugEdited) {
+      const derived = f.name
+        .replace(/\.zip$/i, "")
+        .replace(/[_\s]+/g, "-")
+        .toLowerCase();
+      // Let handleNameChange set both name and slug
+      setName(derived);
+      setSlug(slugify(derived));
+    }
+    clearErrors();
+  };
+
   // ── Submit handlers ──────────────────────────────────────────────────────────
 
-  // Template + GitHub import — both use createProjectAction
-  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  /** Blank project — calls server action which redirects to /files on success. */
+  const handleBlankSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
-    const formData = new FormData(e.currentTarget);
+    const fd = new FormData(e.currentTarget);
     startTransition(async () => {
-      const result = await createProjectAction(null, formData);
+      const result = await createBlankProjectAction(null, fd);
       if (result?.error) {
         setError(result.error);
         setFieldErrors((result.fieldErrors as Record<string, string[]>) ?? {});
       }
-      // On success the server action calls redirect() — navigation is automatic
+      // On success, createBlankProjectAction calls redirect() → navigation is automatic
     });
   };
 
-  // Upload — fetch to /api/projects/upload
+  /** GitHub import — uses existing createProjectAction (redirects to /projects/[id]). */
+  const handleGithubSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    clearErrors();
+    const fd = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const result = await createProjectAction(null, fd);
+      if (result?.error) {
+        setError(result.error);
+        setFieldErrors((result.fieldErrors as Record<string, string[]>) ?? {});
+      }
+    });
+  };
+
+  /** ZIP upload — POST to /api/projects/upload, then client-navigates to /files. */
   const handleUploadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
 
-    if (!uploadFile) { setError("Please select a .zip file."); return; }
+    if (!zipFile) { setError("Please select a .zip file first."); return; }
     if (!name.trim()) { setError("Project name is required."); return; }
     if (!slug.trim()) { setError("Slug is required."); return; }
 
@@ -216,9 +259,11 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     const fd = new FormData();
     fd.append("name", name.trim());
     fd.append("slug", slug.trim());
-    fd.append("description", (form.elements.namedItem("description") as HTMLTextAreaElement | null)?.value ?? "");
-    fd.append("type", (form.elements.namedItem("type") as HTMLSelectElement | null)?.value ?? "APP");
-    fd.append("file", uploadFile);
+    fd.append("description",
+      (form.elements.namedItem("description") as HTMLTextAreaElement | null)?.value ?? "");
+    fd.append("type",
+      (form.elements.namedItem("type") as HTMLSelectElement | null)?.value ?? "APP");
+    fd.append("file", zipFile);
 
     setUploading(true);
     try {
@@ -236,13 +281,13 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     }
   };
 
-  // AI Generate — create a plain project (description = prompt)
+  /** AI generate — creates project record with description, redirects to /projects/[id]. */
   const handleAiSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
-    const formData = new FormData(e.currentTarget);
+    const fd = new FormData(e.currentTarget);
     startTransition(async () => {
-      const result = await createProjectAction(null, formData);
+      const result = await createProjectAction(null, fd);
       if (result?.error) {
         setError(result.error);
         setFieldErrors((result.fieldErrors as Record<string, string[]>) ?? {});
@@ -250,26 +295,29 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     });
   };
 
-  // ── Mode selector data ────────────────────────────────────────────────────
-
-  const MODES: Array<{ id: Mode; label: string; sub: string }> = [
-    { id: "template", label: "Start from template", sub: "Pick a framework or blank" },
-    { id: "github",   label: "Import from GitHub",  sub: "Link a GitHub repository"  },
-    { id: "upload",   label: "Upload Files",         sub: "Upload a .zip archive"     },
-    { id: "ai",       label: "AI Generate",          sub: "Describe what to build"    },
-  ];
-
-  const modeIcon = (id: Mode) => {
-    if (id === "template") return <Layers className="h-5 w-5 text-primary" />;
-    if (id === "github")   return <Github className="h-5 w-5 text-primary" />;
-    if (id === "upload")   return <Upload className="h-5 w-5 text-primary" />;
-    return <Sparkles className="h-5 w-5 text-primary" />;
-  };
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="max-w-2xl">
+      {/*
+        Hidden file input at the ROOT level — outside every conditional block.
+        This lets the Upload ZIP mode button call zipInputRef.current?.click()
+        immediately, before the upload form section is in the DOM.
+      */}
+      <input
+        ref={zipInputRef}
+        type="file"
+        accept=".zip,application/zip,application/x-zip-compressed"
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(e) => {
+          handleZipSelected(e.target.files?.[0] ?? null);
+          // Reset so the same file can be re-selected if needed
+          e.target.value = "";
+        }}
+      />
+
       {/* Back link */}
       <Button variant="ghost" size="sm" className="mb-6 -ml-2 text-muted-foreground" asChild>
         <Link href="/projects">
@@ -283,13 +331,22 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
         <p className="text-muted-foreground mt-1">Choose how you want to start.</p>
       </div>
 
-      {/* ── Mode selector: real <button type="button"> elements ── */}
+      {/* ── Mode selector ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-4">
-        {MODES.map(({ id, label, sub }) => (
+        {MODES.map(({ id, label, sub, Icon }) => (
           <button
             key={id}
             type="button"
-            onClick={() => switchMode(id)}
+            onClick={() => {
+              if (id === "upload") {
+                // Switch mode immediately (highlights the button) AND open file picker.
+                // If the user already has a file, keep it; just switch back into upload view.
+                switchMode("upload");
+                openFilePicker();
+              } else {
+                switchMode(id);
+              }
+            }}
             className={[
               "flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-all",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -299,7 +356,7 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
             ].join(" ")}
           >
             <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-              {modeIcon(id)}
+              <Icon className="h-5 w-5 text-primary" />
             </div>
             <p className="text-sm font-medium leading-snug">{label}</p>
             <p className="text-xs text-muted-foreground">{sub}</p>
@@ -308,122 +365,127 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
       </div>
 
       {/* ══════════════════════════════════════════════════════════════
-          Template mode
+          Blank Project
       ══════════════════════════════════════════════════════════════ */}
-      {mode === "template" && (
-        <>
-          {/* Template picker — real <button type="button"> cards */}
-          <div className="mb-6">
-            <h2 className="text-sm font-semibold mb-3">Start from a template</h2>
-            <div className="grid grid-cols-2 gap-2">
-              {TEMPLATES.map((tpl) => {
-                const active =
-                  tpl.id !== "blank" &&
-                  framework === tpl.framework &&
-                  language === tpl.language;
-                return (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => {
-                      setFramework(tpl.framework);
-                      setLanguage(tpl.language);
-                    }}
-                    className={[
-                      "flex items-center justify-between rounded-lg border p-3.5 text-left transition-all",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      active
-                        ? "border-primary bg-primary/5 ring-1 ring-primary"
-                        : "border-border bg-card hover:border-primary/50",
-                    ].join(" ")}
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{tpl.name}</p>
-                      <p className="text-xs text-muted-foreground">{tpl.description}</p>
-                    </div>
-                    {tpl.tag && (
-                      <span className="ml-2 shrink-0 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
-                        {tpl.tag}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      {mode === "blank" && (
+        <form onSubmit={handleBlankSubmit}>
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FolderPlus className="h-4 w-4" />
+                Blank Project
+              </CardTitle>
+              <CardDescription>
+                Creates an empty project folder on the server. Add files later via upload or
+                GitHub sync.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && <ErrorBanner message={error} />}
 
-          <form onSubmit={handleFormSubmit}>
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="text-base">Project details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {error && <ErrorBanner message={error} />}
+              <NameSlugRow
+                name={name}
+                slug={slug}
+                onNameChange={handleNameChange}
+                onSlugChange={handleSlugChange}
+                nameError={fieldErrors.name?.[0]}
+                slugError={fieldErrors.slug?.[0]}
+              />
 
-                <NameSlugRow
-                  name={name} slug={slug}
-                  onNameChange={handleNameChange} onSlugChange={handleSlugChange}
-                  nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
+              <div className="space-y-1.5">
+                <Label htmlFor="description">
+                  Description{" "}
+                  <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  id="description"
+                  name="description"
+                  placeholder="A brief description of the project"
+                  rows={2}
                 />
+              </div>
 
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="description">
-                    Description <span className="text-muted-foreground font-normal">(optional)</span>
-                  </Label>
-                  <Textarea id="description" name="description" placeholder="A brief description" rows={2} />
+                  <Label htmlFor="type">Type</Label>
+                  <TypeSelect />
                 </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
-                  <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="language">Language</Label>
-                    <Input id="language" name="language" placeholder="TypeScript" value={language} onChange={(e) => setLanguage(e.target.value)} />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="visibility">Visibility</Label>
+                  <VisibilitySelect />
                 </div>
+              </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="framework">Framework</Label>
-                    <Input id="framework" name="framework" placeholder="Next.js" value={framework} onChange={(e) => setFramework(e.target.value)} />
-                  </div>
-                </div>
-
-                {/* Advanced toggle */}
-                <div className="border-t pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAdvanced((v) => !v)}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                    Advanced settings
-                  </button>
-                  {showAdvanced && (
-                    <div className="mt-4 grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5"><Label htmlFor="installCommand">Install command</Label><Input id="installCommand" name="installCommand" placeholder="npm install" className="font-mono text-xs" /></div>
-                      <div className="space-y-1.5"><Label htmlFor="buildCommand">Build command</Label><Input id="buildCommand" name="buildCommand" placeholder="npm run build" className="font-mono text-xs" /></div>
-                      <div className="space-y-1.5"><Label htmlFor="startCommand">Start command</Label><Input id="startCommand" name="startCommand" placeholder="npm start" className="font-mono text-xs" /></div>
-                      <div className="space-y-1.5"><Label htmlFor="outputDirectory">Output directory</Label><Input id="outputDirectory" name="outputDirectory" placeholder=".next" className="font-mono text-xs" /></div>
-                    </div>
+              {/* Advanced build settings */}
+              <div className="border-t pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showAdvanced ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
                   )}
-                </div>
+                  Advanced settings
+                </button>
+                {showAdvanced && (
+                  <div className="mt-4 grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="installCommand">Install command</Label>
+                      <Input
+                        id="installCommand"
+                        name="installCommand"
+                        placeholder="npm install"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="buildCommand">Build command</Label>
+                      <Input
+                        id="buildCommand"
+                        name="buildCommand"
+                        placeholder="npm run build"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="startCommand">Start command</Label>
+                      <Input
+                        id="startCommand"
+                        name="startCommand"
+                        placeholder="npm start"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="outputDirectory">Output directory</Label>
+                      <Input
+                        id="outputDirectory"
+                        name="outputDirectory"
+                        placeholder=".next"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
 
-                <Button type="submit" className="w-full" disabled={isPending}>
-                  {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isPending ? "Creating…" : "Create Project"}
-                </Button>
-              </CardContent>
-            </Card>
-          </form>
-        </>
+              <Button type="submit" className="w-full" disabled={isPending || !name.trim()}>
+                {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isPending ? "Creating…" : "Create Blank Project"}
+              </Button>
+            </CardContent>
+          </Card>
+        </form>
       )}
 
       {/* ══════════════════════════════════════════════════════════════
-          GitHub Import mode
+          GitHub Import
       ══════════════════════════════════════════════════════════════ */}
       {mode === "github" && (
-        <form onSubmit={handleFormSubmit}>
+        <form onSubmit={handleGithubSubmit}>
           <Card>
             <CardHeader className="pb-4">
               <CardTitle className="text-base flex items-center gap-2">
@@ -432,7 +494,10 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
               </CardTitle>
               <CardDescription>
                 Link a GitHub repository to this project. Make sure the{" "}
-                <Link href="/integrations/github" className="underline underline-offset-2 hover:text-foreground">
+                <Link
+                  href="/integrations/github"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
                   GitHub App is configured
                 </Link>{" "}
                 so webhooks are received and commits sync automatically.
@@ -443,7 +508,8 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
 
               <div className="space-y-1.5">
                 <Label htmlFor="githubUrl">
-                  GitHub repository URL <span className="text-destructive">*</span>
+                  GitHub repository URL{" "}
+                  <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="githubUrl"
@@ -462,21 +528,36 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
               </div>
 
               <NameSlugRow
-                name={name} slug={slug}
-                onNameChange={handleNameChange} onSlugChange={handleSlugChange}
-                nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
+                name={name}
+                slug={slug}
+                onNameChange={handleNameChange}
+                onSlugChange={handleSlugChange}
+                nameError={fieldErrors.name?.[0]}
+                slugError={fieldErrors.slug?.[0]}
               />
 
               <div className="space-y-1.5">
                 <Label htmlFor="description">
-                  Description <span className="text-muted-foreground font-normal">(optional)</span>
+                  Description{" "}
+                  <span className="text-muted-foreground font-normal">(optional)</span>
                 </Label>
-                <Textarea id="description" name="description" placeholder="What does this project do?" rows={2} />
+                <Textarea
+                  id="description"
+                  name="description"
+                  placeholder="What does this project do?"
+                  rows={2}
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
-                <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="type">Type</Label>
+                  <TypeSelect />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="visibility">Visibility</Label>
+                  <VisibilitySelect />
+                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="language">Language</Label>
                   <Input id="language" name="language" placeholder="TypeScript" />
@@ -493,133 +574,145 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
       )}
 
       {/* ══════════════════════════════════════════════════════════════
-          Upload Files mode
+          Upload ZIP
+          The hidden <input type="file"> is at the root of this
+          component — the section below is only the visible UI.
       ══════════════════════════════════════════════════════════════ */}
       {mode === "upload" && (
-        <form onSubmit={handleUploadSubmit}>
-          <Card>
-            <CardHeader className="pb-4">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Upload className="h-4 w-4" />
-                Upload Project Files
-              </CardTitle>
-              <CardDescription>
-                Upload a{" "}
-                <code className="font-mono bg-muted px-1 rounded text-xs">.zip</code>{" "}
-                archive of your project (max 50 MB). Files are extracted on the server and
-                never executed automatically.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {error && <ErrorBanner message={error} />}
-
-              {/* File input — use <label> so click always reaches the input */}
-              <div className="space-y-1.5">
-                <Label>
-                  ZIP archive <span className="text-destructive">*</span>
-                </Label>
-                <label
-                  htmlFor="zip-file-input"
-                  className={[
-                    "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8",
-                    "text-center cursor-pointer transition-colors select-none",
-                    uploadFile
-                      ? "border-primary/50 bg-primary/5"
-                      : "border-muted-foreground/30 hover:border-primary/40 hover:bg-muted/30",
-                  ].join(" ")}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const f = e.dataTransfer.files[0];
-                    if (f && f.name.toLowerCase().endsWith(".zip")) {
-                      setUploadFile(f);
-                      if (!name && !slugEdited) handleNameChange(f.name.replace(/\.zip$/i, ""));
-                    } else {
-                      setError("Only .zip files are accepted.");
-                    }
-                  }}
-                >
-                  <input
-                    id="zip-file-input"
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".zip,application/zip,application/x-zip-compressed"
-                    className="sr-only"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      setUploadFile(f);
-                      if (f && !name && !slugEdited) handleNameChange(f.name.replace(/\.zip$/i, ""));
-                    }}
-                  />
-                  {uploadFile ? (
-                    <>
-                      <FileArchive className="h-8 w-8 text-primary mb-2" />
-                      <p className="text-sm font-medium">{uploadFile.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {(uploadFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                      <button
-                        type="button"
-                        className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setUploadFile(null);
-                          if (fileInputRef.current) fileInputRef.current.value = "";
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                      <p className="text-sm font-medium">Click to select or drag &amp; drop</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">.zip only · max 50 MB</p>
-                    </>
-                  )}
-                </label>
-              </div>
-
-              <NameSlugRow
-                name={name} slug={slug}
-                onNameChange={handleNameChange} onSlugChange={handleSlugChange}
-              />
-
-              <div className="space-y-1.5">
-                <Label htmlFor="description">
-                  Description <span className="text-muted-foreground font-normal">(optional)</span>
-                </Label>
-                <Textarea id="description" name="description" placeholder="What does this project do?" rows={2} />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="type">Type</Label>
-                <TypeSelect />
-              </div>
-
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-700 dark:text-amber-300">
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span>
-                  Uploaded files are stored on disk and <strong>never executed automatically</strong>.
-                  Configure deployment settings after creating the project to go live.
-                </span>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={uploading || !uploadFile}
+        <>
+          {/* ── No file yet: large click-to-select target ── */}
+          {!zipFile && (
+            <div>
+              <button
+                type="button"
+                onClick={openFilePicker}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files[0];
+                  if (f && f.name.toLowerCase().endsWith(".zip")) {
+                    handleZipSelected(f);
+                  } else {
+                    setError("Only .zip files are accepted.");
+                  }
+                }}
+                className={[
+                  "w-full flex flex-col items-center justify-center gap-3 rounded-lg",
+                  "border-2 border-dashed border-muted-foreground/30 p-14 text-center",
+                  "cursor-pointer transition-colors select-none",
+                  "hover:border-primary/50 hover:bg-muted/20",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                ].join(" ")}
               >
-                {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
-                {uploading ? "Uploading & extracting…" : "Upload ZIP and Create Project"}
-              </Button>
-            </CardContent>
-          </Card>
-        </form>
+                <div className="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Upload className="h-7 w-7 text-primary" />
+                </div>
+                <div>
+                  <p className="text-base font-semibold">Click to select a ZIP file</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    or drag &amp; drop here
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    .zip only &middot; max 50 MB
+                  </p>
+                </div>
+              </button>
+              {error && <div className="mt-3"><ErrorBanner message={error} /></div>}
+            </div>
+          )}
+
+          {/* ── File selected: show details form ── */}
+          {zipFile && (
+            <form onSubmit={handleUploadSubmit}>
+              <Card>
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Upload className="h-4 w-4" />
+                    Upload Project Files
+                  </CardTitle>
+                  <CardDescription>
+                    Files are extracted on the server and{" "}
+                    <strong>never executed automatically</strong>. Configure deployment
+                    settings after creating the project to go live.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {error && <ErrorBanner message={error} />}
+
+                  {/* Selected file info */}
+                  <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                    <FileArchive className="h-8 w-8 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{zipFile.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {(zipFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openFilePicker}
+                      className="text-xs text-muted-foreground hover:text-foreground underline shrink-0 transition-colors"
+                    >
+                      Choose different ZIP
+                    </button>
+                  </div>
+
+                  <NameSlugRow
+                    name={name}
+                    slug={slug}
+                    onNameChange={handleNameChange}
+                    onSlugChange={handleSlugChange}
+                  />
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="description">
+                      Description{" "}
+                      <span className="text-muted-foreground font-normal">(optional)</span>
+                    </Label>
+                    <Textarea
+                      id="description"
+                      name="description"
+                      placeholder="What does this project do?"
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="type">Type</Label>
+                      <TypeSelect />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="visibility">Visibility</Label>
+                      <VisibilitySelect />
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-700 dark:text-amber-300">
+                    <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>
+                      Files are stored on disk and never auto-executed. Deployment config can
+                      be added after the project is created.
+                    </span>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={uploading || !zipFile || !name.trim() || !slug.trim()}
+                  >
+                    {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {uploading ? "Uploading & extracting…" : "Upload ZIP and Create Project"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </form>
+          )}
+        </>
       )}
 
       {/* ══════════════════════════════════════════════════════════════
-          AI Generate mode
+          AI Generate
       ══════════════════════════════════════════════════════════════ */}
       {mode === "ai" && (
         <form onSubmit={handleAiSubmit}>
@@ -637,20 +730,22 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
             <CardContent className="space-y-4">
               {error && <ErrorBanner message={error} />}
 
-              {/* Honest AI status */}
               {aiAvailable ? (
                 <div className="flex items-start gap-2 rounded-md border border-green-500/30 bg-green-50/50 dark:bg-green-950/20 p-3 text-xs text-green-700 dark:text-green-300">
                   <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  AI provider connected. Code generation is available in the project&apos;s AI tab after creation.
+                  AI provider connected. Code generation is available in the project&apos;s
+                  AI tab after creation.
                 </div>
               ) : (
                 <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-700 dark:text-amber-300">
                   <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span>
-                    <strong>AI code generation is not connected.</strong>{" "}
-                    Set <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">ANTHROPIC_API_KEY</code> in{" "}
-                    <code className="font-mono">.env</code> to enable it.
-                    Your project will be created with the description below.
+                    <strong>AI code generation is not connected.</strong> Set{" "}
+                    <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">
+                      ANTHROPIC_API_KEY
+                    </code>{" "}
+                    in <code className="font-mono">.env</code> to enable it. Your project
+                    will be created with the description below.
                   </span>
                 </div>
               )}
@@ -665,22 +760,35 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                   value={aiPrompt}
                   onChange={(e) => setAiPrompt(e.target.value)}
                 />
-                {/* Pass prompt as description to createProjectAction */}
+                {/* Pass the prompt as description into the standard createProjectAction */}
                 <input type="hidden" name="description" value={aiPrompt} />
               </div>
 
               <NameSlugRow
-                name={name} slug={slug}
-                onNameChange={handleNameChange} onSlugChange={handleSlugChange}
-                nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
+                name={name}
+                slug={slug}
+                onNameChange={handleNameChange}
+                onSlugChange={handleSlugChange}
+                nameError={fieldErrors.name?.[0]}
+                slugError={fieldErrors.slug?.[0]}
               />
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
-                <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="type">Type</Label>
+                  <TypeSelect />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="visibility">Visibility</Label>
+                  <VisibilitySelect />
+                </div>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isPending || !name.trim()}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isPending || !name.trim()}
+              >
                 {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isPending ? "Creating project…" : "Create Project"}
               </Button>
