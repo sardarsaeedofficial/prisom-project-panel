@@ -1,0 +1,868 @@
+// Prisom Project Panel — Production Schema
+// Core workflow: code is pushed to GitHub → GitHub App webhook notifies Prisom
+// → dashboard syncs repo/project data → manages files, commits, preview, logs,
+//   databases, domains, publishing, and AI prompt actions.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ProjectType {
+  APP
+  API
+  LIBRARY
+  STATIC
+  SERVICE
+  OTHER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  BUILDING
+  ERROR
+  ARCHIVED
+  DRAFT
+}
+
+enum Visibility {
+  PRIVATE
+  PUBLIC
+  UNLISTED
+}
+
+enum GitSyncStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum GitSyncSource {
+  WEBHOOK
+  MANUAL
+  SCHEDULED
+}
+
+enum FileType {
+  FILE
+  DIRECTORY
+  SYMLINK
+}
+
+enum FeatureStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskSource {
+  MANUAL
+  AI
+  GITHUB
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum EnvironmentName {
+  DEVELOPMENT
+  PREVIEW
+  PRODUCTION
+}
+
+enum EnvironmentStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum DomainStatus {
+  PENDING
+  ACTIVE
+  FAILED
+}
+
+enum SslStatus {
+  NONE
+  PENDING
+  ACTIVE
+  FAILED
+  EXPIRED
+}
+
+enum DatabaseType {
+  POSTGRES
+  MYSQL
+  SQLITE
+  MONGODB
+  REDIS
+}
+
+enum DatabaseStatus {
+  PROVISIONING
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum MigrationStatus {
+  PENDING
+  APPLIED
+  FAILED
+  REVERTED
+}
+
+enum DeploymentStatus {
+  PENDING
+  QUEUED
+  BUILDING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum DeploymentSource {
+  PUSH
+  MANUAL
+  ROLLBACK
+  API
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+enum LogSource {
+  APP
+  BUILD
+  SYSTEM
+  DEPLOY
+  GITHUB
+}
+
+enum AiSessionStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum AiRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum ToolCallStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum IntegrationType {
+  GITHUB
+  VERCEL
+  RAILWAY
+  SUPABASE
+  PLANETSCALE
+  DATADOG
+  NETLIFY
+  OTHER
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  PENDING
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  role      UserRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Owned resources
+  ownedWorkspaces      Workspace[]
+  workspaceMemberships WorkspaceMember[]
+  apiKeys              ApiKey[]
+
+  // Project-scoped relations
+  ownedProjects        Project[]        @relation("ProjectOwner")
+  assignedFeatures     ProjectFeature[] @relation("FeatureAssignee")
+  assignedTasks        ProjectTask[]    @relation("TaskAssignee")
+  aiSessions           AiSession[]
+  triggeredDeployments Deployment[]
+  portfolioItems       PortfolioItem[]  @relation("PortfolioItemCreator")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WORKSPACE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  members              WorkspaceMember[]
+  projects             Project[]
+  integrations         Integration[]
+  portfolioItems       PortfolioItem[]
+  detectedRepositories    DetectedRepository[]
+  ignoredRepositories     IgnoredRepository[]
+  githubWebhookDeliveries GitHubWebhookDelivery[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WORKSPACE MEMBER
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WorkspaceMember {
+  id       String   @id @default(cuid())
+  role     UserRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  slug           String
+  description    String?
+  type           ProjectType   @default(APP)
+  status         ProjectStatus @default(ACTIVE)
+  visibility     Visibility    @default(PRIVATE)
+  language        String?
+  framework       String?
+  liveUrl         String?
+  lastDeployedAt  DateTime?
+  installCommand  String?
+  buildCommand    String?
+  startCommand    String?
+  outputDirectory String?
+  lastOpenedAt    DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("ProjectOwner", fields: [ownerId], references: [id])
+
+  // GitHub sync
+  githubRepository GitHubRepository?
+  commits          GitCommit[]
+  syncRuns         GitSyncRun[]
+
+  // Environments, secrets, infra
+  environments Environment[]
+  domains      Domain[]
+  databases    ProjectDatabase[]
+
+  // CI/CD
+  deployments Deployment[]
+  logs        ProjectLog[]
+
+  // Content
+  files    ProjectFile[]
+  features ProjectFeature[]
+  tasks    ProjectTask[]
+
+  // AI
+  aiSessions AiSession[]
+
+  // Portfolio
+  portfolioItem PortfolioItem?
+
+  // Slug unique within a workspace
+  @@unique([workspaceId, slug])
+  @@index([workspaceId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GITHUB REPOSITORY  (1:1 with Project — created when a repo is imported)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GitHubRepository {
+  id              String    @id @default(cuid())
+  githubRepoId    Int       @unique  // GitHub's numeric repo ID
+  fullName        String              // "owner/repo"
+  name            String
+  description     String?
+  private         Boolean   @default(false)
+  defaultBranch   String    @default("main")
+  language        String?
+  stargazersCount Int       @default(0)
+  url             String              // API URL
+  htmlUrl         String              // Browser URL
+  cloneUrl        String
+  installationId  Int?                // GitHub App installation ID
+  latestCommitSha String?             // SHA of the most recent synced commit
+  pushedAt        DateTime?
+  syncedAt        DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GIT COMMIT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GitCommit {
+  id           String   @id @default(cuid())
+  sha          String
+  message      String
+  authorName   String
+  authorEmail  String
+  authoredAt   DateTime
+  committedAt  DateTime
+  additions    Int      @default(0)
+  deletions    Int      @default(0)
+  changedFiles Int      @default(0)
+  url          String?
+  createdAt    DateTime @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sha])
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GIT SYNC RUN  (one record per webhook push or manual sync trigger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GitSyncRun {
+  id           String        @id @default(cuid())
+  status       GitSyncStatus @default(PENDING)
+  source       GitSyncSource @default(WEBHOOK)
+  branch       String
+  beforeSha    String?
+  afterSha     String?
+  changedFiles Int           @default(0)
+  errorMessage String?
+  startedAt    DateTime      @default(now())
+  finishedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DETECTED REPOSITORY
+// Repos seen from the GitHub App installation/webhooks, not yet imported.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DetectedRepository {
+  id             String   @id @default(cuid())
+  githubRepoId   Int
+  fullName       String
+  name           String
+  description    String?
+  private        Boolean  @default(false)
+  language       String?
+  defaultBranch  String   @default("main")
+  url            String
+  installationId Int?     // GitHub App installation ID (populated by webhooks)
+  detectedAt     DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, githubRepoId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IGNORED REPOSITORY
+// Repos the user explicitly chose not to import.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model IgnoredRepository {
+  id           String   @id @default(cuid())
+  githubRepoId Int
+  fullName     String
+  reason       String?
+  ignoredAt    DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, githubRepoId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT FILE  (synced from GitHub, used for the in-dashboard editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectFile {
+  id        String   @id @default(cuid())
+  path      String              // Relative path from repo root, e.g. "src/index.ts"
+  name      String
+  type      FileType @default(FILE)
+  size      Int?                // Bytes
+  mimeType  String?
+  sha       String?             // Git blob SHA for change detection
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, path])
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT FEATURE  (higher-level feature tracking)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectFeature {
+  id          String        @id @default(cuid())
+  title       String
+  description String?
+  status      FeatureStatus @default(PLANNED)
+  priority    Priority      @default(MEDIUM)
+  dueDate     DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  assigneeId String?
+  assignee   User?   @relation("FeatureAssignee", fields: [assigneeId], references: [id])
+
+  tasks ProjectTask[]
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT TASK  (granular task, optionally grouped under a feature)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectTask {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+  source      TaskSource @default(MANUAL)
+  priority    Priority   @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  featureId String?
+  feature   ProjectFeature? @relation(fields: [featureId], references: [id])
+
+  assigneeId String?
+  assignee   User?   @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENVIRONMENT  (development / preview / production per project)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Environment {
+  id        String            @id @default(cuid())
+  name      EnvironmentName   @default(PRODUCTION)
+  status    EnvironmentStatus @default(ACTIVE)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  secrets     Secret[]
+  deployments Deployment[]
+  domains     Domain[]
+  databases   ProjectDatabase[]
+
+  // Only one environment of each name per project
+  @@unique([projectId, name])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECRET  (env var — encrypted at rest, NEVER store plaintext)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Secret {
+  id             String   @id @default(cuid())
+  key            String
+  encryptedValue String   // AES-256-GCM encrypted — use lib/crypto.ts encrypt()
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, key])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOMAIN
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Domain {
+  id                String       @id @default(cuid())
+  hostname          String       @unique
+  isPrimary         Boolean      @default(false)
+  status            DomainStatus @default(PENDING)
+  sslStatus         SslStatus    @default(NONE)
+  verificationToken String?
+  verifiedAt        DateTime?
+  provider          String?             // e.g. "cloudflare", "route53"
+  cnameTarget       String?             // CNAME target for DNS setup
+  verificationTxt   String?             // TXT record value
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT DATABASE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectDatabase {
+  id        String         @id @default(cuid())
+  name      String
+  type      DatabaseType   @default(POSTGRES)
+  status    DatabaseStatus @default(PROVISIONING)
+  region         String?
+  version        String?
+  host           String?             // DB host (metadata only — no live connection)
+  port           Int?                // DB port
+  databaseName   String?             // Database / schema name
+  username       String?             // DB user (never store password)
+  storageUsedMb  Float?              // Approximate used storage in MB
+  storageLimitMb Float?              // Configured storage limit in MB
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id])
+
+  migrations DatabaseMigration[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATABASE MIGRATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DatabaseMigration {
+  id           String          @id @default(cuid())
+  name         String
+  status       MigrationStatus @default(PENDING)
+  checksum     String?
+  appliedAt    DateTime?
+  revertedAt   DateTime?
+  errorMessage String?
+  createdAt    DateTime        @default(now())
+
+  databaseId String
+  database   ProjectDatabase @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+
+  @@index([databaseId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEPLOYMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Deployment {
+  id            String           @id @default(cuid())
+  status        DeploymentStatus @default(PENDING)
+  source        DeploymentSource @default(MANUAL)
+  url           String?
+  branch        String?
+  commitSha     String?
+  commitMessage String?
+  duration      Int?             // milliseconds
+  errorMessage  String?
+  metadata      Json?
+  startedAt     DateTime         @default(now())
+  finishedAt    DateTime?
+  createdAt     DateTime         @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id])
+
+  triggeredById String?
+  triggeredBy   User?   @relation(fields: [triggeredById], references: [id])
+
+  logs ProjectLog[]
+
+  @@index([projectId])
+  @@index([environmentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT LOG
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectLog {
+  id        String    @id @default(cuid())
+  level     LogLevel  @default(INFO)
+  source    LogSource @default(APP)
+  message   String
+  metadata  Json?
+  timestamp DateTime  @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  deploymentId String?
+  deployment   Deployment? @relation(fields: [deploymentId], references: [id])
+
+  @@index([projectId, timestamp])
+  @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI SESSION  (one conversation with the AI assistant per project)
+// TODO: Connect to Claude API using lib/claude.ts (not yet implemented)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiSession {
+  id           String          @id @default(cuid())
+  title        String?
+  status       AiSessionStatus @default(ACTIVE)
+  model        String          @default("claude-sonnet-4-6")
+  systemPrompt String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  messages AiMessage[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI MESSAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiMessage {
+  id           String   @id @default(cuid())
+  role         AiRole
+  content      String
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+
+  sessionId String
+  session   AiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  toolCalls AiToolCall[]
+
+  @@index([sessionId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI TOOL CALL  (tool use blocks within an assistant message)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiToolCall {
+  id           String         @id @default(cuid())
+  name         String
+  input        Json
+  output       Json?
+  status       ToolCallStatus @default(PENDING)
+  errorMessage String?
+  startedAt    DateTime       @default(now())
+  finishedAt   DateTime?
+
+  messageId String
+  message   AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTEGRATION  (third-party service connections, scoped to a workspace)
+// Tokens are encrypted — use lib/crypto.ts encrypt/decrypt before read/write.
+// TODO: Implement GitHub App OAuth flow in app/api/integrations/github/
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Integration {
+  id               String            @id @default(cuid())
+  type             IntegrationType
+  status           IntegrationStatus @default(DISCONNECTED)
+  encryptedToken   String?           // AES-256-GCM encrypted access token
+  externalId       String?           // GitHub user/org ID etc.
+  externalUsername String?
+  installationId   Int?              // GitHub App installation ID (for GitHub integrations)
+  metadata         Json?             // Provider-specific data (scopes, org info, etc.)
+  lastSyncedAt     DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // One integration of each type per workspace
+  @@unique([workspaceId, type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API KEY  (programmatic access to the panel's own API)
+// Store only the SHA-256 hash — never the raw key.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  name       String
+  keyHash    String    @unique  // SHA-256(fullKey) — display only the prefix
+  prefix     String             // First 8 chars of the key for UI display
+  scopes     String[]
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PORTFOLIO ITEM  (public project showcase)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PortfolioItem {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  slug        String   @unique
+  tags        String[]
+  imageUrl    String?
+  liveUrl     String?
+  githubUrl   String?
+  featured    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  publishedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("PortfolioItemCreator", fields: [userId], references: [id])
+
+  // Optionally linked to a Project
+  projectId String?  @unique
+  project   Project? @relation(fields: [projectId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GITHUB WEBHOOK DELIVERY
+// One record per verified incoming webhook delivery — used for the delivery
+// history viewer on /integrations/github. The full payload is NOT stored;
+// only a safe summary is persisted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GitHubWebhookDelivery {
+  id                 String    @id @default(cuid())
+  deliveryId         String?   @unique  // x-github-delivery header (null = missing)
+  event              String              // x-github-event header value
+  action             String?             // payload.action if present
+  repositoryFullName String?             // owner/repo extracted from payload
+  installationId     Int?                // payload.installation.id if present
+  status             String              // "ok" | "warning" | "error" | "ignored"
+  message            String?             // Human-readable outcome summary
+  receivedAt         DateTime  @default(now())
+  processedAt        DateTime?
+  payloadSummary     Json?               // Safe summary — never stores secrets or full payload
+
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([event, receivedAt])
+  @@index([repositoryFullName, receivedAt])
+}
