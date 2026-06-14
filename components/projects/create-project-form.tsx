@@ -8,6 +8,7 @@ import {
   Github,
   Upload,
   Sparkles,
+  Layers,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -36,31 +37,60 @@ type Mode = "template" | "github" | "upload" | "ai";
 // ── Templates ─────────────────────────────────────────────────────────────────
 
 const TEMPLATES = [
-  { id: "next",      name: "Next.js",       description: "Full-stack React with App Router",          tag: "Popular",  framework: "Next.js",   language: "TypeScript" },
-  { id: "fastapi",   name: "FastAPI",        description: "High-performance Python API",               tag: null,       framework: "FastAPI",   language: "Python"     },
-  { id: "go-fiber",  name: "Go + Fiber",     description: "Lightweight and fast Go web framework",     tag: null,       framework: "Fiber",     language: "Go"         },
-  { id: "astro",     name: "Astro",          description: "Content-first web with island architecture",tag: null,       framework: "Astro",     language: "TypeScript" },
-  { id: "sveltekit", name: "SvelteKit",      description: "Full-stack Svelte with file-based routing", tag: null,       framework: "SvelteKit", language: "TypeScript" },
-  { id: "blank",     name: "Blank Project",  description: "Start from scratch, no template",          tag: null,       framework: "",          language: ""           },
+  { id: "next",      name: "Next.js",      description: "Full-stack React with App Router",           tag: "Popular", framework: "Next.js",   language: "TypeScript" },
+  { id: "fastapi",   name: "FastAPI",       description: "High-performance Python API",                tag: null,      framework: "FastAPI",   language: "Python"     },
+  { id: "go-fiber",  name: "Go + Fiber",    description: "Lightweight and fast Go web framework",      tag: null,      framework: "Fiber",     language: "Go"         },
+  { id: "astro",     name: "Astro",         description: "Content-first web with island architecture", tag: null,      framework: "Astro",     language: "TypeScript" },
+  { id: "sveltekit", name: "SvelteKit",     description: "Full-stack Svelte with file-based routing",  tag: null,      framework: "SvelteKit", language: "TypeScript" },
+  { id: "blank",     name: "Blank Project", description: "Start from scratch, no template",            tag: null,      framework: "",          language: ""           },
 ];
 
-// ── Shared name/slug fields ───────────────────────────────────────────────────
+// ── Type/Visibility selects (shared) ─────────────────────────────────────────
+
+const SELECT_CLS =
+  "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+function TypeSelect({ defaultValue = "APP" }: { defaultValue?: string }) {
+  return (
+    <select id="type" name="type" defaultValue={defaultValue} className={SELECT_CLS}>
+      {["APP", "API", "LIBRARY", "STATIC", "SERVICE", "OTHER"].map((t) => (
+        <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
+      ))}
+    </select>
+  );
+}
+
+function VisibilitySelect() {
+  return (
+    <select id="visibility" name="visibility" defaultValue="PRIVATE" className={SELECT_CLS}>
+      <option value="PRIVATE">Private</option>
+      <option value="PUBLIC">Public</option>
+      <option value="UNLISTED">Unlisted</option>
+    </select>
+  );
+}
+
+// ── Shared name/slug row ──────────────────────────────────────────────────────
 
 function NameSlugRow({
-  name, slug, slugEdited,
-  onNameChange, onSlugChange,
-  nameError, slugError,
+  name,
+  slug,
+  onNameChange,
+  onSlugChange,
+  nameError,
+  slugError,
 }: {
-  name: string; slug: string; slugEdited: boolean;
-  onNameChange: (v: string) => void; onSlugChange: (v: string) => void;
-  nameError?: string; slugError?: string;
+  name: string;
+  slug: string;
+  onNameChange: (v: string) => void;
+  onSlugChange: (v: string) => void;
+  nameError?: string;
+  slugError?: string;
 }) {
   return (
     <div className="grid grid-cols-2 gap-4">
       <div className="space-y-1.5">
-        <Label htmlFor="name">
-          Project name <span className="text-destructive">*</span>
-        </Label>
+        <Label htmlFor="name">Project name <span className="text-destructive">*</span></Label>
         <Input
           id="name"
           name="name"
@@ -73,9 +103,7 @@ function NameSlugRow({
         {nameError && <p className="text-xs text-destructive">{nameError}</p>}
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="slug">
-          Slug <span className="text-destructive">*</span>
-        </Label>
+        <Label htmlFor="slug">Slug <span className="text-destructive">*</span></Label>
         <Input
           id="slug"
           name="slug"
@@ -103,7 +131,7 @@ function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
       <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-      {message}
+      <span>{message}</span>
     </div>
   );
 }
@@ -112,13 +140,15 @@ function ErrorBanner({ message }: { message: string }) {
 
 export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boolean }) {
   const router = useRouter();
+
+  // ── State ───────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>("template");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Shared name/slug state (reused across modes)
+  // Shared name/slug (persist across mode switches)
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
@@ -130,29 +160,36 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
   // Upload mode
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI mode
   const [aiPrompt, setAiPrompt] = useState("");
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  const clearErrors = () => {
+    setError(null);
+    setFieldErrors({});
+  };
 
   const handleNameChange = (v: string) => {
     setName(v);
     if (!slugEdited) setSlug(slugify(v));
   };
+
   const handleSlugChange = (v: string) => {
     setSlug(v);
     setSlugEdited(true);
   };
-  const clearErrors = () => { setError(null); setFieldErrors({}); };
 
-  const handleModeSelect = (m: Mode) => {
+  const switchMode = (m: Mode) => {
     setMode(m);
     clearErrors();
   };
 
-  // ── Template / GitHub Import submit ──────────────────────────────────────────
+  // ── Submit handlers ──────────────────────────────────────────────────────────
 
-  const handleFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  // Template + GitHub import — both use createProjectAction
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
     const formData = new FormData(e.currentTarget);
@@ -162,25 +199,25 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
         setError(result.error);
         setFieldErrors((result.fieldErrors as Record<string, string[]>) ?? {});
       }
-      // Success → server action calls redirect() automatically
+      // On success the server action calls redirect() — navigation is automatic
     });
   };
 
-  // ── Upload submit ─────────────────────────────────────────────────────────────
-
+  // Upload — fetch to /api/projects/upload
   const handleUploadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
 
-    if (!uploadFile) { setError("Please select a .zip file to upload."); return; }
+    if (!uploadFile) { setError("Please select a .zip file."); return; }
     if (!name.trim()) { setError("Project name is required."); return; }
     if (!slug.trim()) { setError("Slug is required."); return; }
 
+    const form = e.currentTarget;
     const fd = new FormData();
     fd.append("name", name.trim());
     fd.append("slug", slug.trim());
-    fd.append("description", (e.currentTarget.elements.namedItem("description") as HTMLTextAreaElement | null)?.value ?? "");
-    fd.append("type", (e.currentTarget.elements.namedItem("type") as HTMLSelectElement | null)?.value ?? "APP");
+    fd.append("description", (form.elements.namedItem("description") as HTMLTextAreaElement | null)?.value ?? "");
+    fd.append("type", (form.elements.namedItem("type") as HTMLSelectElement | null)?.value ?? "APP");
     fd.append("file", uploadFile);
 
     setUploading(true);
@@ -188,7 +225,7 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
       const res = await fetch("/api/projects/upload", { method: "POST", body: fd });
       const data = (await res.json()) as { projectId?: string; error?: string };
       if (!res.ok || !data.projectId) {
-        setError(data.error ?? "Upload failed. Please try again.");
+        setError(data.error ?? "Upload failed — please try again.");
         return;
       }
       router.push(`/projects/${data.projectId}/files`);
@@ -199,12 +236,10 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     }
   };
 
-  // ── AI submit ─────────────────────────────────────────────────────────────────
-
-  const handleAiSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  // AI Generate — create a plain project (description = prompt)
+  const handleAiSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     clearErrors();
-    // AI is not connected — create a plain DRAFT project with the description
     const formData = new FormData(e.currentTarget);
     startTransition(async () => {
       const result = await createProjectAction(null, formData);
@@ -215,23 +250,28 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     });
   };
 
-  // ── Mode selector cards ───────────────────────────────────────────────────────
+  // ── Mode selector data ────────────────────────────────────────────────────
 
-  const MODES: Array<{ id: Mode; icon: React.ReactNode; label: string; sub: string }> = [
-    { id: "template", icon: <Github className="h-5 w-5 text-primary" />, label: "Start from template", sub: "Pick a framework or blank" },
-    { id: "github",   icon: <Github className="h-5 w-5 text-primary" />, label: "Import from GitHub",   sub: "Link a GitHub repository" },
-    { id: "upload",   icon: <Upload className="h-5 w-5 text-primary" />, label: "Upload Files",          sub: "Upload a .zip archive" },
-    { id: "ai",       icon: <Sparkles className="h-5 w-5 text-primary" />, label: "AI Generate",        sub: "Describe what to build" },
+  const MODES: Array<{ id: Mode; label: string; sub: string }> = [
+    { id: "template", label: "Start from template", sub: "Pick a framework or blank" },
+    { id: "github",   label: "Import from GitHub",  sub: "Link a GitHub repository"  },
+    { id: "upload",   label: "Upload Files",         sub: "Upload a .zip archive"     },
+    { id: "ai",       label: "AI Generate",          sub: "Describe what to build"    },
   ];
+
+  const modeIcon = (id: Mode) => {
+    if (id === "template") return <Layers className="h-5 w-5 text-primary" />;
+    if (id === "github")   return <Github className="h-5 w-5 text-primary" />;
+    if (id === "upload")   return <Upload className="h-5 w-5 text-primary" />;
+    return <Sparkles className="h-5 w-5 text-primary" />;
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="max-w-2xl">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mb-6 -ml-2 text-muted-foreground"
-        asChild
-      >
+      {/* Back link */}
+      <Button variant="ghost" size="sm" className="mb-6 -ml-2 text-muted-foreground" asChild>
         <Link href="/projects">
           <ArrowLeft className="h-4 w-4 mr-1" />
           Back to projects
@@ -243,58 +283,72 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
         <p className="text-muted-foreground mt-1">Choose how you want to start.</p>
       </div>
 
-      {/* Mode selector */}
+      {/* ── Mode selector: real <button type="button"> elements ── */}
       <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-4">
-        {MODES.map(({ id, icon, label, sub }) => (
-          <Card
+        {MODES.map(({ id, label, sub }) => (
+          <button
             key={id}
-            className={`cursor-pointer transition-all ${
+            type="button"
+            onClick={() => switchMode(id)}
+            className={[
+              "flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-all",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               mode === id
-                ? "border-primary shadow-sm ring-1 ring-primary"
-                : "hover:border-primary/50 hover:shadow-sm"
-            }`}
-            onClick={() => handleModeSelect(id)}
+                ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary"
+                : "border-border bg-card hover:border-primary/50 hover:shadow-sm",
+            ].join(" ")}
           >
-            <CardContent className="p-4 flex flex-col items-center text-center gap-2">
-              <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                {icon}
-              </div>
-              <p className="text-sm font-medium leading-snug">{label}</p>
-              <p className="text-xs text-muted-foreground">{sub}</p>
-            </CardContent>
-          </Card>
+            <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+              {modeIcon(id)}
+            </div>
+            <p className="text-sm font-medium leading-snug">{label}</p>
+            <p className="text-xs text-muted-foreground">{sub}</p>
+          </button>
         ))}
       </div>
 
-      {/* ── Template mode ── */}
+      {/* ══════════════════════════════════════════════════════════════
+          Template mode
+      ══════════════════════════════════════════════════════════════ */}
       {mode === "template" && (
         <>
+          {/* Template picker — real <button type="button"> cards */}
           <div className="mb-6">
             <h2 className="text-sm font-semibold mb-3">Start from a template</h2>
             <div className="grid grid-cols-2 gap-2">
-              {TEMPLATES.map((tpl) => (
-                <Card
-                  key={tpl.id}
-                  className={`cursor-pointer transition-all ${
-                    framework === tpl.framework && language === tpl.language && tpl.id !== "blank"
-                      ? "border-primary ring-1 ring-primary"
-                      : "hover:border-primary/50"
-                  }`}
-                  onClick={() => { setFramework(tpl.framework); setLanguage(tpl.language); }}
-                >
-                  <CardContent className="p-3.5 flex items-center justify-between">
+              {TEMPLATES.map((tpl) => {
+                const active =
+                  tpl.id !== "blank" &&
+                  framework === tpl.framework &&
+                  language === tpl.language;
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => {
+                      setFramework(tpl.framework);
+                      setLanguage(tpl.language);
+                    }}
+                    className={[
+                      "flex items-center justify-between rounded-lg border p-3.5 text-left transition-all",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      active
+                        ? "border-primary bg-primary/5 ring-1 ring-primary"
+                        : "border-border bg-card hover:border-primary/50",
+                    ].join(" ")}
+                  >
                     <div>
                       <p className="text-sm font-medium">{tpl.name}</p>
                       <p className="text-xs text-muted-foreground">{tpl.description}</p>
                     </div>
                     {tpl.tag && (
-                      <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium shrink-0 ml-2">
+                      <span className="ml-2 shrink-0 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
                         {tpl.tag}
                       </span>
                     )}
-                  </CardContent>
-                </Card>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -307,33 +361,21 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 {error && <ErrorBanner message={error} />}
 
                 <NameSlugRow
-                  name={name} slug={slug} slugEdited={slugEdited}
+                  name={name} slug={slug}
                   onNameChange={handleNameChange} onSlugChange={handleSlugChange}
                   nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
                 />
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="description">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Label htmlFor="description">
+                    Description <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
                   <Textarea id="description" name="description" placeholder="A brief description" rows={2} />
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="type">Type</Label>
-                    <select id="type" name="type" defaultValue="APP" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      {["APP","API","LIBRARY","STATIC","SERVICE","OTHER"].map((t) => (
-                        <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="visibility">Visibility</Label>
-                    <select id="visibility" name="visibility" defaultValue="PRIVATE" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <option value="PRIVATE">Private</option>
-                      <option value="PUBLIC">Public</option>
-                      <option value="UNLISTED">Unlisted</option>
-                    </select>
-                  </div>
+                  <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
+                  <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
                   <div className="space-y-1.5">
                     <Label htmlFor="language">Language</Label>
                     <Input id="language" name="language" placeholder="TypeScript" value={language} onChange={(e) => setLanguage(e.target.value)} />
@@ -347,8 +389,13 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                   </div>
                 </div>
 
+                {/* Advanced toggle */}
                 <div className="border-t pt-3">
-                  <button type="button" onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
                     {showAdvanced ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                     Advanced settings
                   </button>
@@ -372,7 +419,9 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
         </>
       )}
 
-      {/* ── GitHub Import mode ── */}
+      {/* ══════════════════════════════════════════════════════════════
+          GitHub Import mode
+      ══════════════════════════════════════════════════════════════ */}
       {mode === "github" && (
         <form onSubmit={handleFormSubmit}>
           <Card>
@@ -386,7 +435,7 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 <Link href="/integrations/github" className="underline underline-offset-2 hover:text-foreground">
                   GitHub App is configured
                 </Link>{" "}
-                so that webhooks are received and commits are synced automatically.
+                so webhooks are received and commits sync automatically.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -399,8 +448,8 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 <Input
                   id="githubUrl"
                   name="githubUrl"
-                  placeholder="https://github.com/owner/repo"
                   type="url"
+                  placeholder="https://github.com/owner/repo"
                   required
                   aria-invalid={!!fieldErrors.githubUrl}
                 />
@@ -413,33 +462,21 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
               </div>
 
               <NameSlugRow
-                name={name} slug={slug} slugEdited={slugEdited}
+                name={name} slug={slug}
                 onNameChange={handleNameChange} onSlugChange={handleSlugChange}
                 nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
               />
 
               <div className="space-y-1.5">
-                <Label htmlFor="description">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Label htmlFor="description">
+                  Description <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
                 <Textarea id="description" name="description" placeholder="What does this project do?" rows={2} />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="type">Type</Label>
-                  <select id="type" name="type" defaultValue="APP" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {["APP","API","LIBRARY","STATIC","SERVICE","OTHER"].map((t) => (
-                      <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="visibility">Visibility</Label>
-                  <select id="visibility" name="visibility" defaultValue="PRIVATE" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="PRIVATE">Private</option>
-                    <option value="PUBLIC">Public</option>
-                    <option value="UNLISTED">Unlisted</option>
-                  </select>
-                </div>
+                <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
+                <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
                 <div className="space-y-1.5">
                   <Label htmlFor="language">Language</Label>
                   <Input id="language" name="language" placeholder="TypeScript" />
@@ -455,7 +492,9 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
         </form>
       )}
 
-      {/* ── Upload Files mode ── */}
+      {/* ══════════════════════════════════════════════════════════════
+          Upload Files mode
+      ══════════════════════════════════════════════════════════════ */}
       {mode === "upload" && (
         <form onSubmit={handleUploadSubmit}>
           <Card>
@@ -465,50 +504,51 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 Upload Project Files
               </CardTitle>
               <CardDescription>
-                Upload a <code className="font-mono bg-muted px-1 rounded text-xs">.zip</code> archive of your project source code (max 50 MB).
-                Files are extracted to <code className="font-mono bg-muted px-1 rounded text-xs">storage/projects/&lt;slug&gt;/</code> and are never executed automatically.
+                Upload a{" "}
+                <code className="font-mono bg-muted px-1 rounded text-xs">.zip</code>{" "}
+                archive of your project (max 50 MB). Files are extracted on the server and
+                never executed automatically.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && <ErrorBanner message={error} />}
 
-              {/* File picker */}
+              {/* File input — use <label> so click always reaches the input */}
               <div className="space-y-1.5">
-                <Label htmlFor="file">
+                <Label>
                   ZIP archive <span className="text-destructive">*</span>
                 </Label>
-                <div
-                  className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center cursor-pointer transition-colors ${
-                    uploadFile ? "border-primary/50 bg-primary/5" : "border-muted-foreground/30 hover:border-primary/40 hover:bg-muted/30"
-                  }`}
-                  onClick={() => fileRef.current?.click()}
+                <label
+                  htmlFor="zip-file-input"
+                  className={[
+                    "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8",
+                    "text-center cursor-pointer transition-colors select-none",
+                    uploadFile
+                      ? "border-primary/50 bg-primary/5"
+                      : "border-muted-foreground/30 hover:border-primary/40 hover:bg-muted/30",
+                  ].join(" ")}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
-                    const dropped = e.dataTransfer.files[0];
-                    if (dropped && dropped.name.toLowerCase().endsWith(".zip")) {
-                      setUploadFile(dropped);
-                      if (!slugEdited && !name) {
-                        const base = dropped.name.replace(/\.zip$/i, "");
-                        handleNameChange(base);
-                      }
+                    const f = e.dataTransfer.files[0];
+                    if (f && f.name.toLowerCase().endsWith(".zip")) {
+                      setUploadFile(f);
+                      if (!name && !slugEdited) handleNameChange(f.name.replace(/\.zip$/i, ""));
                     } else {
                       setError("Only .zip files are accepted.");
                     }
                   }}
                 >
                   <input
-                    ref={fileRef}
+                    id="zip-file-input"
+                    ref={fileInputRef}
                     type="file"
                     accept=".zip,application/zip,application/x-zip-compressed"
-                    className="hidden"
+                    className="sr-only"
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null;
                       setUploadFile(f);
-                      if (f && !slugEdited && !name) {
-                        const base = f.name.replace(/\.zip$/i, "");
-                        handleNameChange(base);
-                      }
+                      if (f && !name && !slugEdited) handleNameChange(f.name.replace(/\.zip$/i, ""));
                     }}
                   />
                   {uploadFile ? (
@@ -521,7 +561,11 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                       <button
                         type="button"
                         className="mt-2 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={(e) => { e.stopPropagation(); setUploadFile(null); }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setUploadFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = "";
+                        }}
                       >
                         Remove
                       </button>
@@ -529,47 +573,54 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                   ) : (
                     <>
                       <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                      <p className="text-sm font-medium">Drag &amp; drop or click to select</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">ZIP only, max 50 MB</p>
+                      <p className="text-sm font-medium">Click to select or drag &amp; drop</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">.zip only · max 50 MB</p>
                     </>
                   )}
-                </div>
+                </label>
               </div>
 
               <NameSlugRow
-                name={name} slug={slug} slugEdited={slugEdited}
+                name={name} slug={slug}
                 onNameChange={handleNameChange} onSlugChange={handleSlugChange}
               />
 
               <div className="space-y-1.5">
-                <Label htmlFor="description">Description <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Label htmlFor="description">
+                  Description <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
                 <Textarea id="description" name="description" placeholder="What does this project do?" rows={2} />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="type">Type</Label>
-                <select id="type" name="type" defaultValue="APP" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  {["APP","API","LIBRARY","STATIC","SERVICE","OTHER"].map((t) => (
-                    <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
-                  ))}
-                </select>
+                <TypeSelect />
               </div>
 
               <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-700 dark:text-amber-300">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                Uploaded files are stored on disk and never executed automatically. To deploy, configure deployment settings after creating the project.
+                <span>
+                  Uploaded files are stored on disk and <strong>never executed automatically</strong>.
+                  Configure deployment settings after creating the project to go live.
+                </span>
               </div>
 
-              <Button type="submit" className="w-full" disabled={uploading || !uploadFile}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={uploading || !uploadFile}
+              >
                 {uploading && <Loader2 className="h-4 w-4 animate-spin" />}
-                {uploading ? "Uploading & extracting…" : "Upload & Create Project"}
+                {uploading ? "Uploading & extracting…" : "Upload ZIP and Create Project"}
               </Button>
             </CardContent>
           </Card>
         </form>
       )}
 
-      {/* ── AI Generate mode ── */}
+      {/* ══════════════════════════════════════════════════════════════
+          AI Generate mode
+      ══════════════════════════════════════════════════════════════ */}
       {mode === "ai" && (
         <form onSubmit={handleAiSubmit}>
           <Card>
@@ -579,26 +630,28 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 AI Generate
               </CardTitle>
               <CardDescription>
-                Describe what you want to build. A project will be created with your description — code generation requires a connected AI provider.
+                Describe what you want to build. A project record will be created with your
+                description — actual code generation requires a connected AI provider.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && <ErrorBanner message={error} />}
 
-              {/* Honest AI status banner */}
-              {!aiAvailable ? (
+              {/* Honest AI status */}
+              {aiAvailable ? (
+                <div className="flex items-start gap-2 rounded-md border border-green-500/30 bg-green-50/50 dark:bg-green-950/20 p-3 text-xs text-green-700 dark:text-green-300">
+                  <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  AI provider connected. Code generation is available in the project&apos;s AI tab after creation.
+                </div>
+              ) : (
                 <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-700 dark:text-amber-300">
                   <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span>
                     <strong>AI code generation is not connected.</strong>{" "}
-                    Set <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">ANTHROPIC_API_KEY</code> in <code className="font-mono">.env</code> to enable it.
-                    Your project will still be created with the description you provide below.
+                    Set <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">ANTHROPIC_API_KEY</code> in{" "}
+                    <code className="font-mono">.env</code> to enable it.
+                    Your project will be created with the description below.
                   </span>
-                </div>
-              ) : (
-                <div className="flex items-start gap-2 rounded-md border border-green-500/30 bg-green-50/50 dark:bg-green-950/20 p-3 text-xs text-green-700 dark:text-green-300">
-                  <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  AI provider is connected. Code generation is available in the project's AI tab after creation.
                 </div>
               )}
 
@@ -607,47 +660,25 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
                 <Textarea
                   id="aiPrompt"
                   name="aiPrompt"
-                  placeholder="A task management app with projects, tags, and due dates. Built with Next.js and PostgreSQL."
+                  placeholder="A task management app with projects, tags, and due dates — built with Next.js and PostgreSQL."
                   rows={4}
                   value={aiPrompt}
-                  onChange={(e) => {
-                    setAiPrompt(e.target.value);
-                    if (!slugEdited && !name) {
-                      // Try to extract a name from the first few words
-                    }
-                  }}
+                  onChange={(e) => setAiPrompt(e.target.value)}
                 />
-                {/* Use the prompt text as the description when submitting */}
+                {/* Pass prompt as description to createProjectAction */}
                 <input type="hidden" name="description" value={aiPrompt} />
               </div>
 
               <NameSlugRow
-                name={name} slug={slug} slugEdited={slugEdited}
+                name={name} slug={slug}
                 onNameChange={handleNameChange} onSlugChange={handleSlugChange}
                 nameError={fieldErrors.name?.[0]} slugError={fieldErrors.slug?.[0]}
               />
 
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="type">Type</Label>
-                  <select id="type" name="type" defaultValue="APP" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {["APP","API","LIBRARY","STATIC","SERVICE","OTHER"].map((t) => (
-                      <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="visibility">Visibility</Label>
-                  <select id="visibility" name="visibility" defaultValue="PRIVATE" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="PRIVATE">Private</option>
-                    <option value="PUBLIC">Public</option>
-                    <option value="UNLISTED">Unlisted</option>
-                  </select>
-                </div>
+                <div className="space-y-1.5"><Label htmlFor="type">Type</Label><TypeSelect /></div>
+                <div className="space-y-1.5"><Label htmlFor="visibility">Visibility</Label><VisibilitySelect /></div>
               </div>
-
-              {/* status is DRAFT initially */}
-              <input type="hidden" name="status" value="DRAFT" />
 
               <Button type="submit" className="w-full" disabled={isPending || !name.trim()}>
                 {isPending && <Loader2 className="h-4 w-4 animate-spin" />}
