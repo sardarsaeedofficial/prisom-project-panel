@@ -5,9 +5,11 @@ import { CreateProjectForm } from "@/components/projects/create-project-form";
 export const metadata: Metadata = { title: "New Project" };
 
 export default function NewProjectPage() {
+  const aiAvailable = !!process.env.ANTHROPIC_API_KEY;
+
   return (
     <DashboardShell>
-      <CreateProjectForm />
+      <CreateProjectForm aiAvailable={aiAvailable} />
     </DashboardShell>
   );
 }

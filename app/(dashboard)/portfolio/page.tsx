@@ -1,69 +1,101 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BookOpen, ExternalLink, Github, Star, Plus, Eye } from "lucide-react";
+import {
+  BookOpen,
+  ExternalLink,
+  Github,
+  Star,
+  Plus,
+  Eye,
+  Database,
+} from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
-import { MOCK_PORTFOLIO_PROJECTS } from "@/lib/mock-data";
+import { db } from "@/lib/db";
+import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Portfolio" };
+export const dynamic = "force-dynamic";
 
-export default function PortfolioPage() {
+export default async function PortfolioPage() {
+  let items: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    slug: string;
+    tags: string[];
+    liveUrl: string | null;
+    githubUrl: string | null;
+    featured: boolean;
+    publishedAt: Date;
+  }> = [];
+  let dbError = false;
+
+  try {
+    const workspaceId = await getCurrentWorkspaceId();
+    items = await db.portfolioItem.findMany({
+      where: { workspaceId },
+      orderBy: [{ featured: "desc" }, { sortOrder: "asc" }, { publishedAt: "desc" }],
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        slug: true,
+        tags: true,
+        liveUrl: true,
+        githubUrl: true,
+        featured: true,
+        publishedAt: true,
+      },
+    });
+  } catch {
+    dbError = true;
+  }
+
   return (
     <DashboardShell>
       <PageHeader
         title="Portfolio"
         description="Showcase your best projects to the world."
         action={
-          <div className="flex gap-2">
-            <Button variant="outline" asChild>
-              <a href="/portfolio/preview" target="_blank">
-                <Eye className="h-4 w-4 mr-1.5" />
-                Preview
-              </a>
-            </Button>
-            <Button>
-              <Plus className="h-4 w-4 mr-1.5" />
-              Add Project
-            </Button>
-          </div>
+          <Button variant="outline" asChild>
+            <a href="/portfolio/preview" target="_blank">
+              <Eye className="h-4 w-4 mr-1.5" />
+              Preview
+            </a>
+          </Button>
         }
       />
 
-      {/* Portfolio visibility toggle */}
-      <Card className="mb-6">
-        <CardContent className="p-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">Portfolio visibility</p>
-            <p className="text-xs text-muted-foreground">
-              Your portfolio is publicly accessible at{" "}
-              <code className="font-mono bg-muted px-1 rounded">prisom.dev/u/alexrivera</code>
-            </p>
-          </div>
-          <Switch defaultChecked />
-        </CardContent>
-      </Card>
+      {dbError && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 mb-6 text-sm text-destructive">
+          <Database className="h-4 w-4 shrink-0" />
+          Could not load portfolio items from the database.
+        </div>
+      )}
 
-      {MOCK_PORTFOLIO_PROJECTS.length === 0 ? (
+      {!dbError && items.length === 0 && (
         <div className="text-center py-20">
           <div className="h-12 w-12 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
             <BookOpen className="h-6 w-6 text-muted-foreground" />
           </div>
           <h3 className="font-semibold mb-1">No portfolio items yet</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Add published projects to your portfolio to showcase your work.
+          <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
+            Portfolio items are managed directly in the database for now. A UI
+            for adding items is coming soon.
           </p>
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Your First Project
+          <Button asChild variant="outline">
+            <Link href="/projects">Browse Projects</Link>
           </Button>
         </div>
-      ) : (
+      )}
+
+      {items.length > 0 && (
         <div className="space-y-4">
-          {MOCK_PORTFOLIO_PROJECTS.map((item) => (
+          {items.map((item) => (
             <Card key={item.id} className="group">
               <CardContent className="p-5">
                 <div className="flex items-start gap-4">
@@ -78,7 +110,7 @@ export default function PortfolioPage() {
                         href={`/portfolio/${item.slug}`}
                         className="font-semibold hover:text-primary transition-colors"
                       >
-                        {item.name}
+                        {item.title}
                       </Link>
                       {item.featured && (
                         <Badge variant="default" className="text-xs">
@@ -87,16 +119,20 @@ export default function PortfolioPage() {
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
-                      {item.description}
-                    </p>
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {item.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-xs px-1.5">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
+                    {item.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
+                        {item.description}
+                      </p>
+                    )}
+                    {item.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {item.tags.map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-xs px-1.5">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3">
                       {item.liveUrl && (
                         <a
@@ -125,17 +161,14 @@ export default function PortfolioPage() {
                       </span>
                     </div>
                   </div>
-
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <Button variant="outline" size="sm" className="text-xs">Edit</Button>
-                    <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive">
-                      Remove
-                    </Button>
-                  </div>
                 </div>
               </CardContent>
             </Card>
           ))}
+
+          <p className="text-xs text-muted-foreground text-center pt-2">
+            Portfolio item management UI coming soon. Items can be added directly via the database.
+          </p>
         </div>
       )}
     </DashboardShell>

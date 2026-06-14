@@ -38,3 +38,7 @@ next-env.d.ts
 
 # prisma
 /prisma/migrations
+
+# uploaded / extracted project files (never commit user data)
+/storage/uploads/
+/storage/projects/
