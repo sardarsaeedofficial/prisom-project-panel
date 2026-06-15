@@ -268,14 +268,43 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
     setUploading(true);
     try {
       const res = await fetch("/api/projects/upload", { method: "POST", body: fd });
-      const data = (await res.json()) as { projectId?: string; error?: string };
-      if (!res.ok || !data.projectId) {
-        setError(data.error ?? "Upload failed — please try again.");
+
+      // Attempt to parse JSON — may fail if the response was truncated by the server.
+      let data: { projectId?: string; error?: string } = {};
+      try {
+        data = (await res.json()) as { projectId?: string; error?: string };
+      } catch {
+        // Non-JSON body (e.g. Next.js returned a plain-text error after truncating the stream).
+        // Fall through to the size/generic error below.
+      }
+
+      if (res.status === 413) {
+        setError(
+          "Upload failed. ZIP must be under 50 MB. If your file is smaller, try again."
+        );
         return;
       }
+
+      if (!res.ok || !data.projectId) {
+        // Surface the server error message; fall back to a size hint since the most
+        // common cause of a generic failure is an oversized file.
+        setError(
+          data.error ?? "Upload failed. ZIP must be under 50 MB. If your file is smaller, try again."
+        );
+        return;
+      }
+
       router.push(`/projects/${data.projectId}/files`);
-    } catch {
-      setError("Network error — please check your connection and try again.");
+    } catch (err) {
+      // TypeError is thrown when the request never reached the server (CORS, DNS, etc.)
+      // or when the browser aborted the upload before it completed.
+      if (err instanceof TypeError) {
+        setError(
+          "Upload failed before reaching the server. Please check your upload limit or connection."
+        );
+      } else {
+        setError("Network error — please check your connection and try again.");
+      }
     } finally {
       setUploading(false);
     }

@@ -118,7 +118,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
     }
 
-    const formData = await req.formData();
+    // Parse the multipart body. If the ZIP is larger than the server's configured body
+    // limit, Next.js will truncate the stream and formData() will throw. We catch that
+    // specifically so the client gets a clear 413 rather than a generic 500.
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (parseErr) {
+      console.error("[upload] FormData parse failed:", parseErr);
+      return NextResponse.json(
+        { ok: false, error: "Upload body could not be parsed. ZIP may be too large." },
+        { status: 413 }
+      );
+    }
 
     // ── Validate text fields ──────────────────────────────────────────────────
 
