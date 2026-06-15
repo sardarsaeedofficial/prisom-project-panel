@@ -143,6 +143,8 @@ export async function saveDeploymentConfigAction(
     pm2Name = `project-${project.slug}`;
   }
 
+  const isUpdate = !!project.deploymentConfig;
+
   try {
     await db.projectDeploymentConfig.upsert({
       where: { projectId },
@@ -172,6 +174,23 @@ export async function saveDeploymentConfigAction(
     const msg = e instanceof Error ? e.message : "Database error";
     return { ok: false, error: `Failed to save deployment config: ${msg}` };
   }
+
+  // Audit log
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: isUpdate ? "Deployment config updated" : "Deployment config created",
+      metadata: {
+        startCommand:   input.startCommand.trim(),
+        installCommand: input.installCommand.trim() || null,
+        buildCommand:   input.buildCommand.trim()   || null,
+        port,
+        pm2Name,
+      } as object,
+    },
+  });
 
   revalidatePath(`/projects/${projectId}/publishing`);
   return { ok: true, error: "" };

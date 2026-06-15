@@ -3,9 +3,15 @@
 /**
  * components/projects/deployment-setup-form.tsx
  *
- * First-time deployment configuration form for uploaded / blank / GitHub projects.
- * Preset templates auto-fill the command fields; the user can customise any field.
- * Port and PM2 name are assigned by the server on first save.
+ * First-time setup AND edit form for a project's PM2 deployment config.
+ *
+ * When `existingConfig` is supplied the form opens in edit mode:
+ *   - Fields are pre-filled with the saved values.
+ *   - Port and PM2 name are shown as read-only (they never change after first save).
+ *   - Title says "Edit Deployment Config".
+ *
+ * `onSaved` (optional): called after a successful save instead of router.refresh().
+ * The parent component can use this to close the inline edit form.
  */
 
 import { useState } from "react";
@@ -17,6 +23,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
+  Pencil,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +37,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { saveDeploymentConfigAction } from "@/app/actions/project-deployments";
+import { FULL_PATH_PNPM } from "@/lib/projects/deploy-constants";
 
 // ── Preset templates ───────────────────────────────────────────────────────
 
@@ -43,68 +52,136 @@ type Preset = {
 
 const PRESETS: Preset[] = [
   {
-    id: "nextjs",
+    id: "nextjs-npm",
     label: "Next.js",
-    description: "npm install → build → npm start",
+    description: "npm install + build + start",
     installCommand: "npm install",
-    buildCommand: "npm run build",
-    startCommand: "npm start",
+    buildCommand:   "npm run build",
+    startCommand:   "npm start",
   },
   {
-    id: "node",
+    id: "nextjs-pnpm",
+    label: "Next.js (pnpm)",
+    description: "pnpm install + build + start",
+    installCommand: `${FULL_PATH_PNPM} install`,
+    buildCommand:   `${FULL_PATH_PNPM} run build`,
+    startCommand:   `${FULL_PATH_PNPM} start`,
+  },
+  {
+    id: "node-npm",
     label: "Node.js",
-    description: "npm install → npm start (no build step)",
+    description: "npm install → npm start",
     installCommand: "npm install",
-    buildCommand: "",
-    startCommand: "npm start",
+    buildCommand:   "",
+    startCommand:   "npm start",
+  },
+  {
+    id: "node-pnpm",
+    label: "Node.js (pnpm)",
+    description: "pnpm install → pnpm start",
+    installCommand: `${FULL_PATH_PNPM} install`,
+    buildCommand:   "",
+    startCommand:   `${FULL_PATH_PNPM} start`,
   },
   {
     id: "custom",
     label: "Custom",
     description: "Enter commands manually",
     installCommand: "",
-    buildCommand: "",
-    startCommand: "",
+    buildCommand:   "",
+    startCommand:   "",
   },
 ];
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function detectPreset(
+  install: string | null,
+  build: string | null,
+  start: string
+): string {
+  const i = install ?? "";
+  const b = build   ?? "";
+  for (const p of PRESETS) {
+    if (p.id === "custom") continue;
+    if (p.installCommand === i && p.buildCommand === b && p.startCommand === start)
+      return p.id;
+  }
+  return "custom";
+}
+
 // ── Styles ─────────────────────────────────────────────────────────────────
 
-const INPUT_CLASS =
+const INPUT_CLS =
   "h-9 font-mono text-sm bg-background border border-input rounded-md px-3 py-1 " +
   "focus:outline-none focus:ring-1 focus:ring-ring w-full";
 
-const SELECT_CLASS =
+const SELECT_CLS =
   "h-9 text-sm bg-background border border-input rounded-md px-2 " +
   "focus:outline-none focus:ring-1 focus:ring-ring w-full";
 
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export type ExistingDeployConfig = {
+  installCommand: string | null;
+  buildCommand:   string | null;
+  startCommand:   string;
+  rootDirectory:  string;
+  healthPath:     string;
+  nodeEnv:        string;
+  port:           number;
+  pm2Name:        string;
+};
 
 interface Props {
-  projectId: string;
-  projectSlug: string;
+  projectId:      string;
+  projectSlug:    string;
+  /** If provided, form opens in edit mode pre-filled with these values. */
+  existingConfig?: ExistingDeployConfig;
+  /** Called after a successful save. If omitted, router.refresh() is used. */
+  onSaved?: () => void;
 }
 
-export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
+// ── Component ──────────────────────────────────────────────────────────────
+
+export function DeploymentSetupForm({
+  projectId,
+  projectSlug,
+  existingConfig,
+  onSaved,
+}: Props) {
   const router = useRouter();
-  const [activePreset, setActivePreset] = useState<string>("nextjs");
-  const [installCommand, setInstallCommand] = useState("npm install");
-  const [buildCommand, setBuildCommand]     = useState("npm run build");
-  const [startCommand, setStartCommand]     = useState("npm start");
-  const [rootDirectory, setRootDirectory]   = useState(".");
-  const [healthPath, setHealthPath]         = useState("/");
-  const [nodeEnv, setNodeEnv]               = useState("production");
-  const [saving, setSaving]                 = useState(false);
-  const [error, setError]                   = useState("");
-  const [saved, setSaved]                   = useState(false);
+  const isEdit = !!existingConfig;
+
+  // Derive initial field values
+  const initInstall = existingConfig?.installCommand ?? "npm install";
+  const initBuild   = existingConfig?.buildCommand   ?? "npm run build";
+  const initStart   = existingConfig?.startCommand   ?? "npm start";
+  const initRoot    = existingConfig?.rootDirectory  ?? ".";
+  const initHealth  = existingConfig?.healthPath     ?? "/";
+  const initEnv     = existingConfig?.nodeEnv        ?? "production";
+  const initPreset  = existingConfig
+    ? detectPreset(existingConfig.installCommand, existingConfig.buildCommand, existingConfig.startCommand)
+    : "nextjs-npm";
+
+  const [activePreset,    setActivePreset]    = useState(initPreset);
+  const [installCommand,  setInstallCommand]  = useState(initInstall);
+  const [buildCommand,    setBuildCommand]    = useState(initBuild);
+  const [startCommand,    setStartCommand]    = useState(initStart);
+  const [rootDirectory,   setRootDirectory]   = useState(initRoot);
+  const [healthPath,      setHealthPath]      = useState(initHealth);
+  const [nodeEnv,         setNodeEnv]         = useState(initEnv);
+  const [saving,          setSaving]          = useState(false);
+  const [error,           setError]           = useState("");
+  const [saved,           setSaved]           = useState(false);
 
   function applyPreset(presetId: string) {
     setActivePreset(presetId);
-    const preset = PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
-    setInstallCommand(preset.installCommand);
-    setBuildCommand(preset.buildCommand);
-    setStartCommand(preset.startCommand);
+    const p = PRESETS.find((x) => x.id === presetId);
+    if (!p) return;
+    setInstallCommand(p.installCommand);
+    setBuildCommand(p.buildCommand);
+    setStartCommand(p.startCommand);
   }
 
   async function handleSave() {
@@ -124,8 +201,14 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
         return;
       }
       setSaved(true);
-      // Allow the success state to show briefly, then refresh the page
-      setTimeout(() => router.refresh(), 600);
+      // Notify parent or refresh the page
+      setTimeout(() => {
+        if (onSaved) {
+          onSaved();
+        } else {
+          router.refresh();
+        }
+      }, 500);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unexpected error. Please try again.");
     } finally {
@@ -137,29 +220,53 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Settings className="h-5 w-5 text-muted-foreground" />
-          <CardTitle className="text-base">Configure Deployment</CardTitle>
+          {isEdit ? (
+            <Pencil className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <Settings className="h-5 w-5 text-muted-foreground" />
+          )}
+          <CardTitle className="text-base">
+            {isEdit ? "Edit Deployment Config" : "Configure Deployment"}
+          </CardTitle>
         </div>
         <CardDescription>
-          Set up how your project is installed, built, and started on the VPS.
-          Port and PM2 process name are assigned automatically.
+          {isEdit
+            ? "Update how your project is installed, built, and started. Port and PM2 name are fixed."
+            : "Set up how your project is installed, built, and started on the VPS."}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* ── Port + PM2 name (read-only, only in edit mode) ── */}
+        {isEdit && existingConfig && (
+          <div className="flex items-center gap-4 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 px-4 py-3">
+            <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+            <div className="flex gap-6 text-sm">
+              <div>
+                <span className="text-muted-foreground">Port</span>
+                <code className="ml-2 font-mono font-medium">{existingConfig.port}</code>
+              </div>
+              <div>
+                <span className="text-muted-foreground">PM2 name</span>
+                <code className="ml-2 font-mono font-medium">{existingConfig.pm2Name}</code>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Preset selector ── */}
         <div>
           <Label className="mb-2 block text-xs font-medium text-muted-foreground uppercase tracking-wide">
             Template
           </Label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-wrap gap-2">
             {PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => applyPreset(p.id)}
                 className={[
-                  "flex flex-col items-start rounded-lg border p-3 text-left transition-colors",
+                  "flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
                   activePreset === p.id
                     ? "border-primary bg-primary/5 ring-1 ring-primary"
                     : "border-border hover:border-muted-foreground/50 hover:bg-muted/30",
@@ -183,10 +290,10 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             </Label>
             <Input
               id="installCommand"
-              className={INPUT_CLASS}
+              className={INPUT_CLS}
               placeholder="npm install"
               value={installCommand}
-              onChange={(e) => setInstallCommand(e.target.value)}
+              onChange={(e) => { setInstallCommand(e.target.value); setActivePreset("custom"); }}
             />
             <p className="text-xs text-muted-foreground">
               Runs before build. Leave empty to skip.
@@ -200,13 +307,13 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             </Label>
             <Input
               id="buildCommand"
-              className={INPUT_CLASS}
+              className={INPUT_CLS}
               placeholder="npm run build"
               value={buildCommand}
-              onChange={(e) => setBuildCommand(e.target.value)}
+              onChange={(e) => { setBuildCommand(e.target.value); setActivePreset("custom"); }}
             />
             <p className="text-xs text-muted-foreground">
-              Compile / bundle step. Leave empty for apps that don&apos;t need a build.
+              Compile / bundle step. Leave empty for apps with no build step.
             </p>
           </div>
 
@@ -216,13 +323,13 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             </Label>
             <Input
               id="startCommand"
-              className={INPUT_CLASS}
+              className={INPUT_CLS}
               placeholder="npm start"
               value={startCommand}
-              onChange={(e) => setStartCommand(e.target.value)}
+              onChange={(e) => { setStartCommand(e.target.value); setActivePreset("custom"); }}
             />
             <p className="text-xs text-muted-foreground">
-              How PM2 starts your app. Allowed: npm / pnpm / yarn / node.
+              How PM2 starts your app. Allowed: npm / pnpm / yarn / node / full pnpm path.
             </p>
           </div>
         </div>
@@ -235,14 +342,12 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             </Label>
             <Input
               id="rootDirectory"
-              className={INPUT_CLASS}
+              className={INPUT_CLS}
               placeholder="."
               value={rootDirectory}
               onChange={(e) => setRootDirectory(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">
-              Relative to your project root.
-            </p>
+            <p className="text-xs text-muted-foreground">Relative to project root.</p>
           </div>
 
           <div className="grid gap-1.5">
@@ -251,13 +356,13 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             </Label>
             <Input
               id="healthPath"
-              className={INPUT_CLASS}
+              className={INPUT_CLS}
               placeholder="/"
               value={healthPath}
               onChange={(e) => setHealthPath(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Must return a non-5xx status.
+              Must return a non-5xx response.
             </p>
           </div>
         </div>
@@ -268,7 +373,7 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
           </Label>
           <select
             id="nodeEnv"
-            className={SELECT_CLASS}
+            className={SELECT_CLS}
             value={nodeEnv}
             onChange={(e) => setNodeEnv(e.target.value)}
           >
@@ -277,16 +382,18 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
           </select>
         </div>
 
-        {/* ── Auto-assigned info ── */}
-        <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 px-4 py-3">
-          <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">Port</span> and{" "}
-            <span className="font-medium text-foreground">PM2 name</span> are
-            assigned automatically when you save:{" "}
-            <code className="font-mono">project-{projectSlug}</code> on the
-            next available port starting from 4100.
-          </p>
-        </div>
+        {/* ── Auto-assigned info (create mode only) ── */}
+        {!isEdit && (
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Port</span> and{" "}
+              <span className="font-medium text-foreground">PM2 name</span> are
+              assigned automatically on save:{" "}
+              <code className="font-mono">project-{projectSlug}</code> on the
+              next available port from 4100.
+            </p>
+          </div>
+        )}
 
         {/* ── Error ── */}
         {error && (
@@ -306,7 +413,7 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             {saved ? (
               <>
                 <CheckCircle2 className="h-4 w-4" />
-                Saved — loading deploy panel…
+                {isEdit ? "Saved!" : "Saved — loading…"}
               </>
             ) : saving ? (
               <>
@@ -316,32 +423,31 @@ export function DeploymentSetupForm({ projectId, projectSlug }: Props) {
             ) : (
               <>
                 <ChevronRight className="h-4 w-4" />
-                Save &amp; Continue
+                {isEdit ? "Save Changes" : "Save & Continue"}
               </>
             )}
           </Button>
           {!startCommand.trim() && (
-            <p className="text-xs text-muted-foreground">
-              Start command is required.
-            </p>
+            <p className="text-xs text-muted-foreground">Start command is required.</p>
           )}
         </div>
 
         {/* ── Command allowlist reminder ── */}
-        <div className="text-xs text-muted-foreground space-y-0.5">
+        <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium text-foreground/70">Allowed commands:</p>
           <p>
-            <code className="font-mono">npm install</code>,{" "}
-            <code className="font-mono">npm ci</code>,{" "}
-            <code className="font-mono">npm run &lt;script&gt;</code>,{" "}
-            <code className="font-mono">npm start</code>,{" "}
-            <code className="font-mono">pnpm …</code>,{" "}
-            <code className="font-mono">yarn …</code>,{" "}
-            <code className="font-mono">node &lt;file.js&gt;</code>
+            <code className="font-mono">npm</code> / <code className="font-mono">pnpm</code> /{" "}
+            <code className="font-mono">yarn</code> — install, ci, start, run &lt;script&gt;
+          </p>
+          <p>
+            <code className="font-mono">node &lt;file.js&gt;</code> — relative path, no extra args
+          </p>
+          <p>
+            <code className="font-mono">{FULL_PATH_PNPM}</code> — install, start, run build/start/preview
           </p>
           <p className="flex items-center gap-1 mt-1 text-amber-600 dark:text-amber-500">
             <Rocket className="h-3 w-3" />
-            Shell operators, sudo, rm, curl, wget are blocked.
+            Shell operators (;&amp;|&gt;&lt;), sudo, rm, curl, wget are blocked.
           </p>
         </div>
       </CardContent>

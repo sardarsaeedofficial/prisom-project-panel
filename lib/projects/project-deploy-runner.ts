@@ -18,6 +18,10 @@
 import path from "path";
 import { promises as fs } from "fs";
 import { runCommand, sanitizeOutput } from "@/lib/server/command-runner";
+import { FULL_PATH_PNPM } from "@/lib/projects/deploy-constants";
+
+// Re-export so callers that already import from this module don't need to change
+export { FULL_PATH_PNPM };
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -69,6 +73,9 @@ const DANGEROUS: RegExp[] = [
 const ALLOWED_NPM  = /^(install|ci|start|run\s+[a-zA-Z0-9:_-]+)$/;
 const ALLOWED_PNPM = /^(install|ci|build|start|run\s+[a-zA-Z0-9:_-]+)$/;
 const ALLOWED_YARN = /^(install|build|start|run\s+[a-zA-Z0-9:_-]+)$/;
+
+// Regex for the full-path pnpm binary's allowed sub-commands
+const ALLOWED_FULL_PATH_PNPM = /^(install|start|run\s+(build|start|preview))$/;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -173,10 +180,22 @@ export function validateAndParseCommand(
       return { ok: true, cmd: { binary: "node", args: [file] } };
     }
 
+    case FULL_PATH_PNPM:
+      // Full absolute path to pnpm on the production VPS only.
+      // Allowed sub-commands are deliberately narrower than the relative "pnpm" case.
+      if (!ALLOWED_FULL_PATH_PNPM.test(restStr))
+        return {
+          ok: false,
+          error:
+            `Full-path pnpm: sub-command "${restStr}" is not allowed. ` +
+            `Allowed: install, start, run build, run start, run preview`,
+        };
+      return { ok: true, cmd: { binary: FULL_PATH_PNPM, args: rest } };
+
     default:
       return {
         ok: false,
-        error: `Binary "${binary}" is not in the allowlist. Allowed: npm, pnpm, yarn, node`,
+        error: `Binary "${binary}" is not in the allowlist. Allowed: npm, pnpm, yarn, node, ${FULL_PATH_PNPM}`,
       };
   }
 }
