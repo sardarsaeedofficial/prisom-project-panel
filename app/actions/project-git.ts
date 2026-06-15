@@ -27,6 +27,7 @@ import {
   isBlockedRepoUrl,
   stableGitHubRepoPlaceholderId,
   BLOCKED_REPO_SLUG,
+  type LocalGitStatus,
 } from "@/lib/projects/storage-git";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,6 +65,33 @@ async function verifyProjectOwnership(projectId: string) {
 const BLOCKED_REPO_MESSAGE =
   "You cannot connect an uploaded project to the Project Panel repository. " +
   "Create or choose a separate GitHub repo for this project.";
+
+// ── Types (extended) ─────────────────────────────────────────────────────────
+
+export type RefreshStatusResult = {
+  ok: boolean;
+  gitStatus?: LocalGitStatus;
+  error: string;
+};
+
+// ── Action: refreshGitStatusAction ────────────────────────────────────────────
+
+/**
+ * Re-reads the local git status from disk.
+ * Detects upstream tracking ref so the UI can recognise a push that happened
+ * outside the panel (e.g. manually from the VPS).
+ */
+export async function refreshGitStatusAction(
+  projectId: string
+): Promise<RefreshStatusResult> {
+  const project = await verifyProjectOwnership(projectId);
+  if (!project) {
+    return { ok: false, error: "Project not found or access denied." };
+  }
+
+  const status = await getLocalGitStatus(project.slug);
+  return { ok: true, gitStatus: status, error: "" };
+}
 
 // ── Action: initLocalGitRepoAction ────────────────────────────────────────────
 

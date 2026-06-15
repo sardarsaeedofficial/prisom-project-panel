@@ -212,24 +212,35 @@ export interface LocalGitStatus {
   commitSha: string | null;
   hasRemote: boolean;
   remoteUrl: string | null;
+  /** Upstream tracking ref, e.g. "origin/main" — set only after `git push -u`. */
+  upstreamBranch: string | null;
 }
 
 /**
  * Returns the current git status of a project's storage directory.
  * Never throws — if the directory isn't a git repo, returns `{ initialized: false }`.
  */
+const EMPTY_STATUS: LocalGitStatus = {
+  initialized: false,
+  branch: null,
+  commitSha: null,
+  hasRemote: false,
+  remoteUrl: null,
+  upstreamBranch: null,
+};
+
 export async function getLocalGitStatus(slug: string): Promise<LocalGitStatus> {
   let cwd: string;
   try {
     cwd = resolveStoragePath(slug);
   } catch {
-    return { initialized: false, branch: null, commitSha: null, hasRemote: false, remoteUrl: null };
+    return { ...EMPTY_STATUS };
   }
 
   // Check if it's a git repo at all
   const revParse = await runGit("rev-parse", ["--git-dir"], cwd);
   if (!revParse.ok) {
-    return { initialized: false, branch: null, commitSha: null, hasRemote: false, remoteUrl: null };
+    return { ...EMPTY_STATUS };
   }
 
   // Get current branch
@@ -238,14 +249,26 @@ export async function getLocalGitStatus(slug: string): Promise<LocalGitStatus> {
 
   // Get latest commit SHA
   const shaResult = await runGit("rev-parse", ["HEAD"], cwd);
-  const commitSha = shaResult.ok && /^[0-9a-f]{40}$/i.test(shaResult.output.trim())
-    ? shaResult.output.trim()
-    : null;
+  const commitSha =
+    shaResult.ok && /^[0-9a-f]{40}$/i.test(shaResult.output.trim())
+      ? shaResult.output.trim()
+      : null;
 
-  // Check for remote origin
+  // Check for remote origin URL
   const remoteResult = await runGit("remote", ["get-url", "origin"], cwd);
   const hasRemote = remoteResult.ok;
-  const remoteUrl = hasRemote ? sanitizeGitOutput(remoteResult.output.trim()) : null;
+  const remoteUrl = hasRemote
+    ? sanitizeGitOutput(remoteResult.output.trim())
+    : null;
+
+  // Detect upstream tracking branch — set only after `git push -u origin <branch>`.
+  // `@{u}` is the upstream shorthand; git errors if no upstream is configured.
+  // This is the reliable way to detect that a push -u already happened, even if
+  // it was done manually from the VPS rather than through the panel.
+  const upstreamResult = await runGit("rev-parse", ["--abbrev-ref", "@{u}"], cwd);
+  const upstreamBranch = upstreamResult.ok
+    ? upstreamResult.output.trim() || null
+    : null;
 
   return {
     initialized: true,
@@ -253,6 +276,7 @@ export async function getLocalGitStatus(slug: string): Promise<LocalGitStatus> {
     commitSha,
     hasRemote,
     remoteUrl,
+    upstreamBranch,
   };
 }
 

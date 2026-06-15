@@ -131,6 +131,7 @@ export default async function ProjectGithubPage({ params }: Props) {
     commitSha: null as string | null,
     hasRemote: false,
     remoteUrl: null as string | null,
+    upstreamBranch: null as string | null,
   };
 
   if (project.slug) {

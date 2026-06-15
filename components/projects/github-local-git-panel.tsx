@@ -5,15 +5,18 @@
  *
  * Three-step UI for initialising a local git repo, connecting it to GitHub,
  * and pushing the first commit.  Also allows changing or disconnecting an
- * existing remote connection.
- *
- * Shown on /projects/[projectId]/github when the project has files in
- * storage/projects/<slug>/ (regardless of whether a GitHubRepository row exists).
+ * existing remote connection, and refreshing git status to detect pushes
+ * performed outside the panel (e.g. manually from the VPS).
  *
  * Steps:
  *   1. Init local repo (git init → .gitignore → git add -A → git commit)
  *   2. Connect / Change / Disconnect GitHub repo
  *   3. Push (git push -u origin <branch>)
+ *
+ * Step 3 is considered "done" when either:
+ *   a) The push action succeeded in this session, OR
+ *   b) `gitStatus.upstreamBranch` is non-null (upstream tracking was set
+ *      by any push -u, including a manual push from the VPS).
  */
 
 import { useState, useTransition } from "react";
@@ -32,6 +35,8 @@ import {
   Upload,
   Pencil,
   XCircle,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +53,7 @@ import {
   connectGitHubRepoAction,
   disconnectGitHubRepoAction,
   pushToGitHubAction,
+  refreshGitStatusAction,
 } from "@/app/actions/project-git";
 import type { LocalGitStatus } from "@/lib/projects/storage-git";
 
@@ -66,6 +72,15 @@ function clientNormalizeSlug(url: string): string {
 
 function isBlockedUrl(url: string): boolean {
   return !!url && clientNormalizeSlug(url) === BLOCKED_SLUG;
+}
+
+/** Convert any GitHub remote URL to a browser-friendly HTTPS URL. */
+function toBrowserUrl(url: string): string {
+  if (!url) return "";
+  if (url.startsWith("https://")) return url.replace(/\.git$/, "");
+  const m = url.match(/^git@github\.com:(.+?)(?:\.git)?$/);
+  if (m) return `https://github.com/${m[1]}`;
+  return url;
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -134,14 +149,8 @@ export function GithubLocalGitPanel({
   initialRepo,
 }: Props) {
   // ── Initial connected state ───────────────────────────────────────────────
-  //
-  // "connected" = a remote origin + GitHubRepository row exist.
-  // This is true when either the page passed initialRepo OR the git status
-  // already has a remote (covers the case of init already having been run
-  // but with a lost DB row).
 
-  const alreadyConnected =
-    initialRepo !== null || initialGitStatus.hasRemote;
+  const alreadyConnected = initialRepo !== null || initialGitStatus.hasRemote;
 
   // ── State ─────────────────────────────────────────────────────────────────
 
@@ -149,9 +158,7 @@ export function GithubLocalGitPanel({
 
   // Step 2 state
   const [connected, setConnected] = useState(alreadyConnected);
-  // When true, show the URL+branch form (either first connection or "Change" mode)
   const [step2Editing, setStep2Editing] = useState(!alreadyConnected);
-  // Form field values — prefilled from existing connection if present
   const [repoUrl, setRepoUrl] = useState(
     initialRepo?.htmlUrl ?? initialGitStatus.remoteUrl ?? ""
   );
@@ -160,6 +167,8 @@ export function GithubLocalGitPanel({
   );
 
   // Step 3 state
+  // `pushed` is set when the push action succeeds in THIS session.
+  // `gitStatus.upstreamBranch` covers pushes that happened outside the panel.
   const [pushed, setPushed] = useState(false);
   const [pushConfirmed, setPushConfirmed] = useState(false);
 
@@ -172,26 +181,33 @@ export function GithubLocalGitPanel({
   const [pushOutput, setPushOutput] = useState("");
   const [pushError, setPushError] = useState("");
   const [pushAuthError, setPushAuthError] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
 
   // Pending transitions
   const [initPending, startInitTransition] = useTransition();
   const [connectPending, startConnectTransition] = useTransition();
   const [disconnectPending, startDisconnectTransition] = useTransition();
   const [pushPending, startPushTransition] = useTransition();
+  const [refreshPending, startRefreshTransition] = useTransition();
 
   // ── Derived state ──────────────────────────────────────────────────────────
 
   const step1Done = gitStatus.initialized;
-  // Step 2 is "done" (fully connected, not in editing mode) when:
   const step2Done = connected && !step2Editing;
-  const step3Done = pushed;
+  // Step 3 is done if the panel's push action succeeded, OR if the local branch
+  // already tracks an upstream (detected by git rev-parse --abbrev-ref @{u}).
+  const step3Done = pushed || !!gitStatus.upstreamBranch;
 
   const activeStep = step3Done ? 3 : step2Done ? 3 : step1Done ? 2 : 1;
 
-  // The URL that is currently wired to git origin (for display + blocklist)
   const currentRemoteUrl = gitStatus.remoteUrl ?? (connected ? repoUrl : "");
   const currentBranch = gitStatus.branch ?? branch;
   const remotIsBlocked = isBlockedUrl(currentRemoteUrl);
+
+  // Browser URL for the "Open on GitHub" link
+  const githubBrowserUrl =
+    initialRepo?.htmlUrl ||
+    (currentRemoteUrl ? toBrowserUrl(currentRemoteUrl) : null);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -217,7 +233,6 @@ export function GithubLocalGitPanel({
     setConnectOutput("");
     setConnectError("");
 
-    // Client-side blocklist guard
     if (isBlockedUrl(repoUrl)) {
       setConnectError(
         "You cannot connect an uploaded project to the Project Panel repository. " +
@@ -255,7 +270,6 @@ export function GithubLocalGitPanel({
   }
 
   function handleCancelChange() {
-    // Only valid when we still have a connection to fall back to
     if (connected) {
       setStep2Editing(false);
       setConnectOutput("");
@@ -271,8 +285,12 @@ export function GithubLocalGitPanel({
         setConnected(false);
         setStep2Editing(true);
         setPushConfirmed(false);
-        setGitStatus((prev) => ({ ...prev, hasRemote: false, remoteUrl: null }));
-        // Keep repoUrl so the user can re-connect to the same repo easily
+        setGitStatus((prev) => ({
+          ...prev,
+          hasRemote: false,
+          remoteUrl: null,
+          upstreamBranch: null,
+        }));
       } else {
         setDisconnectError(res.error);
       }
@@ -288,7 +306,32 @@ export function GithubLocalGitPanel({
       setPushOutput(res.output);
       setPushError(res.error);
       setPushAuthError(res.isAuthError ?? false);
-      if (res.ok) setPushed(true);
+      if (res.ok) {
+        setPushed(true);
+        // Refresh git status so upstreamBranch is populated
+        const fresh = await refreshGitStatusAction(projectId);
+        if (fresh.ok && fresh.gitStatus) {
+          setGitStatus(fresh.gitStatus);
+        }
+      }
+    });
+  }
+
+  function handleRefresh() {
+    setRefreshError("");
+    startRefreshTransition(async () => {
+      const res = await refreshGitStatusAction(projectId);
+      if (res.ok && res.gitStatus) {
+        setGitStatus(res.gitStatus);
+        // If upstream is now set, clear any stale push errors
+        if (res.gitStatus.upstreamBranch) {
+          setPushError("");
+          setPushAuthError(false);
+          setPushOutput("");
+        }
+      } else {
+        setRefreshError(res.error || "Could not read git status.");
+      }
     });
   }
 
@@ -386,7 +429,11 @@ export function GithubLocalGitPanel({
       >
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2.5">
-            <StepBadge step={2} active={activeStep === 2} done={step2Done && !remotIsBlocked} />
+            <StepBadge
+              step={2}
+              active={activeStep === 2}
+              done={step2Done && !remotIsBlocked}
+            />
             <div className="flex-1 min-w-0">
               <CardTitle className="text-sm">Connect GitHub Repository</CardTitle>
               <CardDescription className="text-xs mt-0.5">
@@ -398,7 +445,6 @@ export function GithubLocalGitPanel({
           </div>
         </CardHeader>
         <CardContent className="pt-0 space-y-3">
-          {/* ── Connected view (not editing) ── */}
           {connected && !step2Editing ? (
             <div className="space-y-3">
               {/* Blocked URL warning */}
@@ -412,7 +458,7 @@ export function GithubLocalGitPanel({
                 </div>
               )}
 
-              {/* Current connection info */}
+              {/* Connection info */}
               <div className="rounded-md border bg-muted/20 px-3 py-2.5 text-xs space-y-1">
                 <div className="flex gap-2">
                   <span className="text-muted-foreground w-16 shrink-0">Remote</span>
@@ -424,7 +470,28 @@ export function GithubLocalGitPanel({
                   <span className="text-muted-foreground w-16 shrink-0">Branch</span>
                   <code className="font-mono text-foreground">{currentBranch}</code>
                 </div>
+                {gitStatus.upstreamBranch && (
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground w-16 shrink-0">Upstream</span>
+                    <code className="font-mono text-foreground">
+                      {gitStatus.upstreamBranch}
+                    </code>
+                  </div>
+                )}
               </div>
+
+              {/* Open on GitHub link */}
+              {githubBrowserUrl && !remotIsBlocked && (
+                <a
+                  href={githubBrowserUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open on GitHub
+                </a>
+              )}
 
               {/* Change / Disconnect buttons */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -462,7 +529,7 @@ export function GithubLocalGitPanel({
               )}
             </div>
           ) : (
-            /* ── Connect / Change form ── */
+            /* Connect / Change form */
             <form onSubmit={handleConnect} className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="repo-url" className="text-xs">
@@ -524,7 +591,6 @@ export function GithubLocalGitPanel({
                     : "Connect Existing GitHub Repo"}
                 </Button>
 
-                {/* Cancel — only shown when we have an existing connection */}
                 {connected && (
                   <Button
                     type="button"
@@ -566,7 +632,6 @@ export function GithubLocalGitPanel({
             </form>
           )}
 
-          {/* Show output from a completed connect/change even in view mode */}
           {connected && !step2Editing && connectOutput && (
             <TerminalOutput output={connectOutput} />
           )}
@@ -584,39 +649,73 @@ export function GithubLocalGitPanel({
         }
       >
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2.5">
-            <StepBadge step={3} active={activeStep === 3} done={step3Done} />
-            <div className="flex-1 min-w-0">
-              <CardTitle className="text-sm">Push Initial Commit</CardTitle>
-              <CardDescription className="text-xs mt-0.5">
-                Pushes the local commit to GitHub using{" "}
-                <code className="font-mono text-xs">
-                  git push -u origin &lt;branch&gt;
-                </code>
-                .
-              </CardDescription>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <StepBadge step={3} active={activeStep === 3} done={step3Done} />
+              <div className="flex-1 min-w-0">
+                <CardTitle className="text-sm">Push Initial Commit</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  {step3Done
+                    ? "Repository pushed successfully."
+                    : <>
+                        Pushes the local commit to GitHub using{" "}
+                        <code className="font-mono text-xs">
+                          git push -u origin &lt;branch&gt;
+                        </code>
+                        .
+                      </>}
+                </CardDescription>
+              </div>
             </div>
+
+            {/* Refresh status button — always available when connected */}
+            {step2Done && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleRefresh}
+                disabled={refreshPending}
+                className="gap-1.5 text-muted-foreground hover:text-foreground shrink-0"
+                title="Re-read git status from disk — detects pushes done outside the panel"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${refreshPending ? "animate-spin" : ""}`}
+                />
+                {refreshPending ? "Refreshing…" : "Refresh status"}
+              </Button>
+            )}
           </div>
         </CardHeader>
+
         <CardContent className="pt-0 space-y-3">
           {step3Done ? (
-            <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              <span>
-                Pushed to GitHub successfully.{" "}
+            /* ── Success state ── */
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {gitStatus.upstreamBranch && !pushed
+                    ? `Repository already pushed — upstream is ${gitStatus.upstreamBranch}.`
+                    : "Repository pushed successfully."}
+                </span>
+              </div>
+
+              {githubBrowserUrl && (
                 <a
-                  href={currentRemoteUrl.replace(/\.git$/, "") || "#"}
+                  href={githubBrowserUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="underline underline-offset-2 hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline underline-offset-2"
                 >
-                  View on GitHub
+                  <Github className="h-3.5 w-3.5" />
+                  Open GitHub Repository
+                  <ExternalLink className="h-3 w-3" />
                 </a>
-              </span>
+              )}
             </div>
           ) : (
             <>
-              {/* Blocked-URL error overrides the normal warning */}
+              {/* Blocked-URL error overrides normal warning */}
               {step2Done && remotIsBlocked ? (
                 <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 p-3 text-xs flex gap-2">
                   <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
@@ -627,8 +726,8 @@ export function GithubLocalGitPanel({
                   </p>
                 </div>
               ) : (
-                /* Normal pre-push warning */
                 step2Done && (
+                  /* Pre-push warning + confirmation */
                   <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3 space-y-2.5">
                     <div className="flex gap-2">
                       <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
@@ -684,8 +783,12 @@ export function GithubLocalGitPanel({
                 <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 p-3 text-xs flex gap-2">
                   <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
                   <div className="text-red-800 dark:text-red-200">
-                    <p className="font-medium mb-0.5">Authentication failed</p>
-                    <p>Git could not authenticate with GitHub. Make sure:</p>
+                    <p className="font-medium mb-1">Authentication failed</p>
+                    <p>
+                      If you already pushed manually from the VPS, click{" "}
+                      <strong>Refresh status</strong> above to update this view.
+                    </p>
+                    <p className="mt-1">Otherwise, make sure:</p>
                     <ul className="list-disc list-inside mt-1 space-y-0.5">
                       <li>
                         Your SSH key is added to the server and to your GitHub
@@ -707,6 +810,13 @@ export function GithubLocalGitPanel({
                   {pushError}
                 </p>
               )}
+
+              {refreshError && (
+                <p className="text-xs text-muted-foreground flex items-start gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  Refresh: {refreshError}
+                </p>
+              )}
             </>
           )}
 
@@ -717,11 +827,10 @@ export function GithubLocalGitPanel({
             <div className="flex items-start gap-2 rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground">
               <Terminal className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <p>
-                The push runs on the server using the system git credential
-                store. If you are pushing via HTTPS, ensure a PAT is saved in
-                the server&apos;s git config or credential helper. For SSH, the
-                server&apos;s private key must be authorised on your GitHub
-                account.
+                The push runs on the server using the system git credential store.
+                If you pushed manually from the VPS, use{" "}
+                <strong>Refresh status</strong> to update this view without pushing
+                again.
               </p>
             </div>
           )}
@@ -733,7 +842,7 @@ export function GithubLocalGitPanel({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Github className="h-3.5 w-3.5 shrink-0" />
           <span>
-            Your project is now on GitHub. Set up the{" "}
+            Set up the{" "}
             <a
               href="/integrations/github"
               className="underline underline-offset-2 hover:text-foreground"
@@ -759,7 +868,7 @@ export function GithubLocalGitPanel({
         >
           Import an existing repo
         </a>{" "}
-        from the Integrations page to link it directly (skips manual git setup).
+        from the Integrations page to link it directly.
       </p>
 
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
