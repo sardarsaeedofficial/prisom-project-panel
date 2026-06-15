@@ -33,6 +33,7 @@ export default async function ProjectSettingsPage({ params }: Props) {
     visibility: project.visibility,
     language: project.language ?? "",
     framework: project.framework ?? "",
+    liveUrl: project.liveUrl ?? "",
     installCommand: project.installCommand ?? "",
     buildCommand: project.buildCommand ?? "",
     startCommand: project.startCommand ?? "",

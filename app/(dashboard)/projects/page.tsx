@@ -10,7 +10,24 @@ import { getProjects, toProjectViewModel } from "@/lib/data/projects";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Projects" };
 
-export default async function ProjectsPage() {
+type Props = { searchParams: Promise<{ status?: string }> };
+
+const STATUS_MAP: Record<string, string> = {
+  active: "ACTIVE",
+  building: "BUILDING",
+  error: "ERROR",
+};
+
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "active", label: "Active" },
+  { key: "building", label: "Building" },
+  { key: "error", label: "Error" },
+];
+
+export default async function ProjectsPage({ searchParams }: Props) {
+  const { status: statusParam } = await searchParams;
+
   let allProjects: Awaited<ReturnType<typeof getProjects>> = [];
   let dbError: string | null = null;
 
@@ -20,7 +37,11 @@ export default async function ProjectsPage() {
     dbError = "Could not connect to the database.";
   }
 
-  const activeProjects = allProjects.filter((p) => p.status !== "ARCHIVED");
+  const nonArchivedProjects = allProjects.filter((p) => p.status !== "ARCHIVED");
+  const prismaStatus = statusParam ? STATUS_MAP[statusParam] : undefined;
+  const activeProjects = prismaStatus
+    ? nonArchivedProjects.filter((p) => p.status === prismaStatus)
+    : nonArchivedProjects;
   const archivedProjects = allProjects.filter((p) => p.status === "ARCHIVED");
 
   return (
@@ -41,16 +62,22 @@ export default async function ProjectsPage() {
       {/* Filter bar */}
       <div className="flex items-center gap-3 mb-6">
         <div className="flex gap-1.5">
-          {["All", "Active", "Building", "Error"].map((filter) => (
-            <Button
-              key={filter}
-              variant={filter === "All" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-7 text-xs"
-            >
-              {filter}
-            </Button>
-          ))}
+          {FILTERS.map(({ key, label }) => {
+            const isActive = key === "all" ? !statusParam : statusParam === key;
+            return (
+              <Button
+                key={key}
+                variant={isActive ? "secondary" : "ghost"}
+                size="sm"
+                className="h-7 text-xs"
+                asChild
+              >
+                <Link href={key === "all" ? "/projects" : `/projects?status=${key}`}>
+                  {label}
+                </Link>
+              </Button>
+            );
+          })}
         </div>
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           <Search className="h-3.5 w-3.5" />

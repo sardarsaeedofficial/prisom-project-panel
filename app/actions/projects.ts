@@ -11,6 +11,7 @@ import {
   createProject,
   updateProject,
   archiveProject,
+  deleteProject,
   markProjectOpened,
 } from "@/lib/data/projects";
 
@@ -65,6 +66,7 @@ const updateSchema = z.object({
   visibility: z.nativeEnum(Visibility),
   language: z.string().max(50).optional().or(z.literal("")),
   framework: z.string().max(50).optional().or(z.literal("")),
+  liveUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
   installCommand: z.string().max(200).optional().or(z.literal("")),
   buildCommand: z.string().max(200).optional().or(z.literal("")),
   startCommand: z.string().max(200).optional().or(z.literal("")),
@@ -214,6 +216,7 @@ export async function updateProjectAction(
       visibility: d.visibility,
       language: d.language || null,
       framework: d.framework || null,
+      liveUrl: d.liveUrl || null,
       installCommand: d.installCommand || null,
       buildCommand: d.buildCommand || null,
       startCommand: d.startCommand || null,
@@ -233,6 +236,12 @@ export async function updateProjectAction(
   revalidatePath("/projects");
 
   return { success: true };
+}
+
+export async function deleteProjectAction(projectId: string): Promise<void> {
+  await deleteProject(projectId);
+  revalidatePath("/projects");
+  redirect("/projects");
 }
 
 export async function archiveProjectAction(projectId: string): Promise<void> {

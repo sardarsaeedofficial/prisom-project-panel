@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { updateProjectAction, archiveProjectAction } from "@/app/actions/projects";
+import { updateProjectAction, archiveProjectAction, deleteProjectAction } from "@/app/actions/projects";
 import { slugify } from "@/lib/utils";
 
 export type ProjectFormValues = {
@@ -33,6 +33,7 @@ export type ProjectFormValues = {
   visibility: string;
   language: string;
   framework: string;
+  liveUrl: string;
   installCommand: string;
   buildCommand: string;
   startCommand: string;
@@ -49,6 +50,7 @@ type Props = {
 export function ProjectSettingsForm({ projectId, initialValues }: Props) {
   const [isPending, startTransition] = useTransition();
   const [isArchiving, startArchiveTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [success, setSuccess] = useState(false);
@@ -91,6 +93,18 @@ export function ProjectSettingsForm({ projectId, initialValues }: Props) {
     if (!confirm(`Archive "${initialValues.name}"? You can restore it later.`)) return;
     startArchiveTransition(async () => {
       await archiveProjectAction(projectId);
+    });
+  };
+
+  const handleDelete = () => {
+    if (
+      !confirm(
+        `Permanently delete "${initialValues.name}"?\n\nThis will remove the project and all its data from the database. This cannot be undone.`
+      )
+    )
+      return;
+    startDeleteTransition(async () => {
+      await deleteProjectAction(projectId);
     });
   };
 
@@ -217,6 +231,25 @@ export function ProjectSettingsForm({ projectId, initialValues }: Props) {
               )}
             </div>
 
+            <div className="space-y-1.5">
+              <Label htmlFor="liveUrl">Live URL</Label>
+              <Input
+                id="liveUrl"
+                name="liveUrl"
+                type="url"
+                defaultValue={initialValues.liveUrl}
+                placeholder="https://your-project.com"
+                aria-invalid={!!fieldErrors.liveUrl}
+              />
+              {fieldErrors.liveUrl ? (
+                <p className="text-xs text-destructive">{fieldErrors.liveUrl[0]}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Public URL shown on project overview and Published page.
+                </p>
+              )}
+            </div>
+
             {/* Build commands */}
             <div className="border-t pt-4 space-y-3">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Build &amp; Deploy</p>
@@ -310,8 +343,17 @@ export function ProjectSettingsForm({ projectId, initialValues }: Props) {
                 Permanently delete this project and all its data.
               </p>
             </div>
-            <Button variant="destructive" size="sm" disabled>
-              <Trash2 className="h-4 w-4 mr-1.5" />
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-1.5" />
+              )}
               Delete
             </Button>
           </div>

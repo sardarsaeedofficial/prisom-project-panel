@@ -5,7 +5,7 @@ import {
   ExternalLink,
   Github,
   Star,
-  Plus,
+  Trash2,
   Eye,
   Database,
 } from "lucide-react";
@@ -16,6 +16,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { db } from "@/lib/db";
 import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { formatDate } from "@/lib/utils";
+import { AddPortfolioItemForm } from "@/components/portfolio/add-portfolio-item-form";
+import { deletePortfolioItemAction } from "@/app/actions/portfolio";
 
 export const metadata: Metadata = { title: "Portfolio" };
 export const dynamic = "force-dynamic";
@@ -77,19 +79,22 @@ export default async function PortfolioPage() {
         </div>
       )}
 
+      {/* Add item form */}
+      {!dbError && (
+        <div className="mb-6 max-w-2xl">
+          <AddPortfolioItemForm />
+        </div>
+      )}
+
       {!dbError && items.length === 0 && (
-        <div className="text-center py-20">
+        <div className="text-center py-16">
           <div className="h-12 w-12 rounded-full bg-muted mx-auto flex items-center justify-center mb-4">
             <BookOpen className="h-6 w-6 text-muted-foreground" />
           </div>
           <h3 className="font-semibold mb-1">No portfolio items yet</h3>
           <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
-            Portfolio items are managed directly in the database for now. A UI
-            for adding items is coming soon.
+            Use the form above to add your first portfolio item.
           </p>
-          <Button asChild variant="outline">
-            <Link href="/projects">Browse Projects</Link>
-          </Button>
         </div>
       )}
 
@@ -159,16 +164,27 @@ export default async function PortfolioPage() {
                       <span className="text-xs text-muted-foreground ml-auto">
                         Published {formatDate(item.publishedAt)}
                       </span>
+
+                      {/* Delete */}
+                      <form action={deletePortfolioItemAction.bind(null, item.id)}>
+                        <button
+                          type="submit"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
+                          title="Delete portfolio item"
+                          onClick={(e) => {
+                            if (!confirm(`Delete "${item.title}"?`)) e.preventDefault();
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </form>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
           ))}
-
-          <p className="text-xs text-muted-foreground text-center pt-2">
-            Portfolio item management UI coming soon. Items can be added directly via the database.
-          </p>
         </div>
       )}
     </DashboardShell>
