@@ -21,8 +21,11 @@ import {
   initLocalRepo,
   addRemoteOrigin,
   pushToRemote,
+  removeRemoteOrigin,
   isValidGitHubUrl,
   isValidBranchName,
+  isBlockedRepoUrl,
+  BLOCKED_REPO_SLUG,
 } from "@/lib/projects/storage-git";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -55,6 +58,12 @@ async function verifyProjectOwnership(projectId: string) {
   return project;
 }
 
+// ── Shared blocklist message ──────────────────────────────────────────────────
+
+const BLOCKED_REPO_MESSAGE =
+  "You cannot connect an uploaded project to the Project Panel repository. " +
+  "Create or choose a separate GitHub repo for this project.";
+
 // ── Action: initLocalGitRepoAction ────────────────────────────────────────────
 
 /**
@@ -74,7 +83,6 @@ export async function initLocalGitRepoAction(
 
   const result = await initLocalRepo(project.slug);
 
-  // Log to DB regardless of outcome
   await db.projectLog.create({
     data: {
       projectId,
@@ -97,13 +105,15 @@ export async function initLocalGitRepoAction(
 // ── Action: connectGitHubRepoAction ──────────────────────────────────────────
 
 /**
- * Step 2 — Connect an existing GitHub repo to the local git repo.
+ * Step 2 — Connect (or change) the GitHub repo linked to the local git repo.
  *
  * Validates the URL and branch, then:
+ *   - Blocks if the URL is the Project Panel repo itself
  *   - Runs `git remote add origin <url>` (or set-url if one already exists)
  *   - Upserts a GitHubRepository row (placeholder githubRepoId = Date.now())
  *
  * Does NOT push. Does NOT pull.
+ * Safe to call again to change an existing remote — just re-runs set-url + upsert.
  */
 export async function connectGitHubRepoAction(
   projectId: string,
@@ -116,27 +126,15 @@ export async function connectGitHubRepoAction(
     return {
       ok: false,
       output: "",
-      error: "Invalid GitHub repository URL. Use https://github.com/owner/repo or git@github.com:owner/repo",
+      error:
+        "Invalid GitHub repository URL. Use https://github.com/owner/repo or git@github.com:owner/repo",
     };
   }
 
-  // ── Blocklist: prevent connecting to the Project Panel repo itself ─────────
-  // Normalise the URL to a canonical "owner/repo" slug for comparison so
-  // both HTTPS and SSH forms are caught, with or without a trailing .git.
-  const urlSlug = repoUrl
-    .toLowerCase()
-    .replace(/^https:\/\/github\.com\//, "")
-    .replace(/^git@github\.com:/, "")
-    .replace(/\.git$/, "");
+  // ── Blocklist ─────────────────────────────────────────────────────────────
 
-  if (urlSlug === "sardarsaeedofficial/prisom-project-panel") {
-    return {
-      ok: false,
-      output: "",
-      error:
-        "You cannot connect an uploaded project to the Project Panel repository. " +
-        "Create or choose a separate GitHub repo for this project.",
-    };
+  if (isBlockedRepoUrl(repoUrl)) {
+    return { ok: false, output: "", error: BLOCKED_REPO_MESSAGE };
   }
 
   const cleanBranch = branch.trim();
@@ -144,7 +142,8 @@ export async function connectGitHubRepoAction(
     return {
       ok: false,
       output: "",
-      error: "Invalid branch name. Use only letters, numbers, hyphens, underscores, dots, or slashes.",
+      error:
+        "Invalid branch name. Use only letters, numbers, hyphens, underscores, dots, or slashes.",
     };
   }
 
@@ -182,9 +181,8 @@ export async function connectGitHubRepoAction(
     return remoteResult;
   }
 
-  // ── Derive display fields from URL ────────────────────────────────────────
+  // ── Derive display fields from URL (case-preserved) ───────────────────────
 
-  // e.g. "https://github.com/owner/repo.git" → "owner/repo"
   const fullName = repoUrl
     .replace(/^https:\/\/github\.com\//, "")
     .replace(/^git@github\.com:/, "")
@@ -192,16 +190,11 @@ export async function connectGitHubRepoAction(
 
   const repoName = fullName.split("/").pop() ?? fullName;
 
-  // Normalise to HTTPS browser URL for display
   const htmlUrl = repoUrl.startsWith("git@")
     ? `https://github.com/${fullName}`
     : repoUrl.replace(/\.git$/, "");
 
   // ── Upsert GitHubRepository row ───────────────────────────────────────────
-  // githubRepoId is the GitHub API numeric ID — we don't have it yet, so we
-  // use the same Date.now() placeholder pattern as createProject().
-  // The real ID will be captured the next time a webhook fires or the user
-  // triggers a sync via the GitHub App.
 
   try {
     await db.gitHubRepository.upsert({
@@ -238,8 +231,6 @@ export async function connectGitHubRepoAction(
     return { ok: false, output: remoteResult.output, error: `Database error: ${msg}` };
   }
 
-  // ── Log success ───────────────────────────────────────────────────────────
-
   await db.projectLog.create({
     data: {
       projectId,
@@ -255,12 +246,63 @@ export async function connectGitHubRepoAction(
   return remoteResult;
 }
 
+// ── Action: disconnectGitHubRepoAction ───────────────────────────────────────
+
+/**
+ * Removes the git remote origin from the storage directory and deletes the
+ * GitHubRepository DB row.  Idempotent — safe to call even if no remote exists.
+ */
+export async function disconnectGitHubRepoAction(
+  projectId: string
+): Promise<GitActionResult> {
+  const project = await verifyProjectOwnership(projectId);
+  if (!project) {
+    return { ok: false, output: "", error: "Project not found or access denied." };
+  }
+
+  // Remove git remote (idempotent)
+  const removeResult = await removeRemoteOrigin(project.slug);
+  // Continue even if the git remove failed (the repo dir may not exist yet)
+
+  // Delete DB row
+  try {
+    await db.gitHubRepository.deleteMany({ where: { projectId } });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "DB error";
+    await db.projectLog.create({
+      data: {
+        projectId,
+        level: LogLevel.ERROR,
+        source: LogSource.GITHUB,
+        message: `Failed to delete GitHub repository record: ${msg}`,
+        metadata: { output: removeResult.output } as object,
+      },
+    });
+    return { ok: false, output: removeResult.output, error: `Database error: ${msg}` };
+  }
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level: LogLevel.INFO,
+      source: LogSource.GITHUB,
+      message: "GitHub repository disconnected",
+      metadata: { output: removeResult.output } as object,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/github`);
+
+  return { ok: true, output: removeResult.output, error: "" };
+}
+
 // ── Action: pushToGitHubAction ────────────────────────────────────────────────
 
 /**
  * Step 3 — Push the local commits to GitHub.
  *
  * Runs `git push -u origin <branch>`.
+ * Blocks if the current remote is the blocked Project Panel repo.
  * Returns sanitised stdout/stderr and an `isAuthError` flag for targeted UI messaging.
  */
 export async function pushToGitHubAction(
@@ -268,10 +310,14 @@ export async function pushToGitHubAction(
 ): Promise<GitActionResult> {
   const project = await verifyProjectOwnership(projectId);
   if (!project) {
-    return { ok: false, output: "", error: "Project not found or access denied.", isAuthError: false };
+    return {
+      ok: false,
+      output: "",
+      error: "Project not found or access denied.",
+      isAuthError: false,
+    };
   }
 
-  // Need both a local repo and a connected GitHub repo
   if (!project.githubRepository) {
     return {
       ok: false,
@@ -281,7 +327,6 @@ export async function pushToGitHubAction(
     };
   }
 
-  // Resolve current branch from git status
   const gitStatus = await getLocalGitStatus(project.slug);
   if (!gitStatus.initialized) {
     return {
@@ -300,18 +345,33 @@ export async function pushToGitHubAction(
     };
   }
 
-  // Use the branch from git status; fall back to the stored default branch
+  // ── Blocklist check on the actual configured remote ───────────────────────
+
+  const remoteUrl = gitStatus.remoteUrl ?? "";
+  if (remoteUrl && isBlockedRepoUrl(remoteUrl)) {
+    return {
+      ok: false,
+      output: "",
+      error:
+        `The configured remote (${BLOCKED_REPO_SLUG}) is the Project Panel repository. ` +
+        "Disconnect it and connect a separate repository before pushing.",
+      isAuthError: false,
+    };
+  }
+
+  // Resolve branch: prefer git status, fall back to stored default
   const branch =
     gitStatus.branch && gitStatus.branch !== "HEAD"
       ? gitStatus.branch
-      : (await db.gitHubRepository.findUnique({
-          where: { projectId },
-          select: { defaultBranch: true },
-        }))?.defaultBranch ?? "main";
+      : (
+          await db.gitHubRepository.findUnique({
+            where: { projectId },
+            select: { defaultBranch: true },
+          })
+        )?.defaultBranch ?? "main";
 
   const pushResult = await pushToRemote(project.slug, branch);
 
-  // Log outcome
   await db.projectLog.create({
     data: {
       projectId,

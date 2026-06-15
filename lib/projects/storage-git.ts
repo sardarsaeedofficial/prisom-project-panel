@@ -56,6 +56,30 @@ const GITIGNORE_CONTENT = [
   "",
 ].join("\n");
 
+// ── Blocklist ─────────────────────────────────────────────────────────────────
+
+/** The canonical "owner/repo" slug for the Project Panel itself — never a valid push target. */
+export const BLOCKED_REPO_SLUG = "sardarsaeedofficial/prisom-project-panel";
+
+/**
+ * Normalises any GitHub remote URL to a lowercase "owner/repo" slug.
+ * Handles HTTPS and SSH forms, with or without a trailing .git.
+ * Used for blocklist comparison only — preserves no case for display.
+ */
+export function normalizeGitHubRepoSlug(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/^git@github\.com:/, "")
+    .replace(/\.git$/, "");
+}
+
+/** Returns true if the URL resolves to a blocked repository. */
+export function isBlockedRepoUrl(url: string): boolean {
+  return normalizeGitHubRepoSlug(url) === BLOCKED_REPO_SLUG;
+}
+
 // ── Path safety ───────────────────────────────────────────────────────────────
 
 /**
@@ -425,4 +449,40 @@ export async function pushToRemote(slug: string, branch: string): Promise<PushRe
 
   lines.push("✓ push complete");
   return { ok: true, output: lines.join("\n"), error: "", isAuthError: false };
+}
+
+// ── Remove remote ─────────────────────────────────────────────────────────────
+
+export interface RemoveRemoteResult {
+  ok: boolean;
+  output: string;
+  error: string;
+}
+
+/**
+ * Removes the `origin` remote from the project's local git repository.
+ * Idempotent — succeeds silently if no origin is configured.
+ */
+export async function removeRemoteOrigin(slug: string): Promise<RemoveRemoteResult> {
+  let cwd: string;
+  try {
+    cwd = resolveStoragePath(slug);
+  } catch (e) {
+    return { ok: false, output: "", error: (e as Error).message };
+  }
+
+  // If no remote exists there is nothing to do — treat as success
+  const getUrl = await runGit("remote", ["get-url", "origin"], cwd);
+  if (!getUrl.ok) {
+    return { ok: true, output: "No remote origin configured — nothing to remove.", error: "" };
+  }
+
+  const lines: string[] = ["▶ git remote remove origin"];
+  const remove = await runGit("remote", ["remove", "origin"], cwd);
+  if (remove.output) lines.push(remove.output);
+  if (!remove.ok) {
+    return { ok: false, output: lines.join("\n"), error: remove.error };
+  }
+  lines.push("✓ done");
+  return { ok: true, output: lines.join("\n"), error: "" };
 }

@@ -122,7 +122,8 @@ export default async function ProjectGithubPage({ params }: Props) {
   const latestLog = project.logs[0] ?? null;
 
   // ── Storage file detection (for uploaded / blank projects) ─────────────────
-  // Only bother checking when there's no GitHub repo connected yet.
+  // Always check — even when a GitHubRepository row exists — because a locally
+  // connected project (no installationId) still uses the local git panel.
   let hasStorageFiles = false;
   let localGitStatus = {
     initialized: false,
@@ -132,7 +133,7 @@ export default async function ProjectGithubPage({ params }: Props) {
     remoteUrl: null as string | null,
   };
 
-  if (!repo && project.slug) {
+  if (project.slug) {
     const storageDir = path.join(process.cwd(), "storage", "projects", project.slug);
     try {
       const entries = await fs.readdir(storageDir);
@@ -146,6 +147,19 @@ export default async function ProjectGithubPage({ params }: Props) {
     }
   }
 
+  // Show the local git panel when:
+  //  - the project has files in storage/projects/<slug>/  AND
+  //  - either no GitHub repo exists, or it was connected locally (no installationId)
+  //    i.e. NOT a full GitHub App–synced repo
+  const showLocalPanel = hasStorageFiles && (!repo || !repo.installationId);
+
+  // If a locally-connected repo row exists, pass it to the panel so it can
+  // pre-populate the connected state and show Change / Disconnect buttons.
+  const localPanelRepo =
+    showLocalPanel && repo
+      ? { htmlUrl: repo.htmlUrl, defaultBranch: repo.defaultBranch }
+      : null;
+
   const githubConfigured = isGitHubAppConfigured();
 
   return (
@@ -157,7 +171,16 @@ export default async function ProjectGithubPage({ params }: Props) {
           description="Manage your repository connection and view commit history."
         />
 
-        {repo ? (
+        {showLocalPanel ? (
+          /* ── Local git workflow panel for uploaded / blank projects ── */
+          <GithubLocalGitPanel
+            projectId={projectId}
+            projectSlug={project.slug}
+            initialGitStatus={localGitStatus}
+            isGitHubConfigured={githubConfigured}
+            initialRepo={localPanelRepo}
+          />
+        ) : repo ? (
           <div className="space-y-6 max-w-2xl">
             {/* ── Repository info + sync health ── */}
             <Card>
@@ -423,16 +446,8 @@ export default async function ProjectGithubPage({ params }: Props) {
               </CardContent>
             </Card>
           </div>
-        ) : hasStorageFiles ? (
-          /* ── Local git workflow for uploaded / blank projects ── */
-          <GithubLocalGitPanel
-            projectId={projectId}
-            projectSlug={project.slug}
-            initialGitStatus={localGitStatus}
-            isGitHubConfigured={githubConfigured}
-          />
         ) : (
-          /* ── Generic "no repo connected" card for GitHub-imported projects ── */
+          /* ── Generic "no repo connected" card (GitHub App projects with no repo) ── */
           <Card className="max-w-md">
             <CardContent className="flex flex-col items-center text-center p-8 gap-4">
               <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
