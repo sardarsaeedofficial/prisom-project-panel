@@ -122,6 +122,7 @@ export function GithubLocalGitPanel({
   const [pushError, setPushError] = useState("");
   const [pushAuthError, setPushAuthError] = useState(false);
   const [pushPending, startPushTransition] = useTransition();
+  const [pushConfirmed, setPushConfirmed] = useState(false);
 
   // ── Derived state ────────────────────────────────────────────────────────────
 
@@ -154,12 +155,30 @@ export function GithubLocalGitPanel({
     e.preventDefault();
     setConnectOutput("");
     setConnectError("");
+
+    // Client-side guard: block the Project Panel repo before hitting the server
+    const urlSlug = repoUrl
+      .trim()
+      .toLowerCase()
+      .replace(/^https:\/\/github\.com\//, "")
+      .replace(/^git@github\.com:/, "")
+      .replace(/\.git$/, "");
+
+    if (urlSlug === "sardarsaeedofficial/prisom-project-panel") {
+      setConnectError(
+        "You cannot connect an uploaded project to the Project Panel repository. " +
+          "Create or choose a separate GitHub repo for this project."
+      );
+      return;
+    }
+
     startConnectTransition(async () => {
       const res = await connectGitHubRepoAction(projectId, repoUrl.trim(), branch.trim());
       setConnectOutput(res.output);
       setConnectError(res.error);
       if (res.ok) {
         setConnected(true);
+        setPushConfirmed(false); // reset checkbox if reconnecting to a different repo
         setGitStatus((prev) => ({ ...prev, hasRemote: true, remoteUrl: repoUrl.trim() }));
       }
     });
@@ -407,10 +426,42 @@ export function GithubLocalGitPanel({
             </div>
           ) : (
             <>
+              {/* ── Pre-push warning + confirmation ── */}
+              {step2Done && (
+                <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3 space-y-2.5">
+                  <div className="flex gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      This will push the uploaded project root to{" "}
+                      <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded break-all">
+                        {gitStatus.remoteUrl ?? repoUrl}
+                      </code>{" "}
+                      branch{" "}
+                      <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-1 rounded">
+                        {gitStatus.branch ?? branch}
+                      </code>
+                      . It will not create a subfolder.
+                    </p>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={pushConfirmed}
+                      onChange={(e) => setPushConfirmed(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-amber-400 accent-amber-600"
+                    />
+                    <span className="text-xs text-amber-800 dark:text-amber-200">
+                      I understand — push project files to this repository
+                    </span>
+                  </label>
+                </div>
+              )}
+
               <Button
                 size="sm"
                 onClick={handlePush}
-                disabled={!step1Done || !step2Done || pushPending}
+                disabled={!step1Done || !step2Done || pushPending || !pushConfirmed}
                 className="gap-1.5"
               >
                 {pushPending ? (
@@ -422,9 +473,9 @@ export function GithubLocalGitPanel({
               </Button>
 
               {pushAuthError && (
-                <div className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs flex gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                  <div className="text-amber-800 dark:text-amber-200">
+                <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 p-3 text-xs flex gap-2">
+                  <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                  <div className="text-red-800 dark:text-red-200">
                     <p className="font-medium mb-0.5">Authentication failed</p>
                     <p>
                       Git could not authenticate with GitHub. Make sure:

@@ -120,6 +120,25 @@ export async function connectGitHubRepoAction(
     };
   }
 
+  // ── Blocklist: prevent connecting to the Project Panel repo itself ─────────
+  // Normalise the URL to a canonical "owner/repo" slug for comparison so
+  // both HTTPS and SSH forms are caught, with or without a trailing .git.
+  const urlSlug = repoUrl
+    .toLowerCase()
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/^git@github\.com:/, "")
+    .replace(/\.git$/, "");
+
+  if (urlSlug === "sardarsaeedofficial/prisom-project-panel") {
+    return {
+      ok: false,
+      output: "",
+      error:
+        "You cannot connect an uploaded project to the Project Panel repository. " +
+        "Create or choose a separate GitHub repo for this project.",
+    };
+  }
+
   const cleanBranch = branch.trim();
   if (!cleanBranch || !isValidBranchName(cleanBranch)) {
     return {
