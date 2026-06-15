@@ -80,6 +80,38 @@ export function isBlockedRepoUrl(url: string): boolean {
   return normalizeGitHubRepoSlug(url) === BLOCKED_REPO_SLUG;
 }
 
+/**
+ * Derives a stable INT4-safe placeholder ID from a GitHub repo URL.
+ *
+ * Uses FNV-1a 32-bit hashing on the normalised "owner/repo" slug, optionally
+ * salted with a second string (e.g. the project's CUID) to avoid collisions
+ * when two different projects connect to the same remote.
+ *
+ * Returns an integer in [1, 2_000_000_000] — well within Postgres INT4 bounds
+ * (max 2,147,483,647). Safe to use as a placeholder githubRepoId until the
+ * real GitHub API numeric ID is available via a sync or webhook delivery.
+ *
+ * @param repoUrl  Any GitHub remote URL (HTTPS or SSH, with or without .git)
+ * @param salt     Optional second input, e.g. the projectId, for uniqueness
+ */
+export function stableGitHubRepoPlaceholderId(
+  repoUrl: string,
+  salt = ""
+): number {
+  const input = normalizeGitHubRepoSlug(repoUrl) + (salt ? `|${salt}` : "");
+
+  // FNV-1a 32-bit hash — fast, deterministic, well-distributed
+  let hash = 2166136261; // FNV-1a 32-bit offset basis
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    // Math.imul gives true 32-bit multiplication; >>> 0 keeps unsigned 32-bit
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+
+  // Map [0, 2^32) → [1, 2_000_000_000] to stay safely inside INT4
+  return (hash % 2_000_000_000) + 1;
+}
+
 // ── Path safety ───────────────────────────────────────────────────────────────
 
 /**

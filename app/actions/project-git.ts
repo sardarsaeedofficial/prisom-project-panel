@@ -25,6 +25,7 @@ import {
   isValidGitHubUrl,
   isValidBranchName,
   isBlockedRepoUrl,
+  stableGitHubRepoPlaceholderId,
   BLOCKED_REPO_SLUG,
 } from "@/lib/projects/storage-git";
 
@@ -110,7 +111,7 @@ export async function initLocalGitRepoAction(
  * Validates the URL and branch, then:
  *   - Blocks if the URL is the Project Panel repo itself
  *   - Runs `git remote add origin <url>` (or set-url if one already exists)
- *   - Upserts a GitHubRepository row (placeholder githubRepoId = Date.now())
+ *   - Upserts a GitHubRepository row (placeholder githubRepoId = FNV-1a hash, INT4-safe)
  *
  * Does NOT push. Does NOT pull.
  * Safe to call again to change an existing remote — just re-runs set-url + upsert.
@@ -196,12 +197,17 @@ export async function connectGitHubRepoAction(
 
   // ── Upsert GitHubRepository row ───────────────────────────────────────────
 
+  // Stable INT4-safe placeholder — salted with projectId to avoid githubRepoId
+  // unique-constraint collisions when two projects connect to the same remote.
+  // Never uses Date.now() (overflows INT4 since ~year 2001).
+  const placeholderId = stableGitHubRepoPlaceholderId(repoUrl, projectId);
+
   try {
     await db.gitHubRepository.upsert({
       where: { projectId },
       create: {
         projectId,
-        githubRepoId: Date.now(),
+        githubRepoId: placeholderId,
         fullName,
         name: repoName,
         htmlUrl,
@@ -210,6 +216,8 @@ export async function connectGitHubRepoAction(
         defaultBranch: cleanBranch,
       },
       update: {
+        // githubRepoId intentionally NOT updated — preserves the original
+        // placeholder (or real ID if a sync/webhook has already set it)
         fullName,
         name: repoName,
         htmlUrl,
@@ -228,7 +236,15 @@ export async function connectGitHubRepoAction(
         message: `Failed to save GitHub repository record: ${msg}`,
       },
     });
-    return { ok: false, output: remoteResult.output, error: `Database error: ${msg}` };
+    // The git remote was already updated (set-url is idempotent), so retrying
+    // the Connect step is safe — addRemoteOrigin will re-run set-url and the
+    // DB write will be attempted again with the same deterministic placeholder.
+    return {
+      ok: false,
+      output: remoteResult.output,
+      error:
+        "Git remote was updated, but database save failed. Please retry — the remote is already set.",
+    };
   }
 
   await db.projectLog.create({
