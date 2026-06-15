@@ -33,6 +33,9 @@ import { updateDeploymentStatusAction } from "@/app/actions/workspace-modules";
 import { getDeploymentConfig } from "@/lib/projects/deployment-config";
 import { db } from "@/lib/db";
 import { DeploymentStatus } from "@prisma/client";
+import { DeploymentSetupForm } from "@/components/projects/deployment-setup-form";
+import { ProjectDeployPanel } from "@/components/projects/project-deploy-panel";
+import { getPm2AppStatus } from "@/lib/projects/project-deploy-runner";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -118,13 +121,20 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, environments] = await Promise.all([
+  const [deployments, environments, dbDeployConfig] = await Promise.all([
     getProjectDeployments(projectId),
     getProjectEnvironments(projectId),
+    db.projectDeploymentConfig.findUnique({ where: { projectId } }),
   ]);
 
+  // Static VPS config (LocalShop only) — must not be touched
   const deployConfig = getDeploymentConfig(project.slug);
   const hasDeployConfig = !!deployConfig;
+
+  // PM2 status for the project's runtime (only fetched if a DB config exists)
+  const initialPm2Status = dbDeployConfig
+    ? await getPm2AppStatus(dbDeployConfig.pm2Name).catch(() => null)
+    : null;
 
   const latest = deployments[0] ?? null;
   const successDeploy = deployments.find(
@@ -138,14 +148,14 @@ export default async function ProjectPublishingPage({ params }: Props) {
         <PageHeader
           title="Publishing"
           description={
-            hasDeployConfig
+            hasDeployConfig || dbDeployConfig
               ? "Live deployment controls and history for this project."
-              : "Create deployment records and track history."
+              : "Configure deployment to run your project on the VPS."
           }
         />
 
         <div className="space-y-6 max-w-3xl">
-          {/* ── Real deploy controls (projects with VPS config) ── */}
+          {/* ── LocalShop: static VPS config (unchanged path) ── */}
           {hasDeployConfig && deployConfig && (
             <DeployPanel
               projectId={projectId}
@@ -155,11 +165,21 @@ export default async function ProjectPublishingPage({ params }: Props) {
             />
           )}
 
-          {/* ── Manual deployment record form (no deploy config, or supplemental) ── */}
-          {!hasDeployConfig && (
-            <CreateDeploymentForm
+          {/* ── Uploaded / blank / GitHub projects: PM2-based deployment ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <ProjectDeployPanel
               projectId={projectId}
-              environments={environments}
+              config={dbDeployConfig}
+              latestDeployment={deployments[0] ?? null}
+              initialPm2Status={initialPm2Status}
+            />
+          )}
+
+          {/* ── No config yet: show setup form ── */}
+          {!hasDeployConfig && !dbDeployConfig && (
+            <DeploymentSetupForm
+              projectId={projectId}
+              projectSlug={project.slug}
             />
           )}
 
@@ -254,9 +274,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <div>
                   <p className="text-sm font-medium">No deployments yet</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {hasDeployConfig
+                    {hasDeployConfig || dbDeployConfig
                       ? "Deploy from the controls above to create the first record."
-                      : "Create a deployment record above."}
+                      : "Configure deployment above to get started."}
                   </p>
                 </div>
               </CardContent>
@@ -267,7 +287,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <CardTitle className="text-sm">
                   Deployment History ({deployments.length})
                 </CardTitle>
-                {!hasDeployConfig && (
+                {!hasDeployConfig && !dbDeployConfig && (
                   <CardDescription>
                     Metadata records — no live pipeline connected for this project.
                   </CardDescription>

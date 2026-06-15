@@ -335,6 +335,9 @@ model Project {
   // Portfolio
   portfolioItem PortfolioItem?
 
+  // PM2-based deployment (uploaded/blank/GitHub projects)
+  deploymentConfig ProjectDeploymentConfig?
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -865,4 +868,28 @@ model GitHubWebhookDelivery {
 
   @@index([event, receivedAt])
   @@index([repositoryFullName, receivedAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT DEPLOYMENT CONFIG
+// PM2-based runtime config for uploaded / blank / GitHub projects.
+// One row per project. Port and pm2Name are unique across the table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectDeploymentConfig {
+  id              String   @id @default(cuid())
+  projectId       String   @unique
+  installCommand  String?
+  buildCommand    String?
+  startCommand    String
+  rootDirectory   String   @default(".")
+  outputDirectory String?
+  port            Int      @unique
+  pm2Name         String   @unique
+  healthPath      String   @default("/")
+  nodeEnv         String   @default("production")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
