@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { promises as fs } from "fs";
+import path from "path";
 import {
   Github,
   GitBranch,
@@ -23,9 +25,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { SyncButton } from "@/components/github/sync-button";
 import { RepairInstallationIdButton } from "@/components/github/repair-installation-id-button";
+import { GithubLocalGitPanel } from "@/components/projects/github-local-git-panel";
 import { db } from "@/lib/db";
 import { getProjectGitHubData } from "@/lib/data/github";
 import { unlinkGitHubRepositoryAction } from "@/app/actions/github";
+import { isGitHubAppConfigured } from "@/lib/github/config";
+import { getLocalGitStatus } from "@/lib/projects/storage-git";
 import type { GitSyncStatus, LogLevel } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +120,33 @@ export default async function ProjectGithubPage({ params }: Props) {
   const repo = project.githubRepository;
   const latestSyncRun = project.syncRuns[0] ?? null;
   const latestLog = project.logs[0] ?? null;
+
+  // ── Storage file detection (for uploaded / blank projects) ─────────────────
+  // Only bother checking when there's no GitHub repo connected yet.
+  let hasStorageFiles = false;
+  let localGitStatus = {
+    initialized: false,
+    branch: null as string | null,
+    commitSha: null as string | null,
+    hasRemote: false,
+    remoteUrl: null as string | null,
+  };
+
+  if (!repo && project.slug) {
+    const storageDir = path.join(process.cwd(), "storage", "projects", project.slug);
+    try {
+      const entries = await fs.readdir(storageDir);
+      hasStorageFiles = entries.length > 0;
+    } catch {
+      hasStorageFiles = false;
+    }
+
+    if (hasStorageFiles) {
+      localGitStatus = await getLocalGitStatus(project.slug);
+    }
+  }
+
+  const githubConfigured = isGitHubAppConfigured();
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -391,7 +423,16 @@ export default async function ProjectGithubPage({ params }: Props) {
               </CardContent>
             </Card>
           </div>
+        ) : hasStorageFiles ? (
+          /* ── Local git workflow for uploaded / blank projects ── */
+          <GithubLocalGitPanel
+            projectId={projectId}
+            projectSlug={project.slug}
+            initialGitStatus={localGitStatus}
+            isGitHubConfigured={githubConfigured}
+          />
         ) : (
+          /* ── Generic "no repo connected" card for GitHub-imported projects ── */
           <Card className="max-w-md">
             <CardContent className="flex flex-col items-center text-center p-8 gap-4">
               <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
