@@ -338,6 +338,12 @@ model Project {
   // PM2-based deployment (uploaded/blank/GitHub projects)
   deploymentConfig ProjectDeploymentConfig?
 
+  // Per-project encrypted environment variables
+  envVars          ProjectEnvVar[]
+
+  // Database migration records
+  dbMigrations     DbMigration[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -881,19 +887,59 @@ model GitHubWebhookDelivery {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model ProjectDeploymentConfig {
-  id              String   @id @default(cuid())
-  projectId       String   @unique
-  installCommand  String?
-  buildCommand    String?
-  startCommand    String
-  rootDirectory   String   @default(".")
-  outputDirectory String?
-  port            Int      @unique
-  pm2Name         String   @unique
-  healthPath      String   @default("/")
-  nodeEnv         String   @default("production")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(cuid())
+  projectId        String   @unique
+  installCommand   String?
+  buildCommand     String?
+  startCommand     String
+  rootDirectory    String   @default(".")
+  outputDirectory  String?
+  port             Int      @unique
+  pm2Name          String   @unique
+  healthPath       String   @default("/")
+  nodeEnv          String   @default("production")
+  // Route / serving mode
+  routeMode        String   @default("fullstack_node") // fullstack_node | static_plus_api | static_only | api_only
+  staticOutputDir  String?                              // relative path to built static files (e.g. "dist", "out", ".next/static")
+  apiPrefix        String   @default("/api")            // API prefix for static_plus_api mode
+  publicStaticPath String?                              // absolute path after static files are published to /var/www
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT ENV VARS  (AES-256-GCM encrypted, per-project)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectEnvVar {
+  id        String   @id @default(cuid())
+  name      String                       // e.g. "DATABASE_URL"
+  value     String                       // AES-256-GCM: iv:tag:ciphertext (hex)
+  isSecret  Boolean  @default(true)      // If false, value may be shown in UI
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, name])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATABASE MIGRATION  (pg_dump → pg_restore records)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DbMigration {
+  id          String    @id @default(cuid())
+  status      String    @default("PENDING") // PENDING | RUNNING | SUCCESS | FAILED
+  dumpPath    String?                        // absolute path to the dump file
+  logs        String?                        // masked output from pg_dump / pg_restore
+  wipedTarget Boolean   @default(false)      // whether DROP SCHEMA was run first
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

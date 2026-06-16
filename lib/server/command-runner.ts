@@ -22,20 +22,33 @@ const SECRET_PATTERNS: RegExp[] = [
   /SESSION_SECRET\s*=\s*\S+/gi,
   /NEXTAUTH_SECRET\s*=\s*\S+/gi,
   /ENCRYPTION_KEY\s*=\s*\S+/gi,
+  /ENV_ENCRYPTION_KEY\s*=\s*\S+/gi,
   /STRIPE_SECRET_KEY\s*=\s*\S+/gi,
   /STRIPE_WEBHOOK_SECRET\s*=\s*\S+/gi,
+  /STRIPE_PUBLISHABLE_KEY\s*=\s*\S+/gi,
+  /VITE_STRIPE_PUBLISHABLE_KEY\s*=\s*\S+/gi,
+  /CLOUDINARY_URL\s*=\s*\S+/gi,
+  /CLOUDINARY_API_SECRET\s*=\s*\S+/gi,
+  /CLOUDINARY_API_KEY\s*=\s*\S+/gi,
+  /SMTP_PASS\s*=\s*\S+/gi,
+  /SMTP_PASSWORD\s*=\s*\S+/gi,
   /R2_SECRET_ACCESS_KEY\s*=\s*\S+/gi,
   /FIREBASE_SERVICE_ACCOUNT\s*=\s*\S+/gi,
   /GITHUB_APP_PRIVATE_KEY\s*=\s*\S+/gi,
   /GITHUB_CLIENT_SECRET\s*=\s*\S+/gi,
   /GITHUB_WEBHOOK_SECRET\s*=\s*\S+/gi,
   /PROJECT_PANEL_ADMIN_PASSWORD\s*=\s*\S+/gi,
+  // Any key ending in _SECRET, _KEY, _TOKEN, _PASSWORD, _PASS
+  /\b\w+(?:_SECRET|_KEY|_TOKEN|_PASSWORD|_PASS)\s*=\s*\S+/gi,
   // Neon connection passwords (npg_ prefix)
   /npg_[A-Za-z0-9]+/g,
-  // Full PostgreSQL/MySQL/Redis connection URLs
-  /(?:postgresql|postgres|mysql|redis):\/\/[^\s"']+/gi,
+  // Full PostgreSQL/MySQL/Redis connection URLs (inline credentials)
+  /(?:postgresql|postgres|mysql|redis):\/\/[^\s"'`]+/gi,
   // Generic bearer tokens / API keys in Authorization header style
   /Bearer\s+[A-Za-z0-9._~+\-=/]{20,}/gi,
+  // Stripe keys (sk_live_, sk_test_, pk_live_, pk_test_, whsec_)
+  /(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{20,}/g,
+  /whsec_[A-Za-z0-9]{20,}/g,
 ];
 
 export function sanitizeOutput(text: string): string {

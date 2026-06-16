@@ -12,6 +12,8 @@ import {
   ScrollText,
   Settings,
   Bot,
+  KeyRound,
+  PackageOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +32,8 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     { label: "Preview", href: `${base}/preview`, icon: Eye },
     { label: "Publishing", href: `${base}/publishing`, icon: Rocket },
     { label: "Domains", href: `${base}/domains`, icon: Globe },
+    { label: "Env Vars", href: `${base}/env`, icon: KeyRound },
+    { label: "Import", href: `${base}/import`, icon: PackageOpen },
     { label: "Database", href: `${base}/database`, icon: Database },
     { label: "Logs", href: `${base}/logs`, icon: ScrollText },
     { label: "Settings", href: `${base}/settings`, icon: Settings },

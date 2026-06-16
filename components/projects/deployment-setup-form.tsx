@@ -41,6 +41,31 @@ import { FULL_PATH_PNPM } from "@/lib/projects/deploy-constants";
 
 // ── Preset templates ───────────────────────────────────────────────────────
 
+type RouteMode = "fullstack_node" | "static_plus_api" | "static_only" | "api_only";
+
+const ROUTE_MODES: { value: RouteMode; label: string; description: string }[] = [
+  {
+    value: "fullstack_node",
+    label: "Fullstack Node",
+    description: "All traffic proxied to Node backend (default)",
+  },
+  {
+    value: "static_plus_api",
+    label: "Static + API",
+    description: "Frontend served from /var/www, /api proxied to backend",
+  },
+  {
+    value: "static_only",
+    label: "Static Only",
+    description: "Pure static site, no Node backend",
+  },
+  {
+    value: "api_only",
+    label: "API Only",
+    description: "Backend API only, all traffic proxied",
+  },
+];
+
 type Preset = {
   id: string;
   label: string;
@@ -48,6 +73,8 @@ type Preset = {
   installCommand: string;
   buildCommand: string;
   startCommand: string;
+  routeMode?: RouteMode;
+  staticOutputDir?: string;
 };
 
 const PRESETS: Preset[] = [
@@ -58,6 +85,7 @@ const PRESETS: Preset[] = [
     installCommand: "npm install",
     buildCommand:   "npm run build",
     startCommand:   "npm start",
+    routeMode:      "fullstack_node",
   },
   {
     id: "nextjs-pnpm",
@@ -66,6 +94,7 @@ const PRESETS: Preset[] = [
     installCommand: `${FULL_PATH_PNPM} install`,
     buildCommand:   `${FULL_PATH_PNPM} run build`,
     startCommand:   `${FULL_PATH_PNPM} start`,
+    routeMode:      "fullstack_node",
   },
   {
     id: "node-npm",
@@ -74,6 +103,7 @@ const PRESETS: Preset[] = [
     installCommand: "npm install",
     buildCommand:   "",
     startCommand:   "npm start",
+    routeMode:      "fullstack_node",
   },
   {
     id: "node-pnpm",
@@ -82,6 +112,17 @@ const PRESETS: Preset[] = [
     installCommand: `${FULL_PATH_PNPM} install`,
     buildCommand:   "",
     startCommand:   `${FULL_PATH_PNPM} start`,
+    routeMode:      "fullstack_node",
+  },
+  {
+    id: "static-react",
+    label: "Static React/Vite",
+    description: "Build then serve from /dist — no backend",
+    installCommand: "npm install",
+    buildCommand:   "npm run build",
+    startCommand:   "npm run build",
+    routeMode:      "static_only",
+    staticOutputDir: "dist",
   },
   {
     id: "custom",
@@ -110,6 +151,8 @@ function detectPreset(
   return "custom";
 }
 
+const NEEDS_STATIC_DIR: RouteMode[] = ["static_plus_api", "static_only"];
+
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const INPUT_CLS =
@@ -123,14 +166,17 @@ const SELECT_CLS =
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type ExistingDeployConfig = {
-  installCommand: string | null;
-  buildCommand:   string | null;
-  startCommand:   string;
-  rootDirectory:  string;
-  healthPath:     string;
-  nodeEnv:        string;
-  port:           number;
-  pm2Name:        string;
+  installCommand:  string | null;
+  buildCommand:    string | null;
+  startCommand:    string;
+  rootDirectory:   string;
+  healthPath:      string;
+  nodeEnv:         string;
+  port:            number;
+  pm2Name:         string;
+  routeMode?:      string;
+  staticOutputDir?: string | null;
+  apiPrefix?:      string;
 };
 
 interface Props {
@@ -154,26 +200,32 @@ export function DeploymentSetupForm({
   const isEdit = !!existingConfig;
 
   // Derive initial field values
-  const initInstall = existingConfig?.installCommand ?? "npm install";
-  const initBuild   = existingConfig?.buildCommand   ?? "npm run build";
-  const initStart   = existingConfig?.startCommand   ?? "npm start";
-  const initRoot    = existingConfig?.rootDirectory  ?? ".";
-  const initHealth  = existingConfig?.healthPath     ?? "/";
-  const initEnv     = existingConfig?.nodeEnv        ?? "production";
+  const initInstall        = existingConfig?.installCommand  ?? "npm install";
+  const initBuild          = existingConfig?.buildCommand    ?? "npm run build";
+  const initStart          = existingConfig?.startCommand    ?? "npm start";
+  const initRoot           = existingConfig?.rootDirectory   ?? ".";
+  const initHealth         = existingConfig?.healthPath      ?? "/";
+  const initEnv            = existingConfig?.nodeEnv         ?? "production";
+  const initRouteMode      = (existingConfig?.routeMode      ?? "fullstack_node") as RouteMode;
+  const initStaticOutputDir = existingConfig?.staticOutputDir ?? "";
+  const initApiPrefix      = existingConfig?.apiPrefix       ?? "/api";
   const initPreset  = existingConfig
     ? detectPreset(existingConfig.installCommand, existingConfig.buildCommand, existingConfig.startCommand)
     : "nextjs-npm";
 
-  const [activePreset,    setActivePreset]    = useState(initPreset);
-  const [installCommand,  setInstallCommand]  = useState(initInstall);
-  const [buildCommand,    setBuildCommand]    = useState(initBuild);
-  const [startCommand,    setStartCommand]    = useState(initStart);
-  const [rootDirectory,   setRootDirectory]   = useState(initRoot);
-  const [healthPath,      setHealthPath]      = useState(initHealth);
-  const [nodeEnv,         setNodeEnv]         = useState(initEnv);
-  const [saving,          setSaving]          = useState(false);
-  const [error,           setError]           = useState("");
-  const [saved,           setSaved]           = useState(false);
+  const [activePreset,     setActivePreset]     = useState(initPreset);
+  const [installCommand,   setInstallCommand]   = useState(initInstall);
+  const [buildCommand,     setBuildCommand]     = useState(initBuild);
+  const [startCommand,     setStartCommand]     = useState(initStart);
+  const [rootDirectory,    setRootDirectory]    = useState(initRoot);
+  const [healthPath,       setHealthPath]       = useState(initHealth);
+  const [nodeEnv,          setNodeEnv]          = useState(initEnv);
+  const [routeMode,        setRouteMode]        = useState<RouteMode>(initRouteMode);
+  const [staticOutputDir,  setStaticOutputDir]  = useState(initStaticOutputDir);
+  const [apiPrefix,        setApiPrefix]        = useState(initApiPrefix);
+  const [saving,           setSaving]           = useState(false);
+  const [error,            setError]            = useState("");
+  const [saved,            setSaved]            = useState(false);
 
   function applyPreset(presetId: string) {
     setActivePreset(presetId);
@@ -182,6 +234,8 @@ export function DeploymentSetupForm({
     setInstallCommand(p.installCommand);
     setBuildCommand(p.buildCommand);
     setStartCommand(p.startCommand);
+    if (p.routeMode) setRouteMode(p.routeMode);
+    if (p.staticOutputDir !== undefined) setStaticOutputDir(p.staticOutputDir);
   }
 
   async function handleSave() {
@@ -195,6 +249,9 @@ export function DeploymentSetupForm({
         rootDirectory,
         healthPath,
         nodeEnv,
+        routeMode,
+        staticOutputDir: staticOutputDir || undefined,
+        apiPrefix,
       });
       if (!res.ok) {
         setError(res.error);
@@ -381,6 +438,67 @@ export function DeploymentSetupForm({
             <option value="development">development</option>
           </select>
         </div>
+
+        {/* ── Route Mode ── */}
+        <div className="grid gap-1.5">
+          <Label htmlFor="routeMode" className="text-sm">
+            Route Mode
+          </Label>
+          <select
+            id="routeMode"
+            className={SELECT_CLS}
+            value={routeMode}
+            onChange={(e) => setRouteMode(e.target.value as RouteMode)}
+          >
+            {ROUTE_MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label} — {m.description}</option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Controls how nginx routes requests to backend vs static files.
+          </p>
+        </div>
+
+        {/* ── Static Output Dir (only shown when relevant) ── */}
+        {NEEDS_STATIC_DIR.includes(routeMode) && (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="staticOutputDir" className="text-sm">
+                Static Output Directory
+              </Label>
+              <Input
+                id="staticOutputDir"
+                className={INPUT_CLS}
+                placeholder="dist"
+                value={staticOutputDir}
+                onChange={(e) => setStaticOutputDir(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Relative to project root, e.g.{" "}
+                <code className="font-mono">dist</code>,{" "}
+                <code className="font-mono">build</code>,{" "}
+                <code className="font-mono">.next/static</code>
+              </p>
+            </div>
+            {routeMode === "static_plus_api" && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="apiPrefix" className="text-sm">
+                  API Prefix
+                </Label>
+                <Input
+                  id="apiPrefix"
+                  className={INPUT_CLS}
+                  placeholder="/api"
+                  value={apiPrefix}
+                  onChange={(e) => setApiPrefix(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Requests matching this prefix are proxied to backend.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Auto-assigned info (create mode only) ── */}
         {!isEdit && (

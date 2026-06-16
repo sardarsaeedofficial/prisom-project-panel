@@ -28,6 +28,7 @@ import {
   type Pm2AppStatus,
 } from "@/lib/projects/project-deploy-runner";
 import { publishDomain, isValidDomain } from "@/lib/projects/nginx-manager";
+import { getDecryptedEnvVarsForDeploy } from "@/app/actions/project-envvars";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,9 @@ export type DeployActionResult = {
   ok: boolean;
   output: string;
   error: string;
-  deploymentId?: string;
+  deploymentId?:    string;
+  deploymentRef?:   string | null;
+  publicStaticPath?: string | null;
 };
 
 export type RuntimeStatusResult = {
@@ -66,12 +69,15 @@ export type LogsResult = {
 };
 
 export type SaveConfigInput = {
-  installCommand: string;
-  buildCommand: string;
-  startCommand: string;
-  rootDirectory: string;
-  healthPath: string;
-  nodeEnv: string;
+  installCommand:  string;
+  buildCommand:    string;
+  startCommand:    string;
+  rootDirectory:   string;
+  healthPath:      string;
+  nodeEnv:         string;
+  routeMode?:      string;
+  staticOutputDir?: string;
+  apiPrefix?:      string;
 };
 
 // ── Ownership guard ────────────────────────────────────────────────────────
@@ -146,6 +152,10 @@ export async function saveDeploymentConfigAction(
 
   const isUpdate = !!project.deploymentConfig;
 
+  const routeMode      = input.routeMode      ?? "fullstack_node";
+  const staticOutputDir = input.staticOutputDir?.trim() || null;
+  const apiPrefix      = input.apiPrefix?.trim() || "/api";
+
   try {
     await db.projectDeploymentConfig.upsert({
       where: { projectId },
@@ -159,7 +169,10 @@ export async function saveDeploymentConfigAction(
         port,
         pm2Name,
         healthPath,
-        nodeEnv: input.nodeEnv.trim() || "production",
+        nodeEnv:         input.nodeEnv.trim() || "production",
+        routeMode,
+        staticOutputDir,
+        apiPrefix,
       },
       update: {
         // port and pm2Name are intentionally NOT updated after first save
@@ -168,7 +181,10 @@ export async function saveDeploymentConfigAction(
         startCommand:    input.startCommand.trim(),
         rootDirectory:   input.rootDirectory.trim()  || ".",
         healthPath,
-        nodeEnv: input.nodeEnv.trim() || "production",
+        nodeEnv:         input.nodeEnv.trim() || "production",
+        routeMode,
+        staticOutputDir,
+        apiPrefix,
       },
     });
   } catch (e) {
@@ -246,17 +262,24 @@ export async function deployProjectAction(
     },
   });
 
+  // Fetch decrypted env vars — NEVER log or return these to the client
+  const envVars = await getDecryptedEnvVarsForDeploy(projectId);
+
   // Run the full pipeline (synchronous — may take several minutes)
   const result = await runProjectDeployment({
-    slug:           project.slug,
-    installCommand: config.installCommand,
-    buildCommand:   config.buildCommand,
-    startCommand:   config.startCommand,
-    rootDirectory:  config.rootDirectory,
-    port:           config.port,
-    pm2Name:        config.pm2Name,
-    healthPath:     config.healthPath,
-    nodeEnv:        config.nodeEnv,
+    slug:            project.slug,
+    installCommand:  config.installCommand,
+    buildCommand:    config.buildCommand,
+    startCommand:    config.startCommand,
+    rootDirectory:   config.rootDirectory,
+    port:            config.port,
+    pm2Name:         config.pm2Name,
+    healthPath:      config.healthPath,
+    nodeEnv:         config.nodeEnv,
+    envVars,
+    routeMode:       (config.routeMode as import("@/lib/projects/project-deploy-runner").RouteMode) ?? "fullstack_node",
+    staticOutputDir: config.staticOutputDir,
+    apiPrefix:       config.apiPrefix,
   });
 
   const internalUrl = `http://127.0.0.1:${config.port}`;
@@ -265,24 +288,36 @@ export async function deployProjectAction(
   // Build full metadata for traceability (stored in Deployment.metadata JSON)
   const deployMeta = {
     // Deployment tracing
-    deploymentRef:  result.deploymentRef  ?? null,
-    sourceRef:      result.sourceRef      ?? null,
-    sourceType:     result.sourceType     ?? null,
+    deploymentRef:    result.deploymentRef    ?? null,
+    sourceRef:        result.sourceRef        ?? null,
+    sourceType:       result.sourceType       ?? null,
     // Runtime info
-    releasePath:    result.releasePath    ?? null,
-    pm2Name:        config.pm2Name,
-    port:           config.port,
+    releasePath:      result.releasePath      ?? null,
+    publicStaticPath: result.publicStaticPath ?? null,
+    pm2Name:          config.pm2Name,
+    port:             config.port,
     internalUrl,
-    healthPath:     config.healthPath,
+    healthPath:       config.healthPath,
+    routeMode:        config.routeMode        ?? "fullstack_node",
     // Commands used
-    installCommand: config.installCommand ?? null,
-    buildCommand:   config.buildCommand   ?? null,
-    startCommand:   config.startCommand,
-    rootDirectory:  config.rootDirectory,
-    nodeEnv:        config.nodeEnv,
+    installCommand:   config.installCommand   ?? null,
+    buildCommand:     config.buildCommand     ?? null,
+    startCommand:     config.startCommand,
+    rootDirectory:    config.rootDirectory,
+    nodeEnv:          config.nodeEnv,
+    // Env var names injected (NOT values — never store those)
+    envVarNames:      Object.keys(envVars),
     // Build output (truncated)
-    output:         result.output.slice(0, 10_000),
+    output:           result.output.slice(0, 10_000),
   };
+
+  // Persist the publicStaticPath on the config for nginx to use
+  if (result.publicStaticPath && config.id) {
+    await db.projectDeploymentConfig.update({
+      where: { id: config.id },
+      data:  { publicStaticPath: result.publicStaticPath },
+    }).catch(() => {}); // non-fatal
+  }
 
   // Update deployment record with outcome.
   // url is intentionally left null — it's set by publishProjectDomainAction when
@@ -513,7 +548,11 @@ export async function publishProjectDomainAction(
   }
 
   // Publish via nginx (safe fs writes + execFile — no shell)
-  const nginxResult = await publishDomain(clean, config.port);
+  const nginxResult = await publishDomain(clean, config.port, {
+    routeMode:      (config.routeMode as import("@/lib/projects/nginx-manager").RouteMode) ?? "fullstack_node",
+    staticRoot:     config.publicStaticPath ?? undefined,
+    apiPrefix:      config.apiPrefix        ?? "/api",
+  });
 
   if (!nginxResult.ok) {
     // Record the error on the Domain row so the UI can surface it
