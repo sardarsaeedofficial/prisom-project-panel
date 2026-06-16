@@ -17,6 +17,7 @@
 
 import path from "path";
 import { promises as fs } from "fs";
+import crypto from "crypto";
 import { runCommand, sanitizeOutput } from "@/lib/server/command-runner";
 import { FULL_PATH_PNPM } from "@/lib/projects/deploy-constants";
 
@@ -109,6 +110,9 @@ export interface DeployRunnerResult {
   output: string;
   error: string;
   releasePath?: string;
+  deploymentRef?: string;
+  sourceRef?: string;
+  sourceType?: "git" | "upload";
   durationMs: number;
 }
 
@@ -504,6 +508,95 @@ export async function runHealthCheck(
   return false;
 }
 
+// ── Source fingerprinting ──────────────────────────────────────────────────
+
+/**
+ * Computes a deterministic SHA-256 fingerprint of the project source files.
+ * Uses the same exclusion rules as copySourceToRelease so the hash reflects
+ * exactly what will be deployed.
+ * Returns the first 10 hex characters of the combined hash.
+ */
+async function computeFilesHash(dir: string): Promise<string> {
+  const hash = crypto.createHash("sha256");
+
+  async function walk(currentDir: string): Promise<void> {
+    let entries: { name: string; isDirectory(): boolean; isFile(): boolean }[];
+    try {
+      entries = await fs.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    // Sort deterministically
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      const lname = entry.name.toLowerCase();
+      if (EXCLUDE_DIRS.has(lname)) continue;
+      if (ENV_FILE_RE.test(entry.name)) continue;
+      if (TSBUILDINFO_RE.test(entry.name)) continue;
+
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile()) {
+        // Include relative path in hash so renames are detected
+        hash.update(path.relative(dir, fullPath));
+        try {
+          const content = await fs.readFile(fullPath);
+          hash.update(content);
+        } catch {
+          // Skip unreadable files — don't abort the entire hash
+        }
+      }
+    }
+  }
+
+  await walk(dir);
+  return hash.digest("hex").slice(0, 10);
+}
+
+/**
+ * Returns a short source reference for the project:
+ *   - Git projects: first 7 chars of HEAD commit SHA
+ *   - Upload / blank projects: first 10 chars of SHA-256 of source files
+ *
+ * Never throws — falls back to file hash on any git error.
+ */
+async function computeSourceRef(
+  projectRoot: string
+): Promise<{ sourceRef: string; sourceType: "git" | "upload" }> {
+  // Try to read a git commit SHA (not user-supplied — internal, fixed command)
+  try {
+    const r = await runCommand("git", ["rev-parse", "HEAD"], {
+      cwd: projectRoot,
+      timeoutMs: 5_000,
+    });
+    if (r.exitCode === 0 && r.stdout.trim().length >= 7) {
+      return { sourceRef: r.stdout.trim().slice(0, 7), sourceType: "git" };
+    }
+  } catch {
+    // Not a git repo, or git not available — fall through
+  }
+
+  const sourceRef = await computeFilesHash(projectRoot);
+  return { sourceRef, sourceType: "upload" };
+}
+
+/**
+ * Generates a deployment reference string:
+ *   dep_<YYYYMMDDHHmmss>_<shortSourceRef>
+ *
+ * Example:  dep_20241201120034_a3f7b2c1e9
+ */
+function generateDeploymentRef(sourceRef: string): string {
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[^0-9]/g, "")
+    .slice(0, 14); // YYYYMMDDHHmmss
+  return `dep_${timestamp}_${sourceRef}`;
+}
+
 // ── Main deploy pipeline ───────────────────────────────────────────────────
 
 /**
@@ -523,26 +616,34 @@ export async function runProjectDeployment(
   const t0 = Date.now();
   const lines: string[] = [];
 
-  // e.g. "20241201120034"
-  const timestamp = new Date()
-    .toISOString()
-    .replace(/[^0-9]/g, "")
-    .slice(0, 14);
-  const releasePath = path.join(RELEASE_STORAGE, config.slug, timestamp);
+  // ── Pre-flight: verify source + compute deployment reference ─────────────
+  const projectRoot = path.resolve(PROJECT_STORAGE, config.slug);
+
+  // sourceRef and deploymentRef are computed before the release dir is created
+  // so they can be used as the directory name. On error we still have placeholders.
+  let sourceRef = "unknown";
+  let sourceType: "git" | "upload" = "upload";
+  let deploymentRef = `dep_${"0".repeat(14)}_unknown`;
 
   const log = (msg: string) => lines.push(msg);
   const out = () => sanitizeOutput(lines.join("\n")).slice(0, MAX_LOG_BYTES);
+
+  // Resolve release path only after we have the deploymentRef
+  let releasePath = "";
+
   const fail = (error: string): DeployRunnerResult => ({
     ok: false,
     output: out(),
     error,
-    releasePath,
+    releasePath: releasePath || undefined,
+    deploymentRef,
+    sourceRef,
+    sourceType,
     durationMs: Date.now() - t0,
   });
 
   try {
     // ── 0. Verify source exists ───────────────────────────────────────────
-    const projectRoot = path.resolve(PROJECT_STORAGE, config.slug);
     try {
       await fs.access(projectRoot);
     } catch {
@@ -552,13 +653,25 @@ export async function runProjectDeployment(
       );
     }
 
+    // ── 0a. Compute source fingerprint ────────────────────────────────────
+    log("▶ Computing source fingerprint…");
+    const computed = await computeSourceRef(projectRoot);
+    sourceRef = computed.sourceRef;
+    sourceType = computed.sourceType;
+    deploymentRef = generateDeploymentRef(sourceRef);
+    releasePath = path.join(RELEASE_STORAGE, config.slug, deploymentRef);
+    log(
+      `✓ ${sourceType === "git" ? "Git commit" : "Source hash"}: ${sourceRef}` +
+        `  →  ${deploymentRef}`
+    );
+
     // ── 1. Create release dir ─────────────────────────────────────────────
-    log(`▶ Creating release snapshot: storage/releases/${config.slug}/${timestamp}`);
+    log(`▶ Creating release snapshot: storage/releases/${config.slug}/${deploymentRef}`);
     await fs.mkdir(releasePath, { recursive: true });
     log("✓ Release directory created");
 
     // ── 2. Copy source ────────────────────────────────────────────────────
-    log(`▶ Copying source from storage/projects/${config.slug}/`);
+    log(`▶ Copying source from storage/projects/${config.slug}/…`);
     await copySourceToRelease(config.slug, releasePath, config.rootDirectory);
     log("✓ Source copied to release");
 
@@ -643,6 +756,9 @@ export async function runProjectDeployment(
       output: out(),
       error: "",
       releasePath,
+      deploymentRef,
+      sourceRef,
+      sourceType,
       durationMs: Date.now() - t0,
     };
   } catch (e) {

@@ -9,19 +9,23 @@ import {
   ShieldCheck,
   Trash2,
   Star,
+  Server,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AddDomainForm } from "@/components/workspace/add-domain-form";
 import { getProjectDomains, getProjectEnvironments } from "@/lib/data/workspace-modules";
 import { deleteDomainAction, updateDomainAction } from "@/app/actions/workspace-modules";
 import { db } from "@/lib/db";
 import { DomainStatus, SslStatus } from "@prisma/client";
+import { PublishDomainForm } from "@/components/projects/publish-domain-form";
 
 export const metadata: Metadata = { title: "Domains" };
 export const dynamic = "force-dynamic";
+
+const BASE_DOMAIN = "doorstepmanchester.uk";
 
 type Props = { params: Promise<{ projectId: string }> };
 
@@ -78,14 +82,23 @@ export default async function ProjectDomainsPage({ params }: Props) {
 
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, slug: true },
   });
   if (!project) notFound();
 
-  const [domains, environments] = await Promise.all([
+  const [domains, environments, dbDeployConfig] = await Promise.all([
     getProjectDomains(projectId),
     getProjectEnvironments(projectId),
+    db.projectDeploymentConfig.findUnique({ where: { projectId } }),
   ]);
+
+  const generatedDomain = `${project.slug}.${BASE_DOMAIN}`;
+
+  // The currently nginx-published domain for this project (if any)
+  const activeDomainRow = domains.find(
+    (d) => d.status === DomainStatus.ACTIVE && (d as { nginxConfigPath?: string | null }).nginxConfigPath
+  );
+  const activeDomain = activeDomainRow?.hostname ?? null;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -93,12 +106,46 @@ export default async function ProjectDomainsPage({ params }: Props) {
       <DashboardShell>
         <PageHeader
           title="Domains"
-          description="Manage custom domains attached to this project."
+          description="Publish your running app to a public URL through nginx."
         />
 
         <div className="space-y-6 max-w-2xl">
-          {/* Add form */}
-          <AddDomainForm projectId={projectId} environments={environments} />
+          {/* ── Nginx publish section (only if project has a deployment config) ── */}
+          {dbDeployConfig ? (
+            <PublishDomainForm
+              projectId={projectId}
+              generatedDomain={generatedDomain}
+              port={dbDeployConfig.port}
+              activeDomain={activeDomain}
+            />
+          ) : (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-base">Publish via Nginx</CardTitle>
+                </div>
+                <CardDescription>
+                  Deploy your project first (Publishing tab) before you can
+                  connect a domain.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Server className="h-3.5 w-3.5" />
+                  <span>No deployment config — go to the Publishing tab to set up your project.</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Legacy AddDomainForm (DNS/CNAME management) ── */}
+          <div className="border-t pt-4">
+            <p className="text-xs text-muted-foreground mb-3 font-medium">
+              Manual domain management (DNS/CNAME verification)
+            </p>
+            <AddDomainForm projectId={projectId} environments={environments} />
+          </div>
 
           {/* Domain list */}
           {domains.length === 0 ? (
@@ -152,7 +199,34 @@ export default async function ProjectDomainsPage({ params }: Props) {
                           <div className="flex items-center gap-4 mt-1.5 flex-wrap">
                             <DomainStatusBadge status={domain.status} />
                             <SslBadge status={domain.sslStatus} />
+                            {/* Nginx route status */}
+                            {(domain as { nginxConfigPath?: string | null }).nginxConfigPath && (
+                              <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                Nginx active
+                              </span>
+                            )}
                           </div>
+
+                          {/* Internal target for nginx-published domains */}
+                          {(domain as { nginxConfigPath?: string | null; targetPort?: number | null }).nginxConfigPath &&
+                            (domain as { targetPort?: number | null }).targetPort && (
+                            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                              <Server className="h-3 w-3" />
+                              Internal: 127.0.0.1:{(domain as { targetPort?: number | null }).targetPort}
+                            </p>
+                          )}
+
+                          {/* Nginx last error */}
+                          {domain.status === DomainStatus.FAILED &&
+                            (domain as { lastError?: string | null }).lastError && (
+                            <div className="mt-2 rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 px-2.5 py-2 text-xs">
+                              <p className="font-medium text-red-700 dark:text-red-400">Nginx error:</p>
+                              <pre className="mt-1 text-red-600 dark:text-red-400 whitespace-pre-wrap break-all">
+                                {(domain as { lastError?: string | null }).lastError}
+                              </pre>
+                            </div>
+                          )}
 
                           {/* DNS instructions */}
                           {domain.status === DomainStatus.PENDING && (

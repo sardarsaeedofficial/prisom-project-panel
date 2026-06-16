@@ -592,6 +592,10 @@ model Domain {
   provider          String?             // e.g. "cloudflare", "route53"
   cnameTarget       String?             // CNAME target for DNS setup
   verificationTxt   String?             // TXT record value
+  // Deployment routing fields
+  targetPort        Int?                // The PM2 app port this domain proxies to
+  nginxConfigPath   String?             // Absolute path to the written nginx .conf file
+  lastError         String?             // Last nginx publish error (if any)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 

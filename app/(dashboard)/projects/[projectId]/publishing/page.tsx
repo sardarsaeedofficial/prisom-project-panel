@@ -121,10 +121,15 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, environments, dbDeployConfig] = await Promise.all([
+  const [deployments, environments, dbDeployConfig, activeDomainRow] = await Promise.all([
     getProjectDeployments(projectId),
     getProjectEnvironments(projectId),
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
+    db.domain.findFirst({
+      where: { projectId, status: "ACTIVE", nginxConfigPath: { not: null } },
+      select: { hostname: true },
+      orderBy: { isPrimary: "desc" },
+    }),
   ]);
 
   // Static VPS config (LocalShop only) — must not be touched
@@ -169,9 +174,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
           {!hasDeployConfig && dbDeployConfig && (
             <ProjectDeployPanel
               projectId={projectId}
+              projectSlug={project.slug}
               config={dbDeployConfig}
               latestDeployment={deployments[0] ?? null}
               initialPm2Status={initialPm2Status}
+              activeDomain={activeDomainRow?.hostname ?? null}
             />
           )}
 

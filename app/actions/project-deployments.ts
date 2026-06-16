@@ -16,7 +16,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentWorkspaceId } from "@/lib/current-workspace";
-import { DeploymentStatus, DeploymentSource, LogLevel, LogSource } from "@prisma/client";
+import { DeploymentStatus, DeploymentSource, DomainStatus, LogLevel, LogSource } from "@prisma/client";
 import {
   assignNextPort,
   runProjectDeployment,
@@ -27,6 +27,7 @@ import {
   validateAndParseCommand,
   type Pm2AppStatus,
 } from "@/lib/projects/project-deploy-runner";
+import { publishDomain, isValidDomain } from "@/lib/projects/nginx-manager";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -258,32 +259,52 @@ export async function deployProjectAction(
     nodeEnv:        config.nodeEnv,
   });
 
-  const liveUrl = `http://${VPS_IP}:${config.port}`;
+  const internalUrl = `http://127.0.0.1:${config.port}`;
   const finalStatus = result.ok ? DeploymentStatus.SUCCESS : DeploymentStatus.FAILED;
 
-  // Update deployment record with outcome
+  // Build full metadata for traceability (stored in Deployment.metadata JSON)
+  const deployMeta = {
+    // Deployment tracing
+    deploymentRef:  result.deploymentRef  ?? null,
+    sourceRef:      result.sourceRef      ?? null,
+    sourceType:     result.sourceType     ?? null,
+    // Runtime info
+    releasePath:    result.releasePath    ?? null,
+    pm2Name:        config.pm2Name,
+    port:           config.port,
+    internalUrl,
+    healthPath:     config.healthPath,
+    // Commands used
+    installCommand: config.installCommand ?? null,
+    buildCommand:   config.buildCommand   ?? null,
+    startCommand:   config.startCommand,
+    rootDirectory:  config.rootDirectory,
+    nodeEnv:        config.nodeEnv,
+    // Build output (truncated)
+    output:         result.output.slice(0, 10_000),
+  };
+
+  // Update deployment record with outcome.
+  // url is intentionally left null — it's set by publishProjectDomainAction when
+  // a public domain is connected.  Internal port URLs are not "live" URLs.
   await db.deployment.update({
     where: { id: deployment.id },
     data: {
       status:       finalStatus,
       finishedAt:   new Date(),
       duration:     result.durationMs,
-      url:          result.ok ? liveUrl : null,
+      url:          null,
       errorMessage: result.ok ? null : result.error,
-      metadata: {
-        output:      result.output.slice(0, 10_000),
-        releasePath: result.releasePath ?? null,
-        port:        config.port,
-        pm2Name:     config.pm2Name,
-      } as object,
+      metadata:     deployMeta as object,
     },
   });
 
-  // Update project.liveUrl on success
+  // Update lastDeployedAt on success (do NOT set liveUrl to raw port — only
+  // set liveUrl when a domain is explicitly published via publishProjectDomainAction)
   if (result.ok) {
     await db.project.update({
       where: { id: projectId },
-      data: { liveUrl, lastDeployedAt: new Date() },
+      data: { lastDeployedAt: new Date() },
     });
   }
 
@@ -295,12 +316,14 @@ export async function deployProjectAction(
       level:   result.ok ? LogLevel.INFO : LogLevel.ERROR,
       source:  LogSource.DEPLOY,
       message: result.ok
-        ? `Deployment successful — live at ${liveUrl}`
+        ? `Deployment ${result.deploymentRef ?? "?"} successful — running internally on port ${config.port}`
         : `Deployment failed: ${result.error}`,
       metadata: {
-        port:        config.port,
-        pm2Name:     config.pm2Name,
-        durationMs:  result.durationMs,
+        deploymentRef: result.deploymentRef ?? null,
+        sourceRef:     result.sourceRef     ?? null,
+        port:          config.port,
+        pm2Name:       config.pm2Name,
+        durationMs:    result.durationMs,
       } as object,
     },
   });
@@ -448,4 +471,114 @@ export async function getProjectRuntimeLogsAction(
 
   const logs = await getPm2AppLogs(config.pm2Name, 200);
   return { ok: true, error: "", logs };
+}
+
+// ── Action: publishProjectDomainAction ────────────────────────────────────
+
+export type PublishDomainResult = {
+  ok:    boolean;
+  error: string;
+};
+
+/**
+ * Publishes a domain for a project by writing an nginx reverse-proxy config
+ * that routes `hostname` → `127.0.0.1:<port>` (port from ProjectDeploymentConfig).
+ *
+ * Steps:
+ *   1. Verify ownership + ensure deployment config exists
+ *   2. Validate hostname
+ *   3. Call publishDomain() → write config, symlink, nginx -t, reload
+ *   4. Upsert Domain record with ACTIVE status and nginx metadata
+ *   5. Update project.liveUrl to http://<hostname>
+ */
+export async function publishProjectDomainAction(
+  projectId: string,
+  hostname:  string
+): Promise<PublishDomainResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  const config = project.deploymentConfig;
+  if (!config) {
+    return {
+      ok: false,
+      error: "No deployment config found. Deploy the project first before publishing a domain.",
+    };
+  }
+
+  // Validate hostname
+  const clean = hostname.trim().toLowerCase();
+  if (!isValidDomain(clean)) {
+    return { ok: false, error: `Invalid domain name: "${clean}"` };
+  }
+
+  // Publish via nginx (safe fs writes + execFile — no shell)
+  const nginxResult = await publishDomain(clean, config.port);
+
+  if (!nginxResult.ok) {
+    // Record the error on the Domain row so the UI can surface it
+    await db.domain.upsert({
+      where: { hostname: clean },
+      update: {
+        status:    DomainStatus.FAILED,
+        lastError: nginxResult.error ?? "Unknown nginx error",
+        targetPort: config.port,
+        projectId,
+      },
+      create: {
+        hostname:   clean,
+        projectId,
+        status:     DomainStatus.FAILED,
+        lastError:  nginxResult.error ?? "Unknown nginx error",
+        targetPort: config.port,
+      },
+    });
+    return { ok: false, error: nginxResult.error ?? "Nginx publishing failed." };
+  }
+
+  // Upsert Domain record — mark as ACTIVE with nginx metadata
+  await db.domain.upsert({
+    where: { hostname: clean },
+    update: {
+      status:          DomainStatus.ACTIVE,
+      nginxConfigPath: nginxResult.configPath ?? null,
+      targetPort:      config.port,
+      lastError:       null,
+      isPrimary:       true,
+      projectId,
+    },
+    create: {
+      hostname:        clean,
+      projectId,
+      status:          DomainStatus.ACTIVE,
+      nginxConfigPath: nginxResult.configPath ?? null,
+      targetPort:      config.port,
+      isPrimary:       true,
+    },
+  });
+
+  // Update project.liveUrl to the published domain (HTTP for now — SSL is manual)
+  await db.project.update({
+    where: { id: projectId },
+    data:  { liveUrl: `http://${clean}` },
+  });
+
+  // Audit log
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: `Domain published: http://${clean} → 127.0.0.1:${config.port}`,
+      metadata: {
+        domain:     clean,
+        port:       config.port,
+        configPath: nginxResult.configPath ?? null,
+      } as object,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/domains`);
+  revalidatePath(`/projects/${projectId}/publishing`);
+  return { ok: true, error: "" };
 }

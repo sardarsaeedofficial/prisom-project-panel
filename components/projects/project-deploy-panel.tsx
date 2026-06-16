@@ -36,6 +36,10 @@ import {
   Pencil,
   X,
   WrenchIcon,
+  Globe,
+  Copy,
+  GitCommit,
+  Server,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,9 +91,34 @@ type DeployConfig = {
 
 interface Props {
   projectId:         string;
+  projectSlug:       string;
   config:            DeployConfig;
   latestDeployment:  DeploymentInfo | null;
   initialPm2Status:  Pm2AppStatus | null;
+  /** Hostname of the published domain, or null if no domain has been published yet. */
+  activeDomain:      string | null;
+}
+
+// ── Deployment metadata parsing ────────────────────────────────────────────
+
+type DeployMeta = {
+  deploymentRef?: string;
+  sourceRef?:     string;
+  sourceType?:    "git" | "upload";
+  releasePath?:   string;
+  internalUrl?:   string;
+};
+
+function parseDeployMeta(metadata: unknown): DeployMeta {
+  if (!metadata || typeof metadata !== "object") return {};
+  const m = metadata as Record<string, unknown>;
+  return {
+    deploymentRef: typeof m.deploymentRef === "string" ? m.deploymentRef : undefined,
+    sourceRef:     typeof m.sourceRef     === "string" ? m.sourceRef     : undefined,
+    sourceType:    m.sourceType === "git" || m.sourceType === "upload" ? m.sourceType : undefined,
+    releasePath:   typeof m.releasePath   === "string" ? m.releasePath   : undefined,
+    internalUrl:   typeof m.internalUrl   === "string" ? m.internalUrl   : undefined,
+  };
 }
 
 // ── PM2 status badge ───────────────────────────────────────────────────────
@@ -195,9 +224,11 @@ function shouldShowPnpmHint(
 
 export function ProjectDeployPanel({
   projectId,
+  projectSlug,
   config,
   latestDeployment: initialLatest,
   initialPm2Status,
+  activeDomain,
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -225,8 +256,8 @@ export function ProjectDeployPanel({
   const [actionError,   setActionError]   = useState("");
   const [actionOk,      setActionOk]      = useState("");
 
-  const previewUrl = `http://178.105.105.59:${config.port}`;
   const anyBusy    = isDeploying || isRestarting || isStopping;
+  const [copiedRef, setCopiedRef] = useState(false);
 
   // ── onSaved callback for the inline edit form ──────────────────────────
 
@@ -362,6 +393,7 @@ export function ProjectDeployPanel({
   );
 
   const showPnpmHint = shouldShowPnpmHint(latest, config);
+  const deployMeta   = parseDeployMeta(latest?.metadata);
 
   // Existing config shape for the edit form
   const existingForEdit: ExistingDeployConfig = {
@@ -404,17 +436,29 @@ export function ProjectDeployPanel({
             </div>
           </div>
 
-          {/* Preview link + meta */}
+          {/* Internal target + public domain status */}
           <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <a
-              href={previewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-sm text-primary hover:underline font-mono"
-            >
-              {previewUrl}
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+            <span className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
+              <Server className="h-3.5 w-3.5" />
+              127.0.0.1:{config.port}
+            </span>
+            {activeDomain ? (
+              <a
+                href={`http://${activeDomain}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                {activeDomain}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : pm2Status?.status === "online" ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                <Globe className="h-3.5 w-3.5" />
+                Running internally — publish a domain to go public
+              </span>
+            ) : null}
             {pm2Status?.memoryMb != null && (
               <span className="text-xs text-muted-foreground">{pm2Status.memoryMb} MB</span>
             )}
@@ -430,6 +474,33 @@ export function ProjectDeployPanel({
               </span>
             )}
           </div>
+
+          {/* Deployment reference strip */}
+          {deployMeta.deploymentRef && (
+            <div className="flex items-center gap-2 mt-1.5 text-xs font-mono text-muted-foreground">
+              <span className="text-muted-foreground/60">ref</span>
+              <code className="text-foreground/80">{deployMeta.deploymentRef}</code>
+              <button
+                type="button"
+                title="Copy deployment ref"
+                className="hover:text-foreground transition-colors"
+                onClick={() => {
+                  void navigator.clipboard.writeText(deployMeta.deploymentRef!);
+                  setCopiedRef(true);
+                  setTimeout(() => setCopiedRef(false), 2000);
+                }}
+              >
+                {copiedRef ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+              {deployMeta.sourceRef && (
+                <span className="text-muted-foreground/60 ml-1 flex items-center gap-1">
+                  <GitCommit className="h-3 w-3" />
+                  {deployMeta.sourceType === "git" ? "commit" : "hash"}:
+                  <code className="ml-0.5">{deployMeta.sourceRef}</code>
+                </span>
+              )}
+            </div>
+          )}
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -668,7 +739,7 @@ export function ProjectDeployPanel({
       {isEditing && (
         <DeploymentSetupForm
           projectId={projectId}
-          projectSlug={config.pm2Name.replace(/^project-/, "")}
+          projectSlug={projectSlug}
           existingConfig={existingForEdit}
           onSaved={handleEditSaved}
         />
