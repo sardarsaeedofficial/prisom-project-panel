@@ -35,7 +35,7 @@ const RESERVED_PORTS = new Set([3000, 3001, 3002, 3003]);
 
 const MAX_LOG_BYTES = 50_000;
 
-// Directories excluded from source copy (lower-case comparison)
+// Directories excluded from source copy (lower-case name comparison)
 const EXCLUDE_DIRS = new Set([
   ".git",
   "node_modules",
@@ -50,10 +50,18 @@ const EXCLUDE_DIRS = new Set([
   "coverage",
   "__pycache__",
   "storage",
+  // Build-tool cache directories
+  ".turbo",
+  ".cache",
 ]);
 
 // Files matching this pattern are excluded (env files with any suffix)
 const ENV_FILE_RE = /^\.env(\.|$)/i;
+
+// TypeScript incremental build cache files — MUST be excluded so tsc does not
+// use stale references to dist/ outputs that were intentionally not copied.
+// Keeping these causes TS6305 ("Output file has not been built from source file").
+const TSBUILDINFO_RE = /\.tsbuildinfo$/i;
 
 // Shell-injection character reject set
 const INJECT_CHARS_RE = /[;&|><`$\\]/;
@@ -220,7 +228,13 @@ export async function assignNextPort(): Promise<number> {
 
 /**
  * Copies the project source to a release snapshot directory, excluding
- * git artifacts, build outputs, node_modules, and env files.
+ * git artifacts, build outputs, node_modules, env files, and TS build cache.
+ *
+ * Files that are intentionally preserved as-is:
+ *   - pnpm-workspace.yaml  — copied verbatim; must never be overwritten by
+ *                            the runner (contains user-defined workspace config).
+ *   - package.json         — copied verbatim.
+ *   - tsconfig*.json       — copied verbatim (build cache files removed separately).
  */
 export async function copySourceToRelease(
   slug: string,
@@ -251,6 +265,7 @@ export async function copySourceToRelease(
     for (const e of entries) {
       if (EXCLUDE_DIRS.has(e.name.toLowerCase())) continue;
       if (ENV_FILE_RE.test(e.name)) continue;
+      if (TSBUILDINFO_RE.test(e.name)) continue; // skip stale TS build cache
 
       const srcPath = path.join(src, e.name);
       const dstPath = path.join(dst, e.name);
@@ -264,6 +279,39 @@ export async function copySourceToRelease(
   }
 
   await copy(sourceRoot, releasePath);
+}
+
+// ── Post-copy TypeScript cache cleanup ────────────────────────────────────
+
+/**
+ * Recursively walks `dir` and deletes every `*.tsbuildinfo` file found.
+ * This is a safety sweep run after `copySourceToRelease` in case any cache
+ * files slipped through (e.g. inside a subdirectory that was not excluded).
+ *
+ * Returns the number of files deleted.
+ * Uses only fs/path — no shell, no external commands.
+ */
+async function removeTsBuildInfoFiles(dir: string): Promise<number> {
+  let count = 0;
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const fullPath = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        count += await removeTsBuildInfoFiles(fullPath);
+      } else if (e.isFile() && TSBUILDINFO_RE.test(e.name)) {
+        try {
+          await fs.unlink(fullPath);
+          count++;
+        } catch {
+          // Non-fatal — best-effort cleanup
+        }
+      }
+    }
+  } catch {
+    // Directory may not exist or be unreadable — skip silently
+  }
+  return count;
 }
 
 // ── PM2 helpers ────────────────────────────────────────────────────────────
@@ -513,6 +561,18 @@ export async function runProjectDeployment(
     log(`▶ Copying source from storage/projects/${config.slug}/`);
     await copySourceToRelease(config.slug, releasePath, config.rootDirectory);
     log("✓ Source copied to release");
+
+    // ── 2a. Remove TypeScript build cache ─────────────────────────────────
+    // *.tsbuildinfo files are excluded during copy, but we run a safety sweep
+    // in case any survived (e.g. nested in a sub-package not in EXCLUDE_DIRS).
+    // Stale cache files cause TS6305 by making tsc believe referenced packages
+    // are already built even though their dist/ outputs were not copied.
+    log("▶ Removing TypeScript build cache");
+    const removedCount = await removeTsBuildInfoFiles(releasePath);
+    log(
+      `✓ TypeScript build cache removed` +
+        (removedCount > 0 ? ` (${removedCount} file${removedCount !== 1 ? "s" : ""} deleted)` : " (none found)")
+    );
 
     // ── 3. Install ────────────────────────────────────────────────────────
     if (config.installCommand) {
