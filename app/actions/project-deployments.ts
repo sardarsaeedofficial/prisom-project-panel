@@ -16,7 +16,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentWorkspaceId } from "@/lib/current-workspace";
-import { DeploymentStatus, DeploymentSource, DomainStatus, LogLevel, LogSource } from "@prisma/client";
+import { DeploymentStatus, DeploymentSource, DomainStatus, SslStatus, LogLevel, LogSource } from "@prisma/client";
 import {
   assignNextPort,
   runProjectDeployment,
@@ -27,7 +27,15 @@ import {
   validateAndParseCommand,
   type Pm2AppStatus,
 } from "@/lib/projects/project-deploy-runner";
-import { publishDomain, publishIpPreviewPath, isValidDomain } from "@/lib/projects/nginx-manager";
+import {
+  publishDomain,
+  publishIpPreviewPath,
+  isValidDomain,
+  verifyDnsARecord,
+  removeDomainNginxConfig,
+  issueSslCertificate,
+  type RouteMode,
+} from "@/lib/projects/nginx-manager";
 import { getDecryptedEnvVarsForDeploy } from "@/app/actions/project-envvars";
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -337,7 +345,7 @@ export async function deployProjectAction(
     } else {
       // Attempt automatic path-based IP preview setup
       const ipResult = await publishIpPreviewPath(project.slug, config.port, {
-        routeMode:   (config.routeMode as import("@/lib/projects/nginx-manager").RouteMode) ?? "fullstack_node",
+        routeMode:   (config.routeMode as RouteMode) ?? "fullstack_node",
         staticRoot:  result.publicStaticPath ?? undefined,
         apiPrefix:   config.apiPrefix ?? "/api",
         serverIp:    VPS_IP,
@@ -689,7 +697,7 @@ export async function publishProjectDomainAction(
 
   // Publish via nginx (safe fs writes + execFile — no shell)
   const nginxResult = await publishDomain(clean, config.port, {
-    routeMode:      (config.routeMode as import("@/lib/projects/nginx-manager").RouteMode) ?? "fullstack_node",
+    routeMode:      (config.routeMode as RouteMode) ?? "fullstack_node",
     staticRoot:     config.publicStaticPath ?? undefined,
     apiPrefix:      config.apiPrefix        ?? "/api",
   });
@@ -760,4 +768,313 @@ export async function publishProjectDomainAction(
   revalidatePath(`/projects/${projectId}/domains`);
   revalidatePath(`/projects/${projectId}/publishing`);
   return { ok: true, error: "" };
+}
+
+// ── Action: addCustomDomainAction ─────────────────────────────────────────
+
+export type AddDomainResult = {
+  ok:       boolean;
+  error:    string;
+  domainId?: string;
+};
+
+/**
+ * Adds a custom domain to a project in PENDING state.
+ * Does NOT write nginx config yet — the user must verify DNS first via
+ * checkDnsAndPublishDomainAction.
+ *
+ * For `*.doorstepmanchester.uk` subdomains (wildcard DNS already in place),
+ * callers should use the existing publishProjectDomainAction to skip DNS check.
+ */
+export async function addCustomDomainAction(
+  projectId: string,
+  hostname:  string
+): Promise<AddDomainResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  const config = project.deploymentConfig;
+  if (!config) {
+    return { ok: false, error: "No deployment config found. Deploy the project first." };
+  }
+
+  const clean = hostname.trim().toLowerCase();
+  if (!isValidDomain(clean)) {
+    return { ok: false, error: `Invalid domain name: "${clean}"` };
+  }
+
+  // Check for duplicates across all projects
+  const existing = await db.domain.findUnique({ where: { hostname: clean } });
+  if (existing && existing.projectId !== projectId) {
+    return { ok: false, error: `"${clean}" is already used by another project.` };
+  }
+  if (existing) {
+    return { ok: false, error: `"${clean}" is already connected to this project.` };
+  }
+
+  const domain = await db.domain.create({
+    data: {
+      hostname:   clean,
+      projectId,
+      status:     DomainStatus.PENDING,
+      targetPort: config.port,
+    },
+  });
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: `Custom domain added (pending DNS): ${clean}`,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/domains`);
+  return { ok: true, error: "", domainId: domain.id };
+}
+
+// ── Action: checkDnsAndPublishDomainAction ────────────────────────────────
+
+export type CheckDnsResult = {
+  ok:          boolean;
+  error:       string;
+  resolvedIp?: string;
+};
+
+/**
+ * Verifies the DNS A record for `hostname` resolves to the VPS IP,
+ * then writes an nginx config and marks the domain ACTIVE.
+ *
+ * Domain must already exist in PENDING state (created via addCustomDomainAction).
+ */
+export async function checkDnsAndPublishDomainAction(
+  projectId: string,
+  hostname:  string
+): Promise<CheckDnsResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  const config = project.deploymentConfig;
+  if (!config) {
+    return { ok: false, error: "No deployment config found." };
+  }
+
+  const clean = hostname.trim().toLowerCase();
+
+  const domain = await db.domain.findFirst({ where: { hostname: clean, projectId } });
+  if (!domain) {
+    return { ok: false, error: `Domain "${clean}" not found for this project.` };
+  }
+
+  // ── Step 1: Verify DNS ──────────────────────────────────────────────────
+
+  const dnsResult = await verifyDnsARecord(clean, VPS_IP);
+  if (!dnsResult.ok) {
+    await db.domain.update({
+      where: { id: domain.id },
+      data:  { status: DomainStatus.FAILED, lastError: dnsResult.error ?? "DNS verification failed" },
+    });
+    return {
+      ok:          false,
+      error:       dnsResult.error ?? "DNS verification failed",
+      resolvedIp:  dnsResult.resolvedIp,
+    };
+  }
+
+  // ── Step 2: Publish nginx config ───────────────────────────────────────
+
+  const nginxResult = await publishDomain(clean, config.port, {
+    routeMode:  (config.routeMode as RouteMode) ?? "fullstack_node",
+    staticRoot: config.publicStaticPath ?? undefined,
+    apiPrefix:  config.apiPrefix ?? "/api",
+  });
+
+  if (!nginxResult.ok) {
+    await db.domain.update({
+      where: { id: domain.id },
+      data:  { status: DomainStatus.FAILED, lastError: nginxResult.error ?? "nginx publish failed" },
+    });
+    return { ok: false, error: nginxResult.error ?? "nginx publish failed" };
+  }
+
+  // ── Step 3: Mark domain ACTIVE ─────────────────────────────────────────
+
+  await db.domain.update({
+    where: { id: domain.id },
+    data:  {
+      status:          DomainStatus.ACTIVE,
+      nginxConfigPath: nginxResult.configPath ?? null,
+      lastError:       null,
+    },
+  });
+
+  // Update project.liveUrl to HTTP (only if no HTTPS domain already set)
+  const httpsActive = await db.domain.findFirst({
+    where: { projectId, sslStatus: SslStatus.ACTIVE },
+  });
+  if (!httpsActive) {
+    await db.project.update({
+      where: { id: projectId },
+      data:  { liveUrl: `http://${clean}` },
+    });
+  }
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: `Domain DNS verified and published: http://${clean} → 127.0.0.1:${config.port}`,
+      metadata: {
+        domain:     clean,
+        port:       config.port,
+        resolvedIp: dnsResult.resolvedIp,
+        configPath: nginxResult.configPath ?? null,
+      } as object,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/domains`);
+  revalidatePath(`/projects/${projectId}/publishing`);
+  return { ok: true, error: "", resolvedIp: dnsResult.resolvedIp };
+}
+
+// ── Action: requestSslCertAction ──────────────────────────────────────────
+
+export type SslCertResult = {
+  ok:    boolean;
+  error: string;
+  logs?: string;
+};
+
+/**
+ * Issues an SSL certificate for `hostname` via certbot --nginx.
+ * Domain must have status=ACTIVE (nginx HTTP working) before calling this.
+ * On success, updates sslStatus=ACTIVE and sets project.liveUrl to https://
+ */
+export async function requestSslCertAction(
+  projectId: string,
+  hostname:  string
+): Promise<SslCertResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  const clean = hostname.trim().toLowerCase();
+
+  const domain = await db.domain.findFirst({ where: { hostname: clean, projectId } });
+  if (!domain) {
+    return { ok: false, error: `Domain "${clean}" not found for this project.` };
+  }
+  if (domain.status !== DomainStatus.ACTIVE) {
+    return {
+      ok:    false,
+      error: "Domain must have HTTP active before requesting SSL. Verify DNS and publish first.",
+    };
+  }
+
+  // Derive certbot email: CERTBOT_EMAIL env var, or admin@<root-domain>
+  const rootDomain = clean.split(".").slice(-2).join(".");
+  const certbotEmail = process.env.CERTBOT_EMAIL ?? `admin@${rootDomain}`;
+
+  const sslResult = await issueSslCertificate(clean, certbotEmail);
+
+  if (!sslResult.ok) {
+    await db.domain.update({
+      where: { id: domain.id },
+      data:  { sslStatus: SslStatus.FAILED, lastError: sslResult.error ?? "SSL issuance failed" },
+    });
+    return { ok: false, error: sslResult.error ?? "SSL issuance failed", logs: sslResult.logs };
+  }
+
+  // Mark SSL active + update project liveUrl to HTTPS
+  await db.domain.update({
+    where: { id: domain.id },
+    data:  { sslStatus: SslStatus.ACTIVE, lastError: null },
+  });
+
+  await db.project.update({
+    where: { id: projectId },
+    data:  { liveUrl: `https://${clean}` },
+  });
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: `SSL certificate issued: https://${clean}`,
+      metadata: { domain: clean } as object,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/domains`);
+  revalidatePath(`/projects/${projectId}/publishing`);
+  return { ok: true, error: "", logs: sslResult.logs };
+}
+
+// ── Action: removeDomainAndNginxAction ────────────────────────────────────
+
+export type RemoveDomainResult = {
+  ok:    boolean;
+  error: string;
+};
+
+/**
+ * Removes a domain from a project: deletes the nginx config + symlink,
+ * reloads nginx, and deletes the Domain record.
+ *
+ * Nginx cleanup is non-fatal — domain is always removed from the DB.
+ */
+export async function removeDomainAndNginxAction(
+  projectId: string,
+  domainId:  string
+): Promise<RemoveDomainResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  const domain = await db.domain.findFirst({ where: { id: domainId, projectId } });
+  if (!domain) return { ok: false, error: "Domain not found." };
+
+  // Remove nginx config (non-fatal: log warning but continue)
+  let nginxWarning = "";
+  if (domain.nginxConfigPath || domain.status === DomainStatus.ACTIVE) {
+    const removeResult = await removeDomainNginxConfig(domain.hostname);
+    if (!removeResult.ok) {
+      nginxWarning = removeResult.error ?? "nginx cleanup warning";
+    }
+  }
+
+  // Delete domain record
+  await db.domain.delete({ where: { id: domainId } });
+
+  // Clear project.liveUrl if it pointed to this domain
+  const proj = await db.project.findUnique({
+    where: { id: projectId },
+    select: { liveUrl: true },
+  });
+  if (proj?.liveUrl?.includes(domain.hostname)) {
+    await db.project.update({
+      where: { id: projectId },
+      data:  { liveUrl: null },
+    });
+  }
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   nginxWarning ? LogLevel.WARN : LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: nginxWarning
+        ? `Domain removed: ${domain.hostname} (nginx cleanup warning: ${nginxWarning})`
+        : `Domain removed: ${domain.hostname}`,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/domains`);
+  revalidatePath(`/projects/${projectId}/publishing`);
+  return {
+    ok:    true,
+    error: nginxWarning ? `Domain removed (nginx warning: ${nginxWarning})` : "",
+  };
 }

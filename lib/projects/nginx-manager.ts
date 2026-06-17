@@ -412,6 +412,98 @@ export async function publishIpPreviewPath(
   return { ok: true, url, mode: "path_ip" };
 }
 
+// ── DNS verification ──────────────────────────────────────────────────────
+
+export interface DnsVerifyResult {
+  ok:          boolean;
+  resolvedIp?: string;
+  error?:      string;
+}
+
+/**
+ * Verifies that `hostname` has a DNS A record pointing to `expectedIp`.
+ * Uses Node's `dns.resolve4()` — bypasses OS resolver cache for a fresh result.
+ */
+export async function verifyDnsARecord(
+  hostname:   string,
+  expectedIp: string
+): Promise<DnsVerifyResult> {
+  const { resolve4 } = await import("dns/promises");
+  try {
+    const addresses = await resolve4(hostname);
+    if (addresses.includes(expectedIp)) {
+      return { ok: true, resolvedIp: addresses[0] };
+    }
+    return {
+      ok:         false,
+      resolvedIp: addresses[0],
+      error:      `DNS resolves to ${addresses.join(", ")} — expected ${expectedIp}`,
+    };
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (
+      err.code === "ENOTFOUND" ||
+      err.code === "ENODATA"   ||
+      err.code === "ESERVFAIL"
+    ) {
+      return {
+        ok:    false,
+        error: "No DNS A record found — add an A record pointing to your server first",
+      };
+    }
+    return { ok: false, error: `DNS lookup failed: ${err.message}` };
+  }
+}
+
+// ── Nginx config removal ───────────────────────────────────────────────────
+
+export interface NginxRemoveResult {
+  ok:     boolean;
+  error?: string;
+}
+
+/**
+ * Removes the nginx config file and sites-enabled symlink for a published domain,
+ * then tests and reloads nginx.
+ *
+ * File removal is best-effort (non-fatal if files are already gone).
+ */
+export async function removeDomainNginxConfig(
+  hostname: string
+): Promise<NginxRemoveResult> {
+  if (!isValidDomain(hostname)) {
+    return { ok: false, error: `Invalid domain name: "${hostname}"` };
+  }
+
+  const configFilename = `${hostname}.conf`;
+  const configPath     = path.join(NGINX_SITES_AVAILABLE, configFilename);
+  const enabledPath    = path.join(NGINX_SITES_ENABLED,   configFilename);
+
+  // Remove symlink and config (ignore ENOENT — already gone is fine)
+  await fs.unlink(enabledPath).catch(() => {});
+  await fs.unlink(configPath).catch(() => {});
+
+  // Test nginx config (must pass before reload)
+  try {
+    await execFileAsync("nginx", ["-t"], { timeout: 10_000 });
+  } catch (e) {
+    const stderr = (e as { stderr?: string }).stderr ?? "";
+    const msg    = stderr.trim() || (e instanceof Error ? e.message : String(e));
+    return { ok: false, error: `nginx config test failed after removal:\n${msg}` };
+  }
+
+  // Reload nginx
+  try {
+    await execFileAsync("systemctl", ["reload", "nginx"], { timeout: 15_000 });
+  } catch (e) {
+    const stderr = (e as { stderr?: string }).stderr ?? "";
+    const msg    = stderr.trim() || (e instanceof Error ? e.message : String(e));
+    return { ok: false, error: `nginx reload failed after removal: ${msg}` };
+  }
+
+  return { ok: true };
+}
+
 // ── SSL via certbot ────────────────────────────────────────────────────────
 
 /**
