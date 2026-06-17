@@ -36,6 +36,7 @@ import { DeploymentSetupForm } from "@/components/projects/deployment-setup-form
 import { ProjectDeployPanel } from "@/components/projects/project-deploy-panel";
 import { getPm2AppStatus } from "@/lib/projects/project-deploy-runner";
 import { LiveEndpointsCard } from "@/components/projects/live-endpoints-card";
+import { ReadinessPanel }    from "@/components/projects/readiness-panel";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -182,6 +183,15 @@ export default async function ProjectPublishingPage({ params }: Props) {
               }))}
               isDeployed={!!successDeploy || !!project.liveUrl}
               domainsHref={`/projects/${projectId}/domains`}
+            />
+          )}
+
+          {/* ── Readiness panel (shown once deployed) ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <ReadinessPanel
+              projectId={projectId}
+              hasConfig={!!dbDeployConfig}
+              defaultEnv="production"
             />
           )}
 
@@ -355,11 +365,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
                         {/* Status update for in-flight records */}
                         {!isTerminal && (
                           <form
-                            action={updateDeploymentStatusAction.bind(
-                              null,
-                              dep.id,
-                              projectId
-                            )}
+                            action={updateDeploymentStatusAction.bind(null, dep.id, projectId) as unknown as (formData: FormData) => void}
                             className="flex items-center gap-1"
                           >
                             <select

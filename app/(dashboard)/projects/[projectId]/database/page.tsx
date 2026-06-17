@@ -6,6 +6,7 @@ import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AddDatabaseForm } from "@/components/workspace/add-database-form";
+import { DbConnectionTestPanel } from "@/components/projects/db-connection-test-panel";
 import {
   getProjectDatabases,
   getProjectEnvironments,
@@ -71,9 +72,18 @@ export default async function ProjectDatabasePage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [databases, environments] = await Promise.all([
+  const [databases, environments, deployConfig] = await Promise.all([
     getProjectDatabases(projectId),
     getProjectEnvironments(projectId),
+    db.projectDeploymentConfig.findUnique({
+      where:  { projectId },
+      select: {
+        dbConnLastCheckedAt: true,
+        dbConnStatus:        true,
+        dbConnErrorMessage:  true,
+        dbConnEnvironment:   true,
+      },
+    }),
   ]);
 
   return (
@@ -86,6 +96,19 @@ export default async function ProjectDatabasePage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+          {/* ── Live connection test ── */}
+          <DbConnectionTestPanel
+            projectId={projectId}
+            hasDbConfig={!!deployConfig}
+            defaultEnv="production"
+            cachedResult={{
+              status:       deployConfig?.dbConnStatus ?? null,
+              errorMessage: deployConfig?.dbConnErrorMessage ?? null,
+              checkedAt:    deployConfig?.dbConnLastCheckedAt ?? null,
+              environment:  deployConfig?.dbConnEnvironment ?? null,
+            }}
+          />
+
           {/* Add form */}
           <AddDatabaseForm projectId={projectId} environments={environments} />
 
@@ -125,11 +148,7 @@ export default async function ProjectDatabasePage({ params }: Props) {
                         </div>
                         <div className="flex items-center gap-1">
                           <form
-                            action={deleteDatabaseAction.bind(
-                              null,
-                              db_.id,
-                              projectId
-                            )}
+                            action={deleteDatabaseAction.bind(null, db_.id, projectId) as unknown as (formData: FormData) => void}
                           >
                             <button
                               type="submit"

@@ -38,7 +38,10 @@ import {
   issueSslCertificate,
   type RouteMode,
 } from "@/lib/projects/nginx-manager";
-import { getDecryptedEnvVarsForDeploy } from "@/app/actions/project-envvars";
+import {
+  getDecryptedEnvVarsForDeploy,
+  checkRequiredProjectSecretsAction,
+} from "@/app/actions/project-envvars";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -273,7 +276,7 @@ export async function deployProjectAction(
   });
 
   // Fetch decrypted env vars — NEVER log or return these to the client
-  const envVars = await getDecryptedEnvVarsForDeploy(projectId);
+  const envVars = await getDecryptedEnvVarsForDeploy(projectId, "production");
 
   // Run the full pipeline (synchronous — may take several minutes)
   const result = await runProjectDeployment({
@@ -1145,4 +1148,356 @@ export async function cleanupReservedDomainRecordsAction(projectId: string) {
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
+}
+
+// ── Action: testProjectDatabaseConnectionAction ───────────────────────────
+
+export type DbConnectionTestResult = {
+  ok:             boolean;
+  error:          string;
+  code?:          string; // "DATABASE_URL_MISSING" | "PSQL_NOT_FOUND" | "CONNECTION_FAILED" | "OK"
+  environment:    string;
+  checkedAt:      string; // ISO timestamp
+  errorMessage?:  string;
+};
+
+/**
+ * Tests the project's DATABASE_URL by running `SELECT 1` via psql.
+ *
+ * Security:
+ *   - The URL is decrypted server-side and never returned to the client
+ *   - Only SELECT 1 is run — no DDL, no DML
+ *   - The result (status + safe error) is cached in ProjectDeploymentConfig
+ */
+export async function testProjectDatabaseConnectionAction(
+  projectId:   string,
+  environment: string = "production"
+): Promise<DbConnectionTestResult> {
+  const project = await verifyOwnership(projectId);
+  if (!project) {
+    return { ok: false, error: "Not found or access denied.", environment, checkedAt: new Date().toISOString() };
+  }
+
+  const config = await db.projectDeploymentConfig.findUnique({ where: { projectId } });
+  if (!config) {
+    return {
+      ok: false, error: "No deployment config found. Deploy the project first.",
+      code: "NO_CONFIG", environment, checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const env = environment.toLowerCase().trim();
+
+  // 1. Load DATABASE_URL for this environment
+  const dbUrlRow = await db.projectEnvVar.findFirst({
+    where:  { projectId, name: "DATABASE_URL", environment: env, isEnabled: true },
+    select: { value: true },
+  });
+
+  if (!dbUrlRow) {
+    const result: DbConnectionTestResult = {
+      ok:           false,
+      error:        `DATABASE_URL is not configured for ${env}.`,
+      code:         "DATABASE_URL_MISSING",
+      environment:  env,
+      checkedAt:    new Date().toISOString(),
+    };
+    // Cache miss result
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: {
+        dbConnLastCheckedAt: new Date(),
+        dbConnStatus:        "missing_url",
+        dbConnErrorMessage:  result.error,
+        dbConnEnvironment:   env,
+      },
+    }).catch(() => {});
+    return result;
+  }
+
+  // 2. Decrypt URL server-side — NEVER log or return the URL
+  let databaseUrl: string;
+  try {
+    const { decryptEnvValue } = await import("@/lib/projects/env-manager");
+    databaseUrl = decryptEnvValue(dbUrlRow.value);
+  } catch (e) {
+    const result: DbConnectionTestResult = {
+      ok:           false,
+      error:        "Failed to decrypt DATABASE_URL. The encryption key may have changed.",
+      code:         "DECRYPT_FAILED",
+      environment:  env,
+      checkedAt:    new Date().toISOString(),
+    };
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: { dbConnLastCheckedAt: new Date(), dbConnStatus: "failed", dbConnErrorMessage: result.error, dbConnEnvironment: env },
+    }).catch(() => {});
+    return result;
+  }
+
+  // 3. Run SELECT 1 via psql (execFile — no shell injection possible)
+  const { execFile } = await import("child_process");
+  const { promisify } = await import("util");
+  const execFileAsync = promisify(execFile);
+
+  // Check psql is available first
+  try {
+    await execFileAsync("which", ["psql"], { timeout: 5_000 });
+  } catch {
+    const result: DbConnectionTestResult = {
+      ok:    false,
+      error: "psql is not installed on this server. Install with: sudo apt-get install postgresql-client",
+      code:  "PSQL_NOT_FOUND",
+      environment: env,
+      checkedAt: new Date().toISOString(),
+    };
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: { dbConnLastCheckedAt: new Date(), dbConnStatus: "failed", dbConnErrorMessage: result.error, dbConnEnvironment: env },
+    }).catch(() => {});
+    return result;
+  }
+
+  // 4. Run the connection test (10s timeout)
+  try {
+    await execFileAsync("psql", [databaseUrl, "--no-password", "-c", "SELECT 1 AS ok;"], {
+      timeout: 15_000,
+      env:     { ...process.env, PGCONNECT_TIMEOUT: "10" },
+    });
+
+    // Success — cache and return
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: {
+        dbConnLastCheckedAt: new Date(),
+        dbConnStatus:        "ok",
+        dbConnErrorMessage:  null,
+        dbConnEnvironment:   env,
+      },
+    }).catch(() => {});
+
+    await db.projectLog.create({
+      data: {
+        projectId,
+        level:   LogLevel.INFO,
+        source:  LogSource.DEPLOY,
+        message: `DB connection test OK for ${env} environment.`,
+        metadata: { environment: env } as object,
+      },
+    }).catch(() => {});
+
+    return { ok: true, error: "", code: "OK", environment: env, checkedAt: new Date().toISOString() };
+
+  } catch (e) {
+    // Mask any URL that might appear in the psql error output
+    const raw = e instanceof Error ? e.message : String(e);
+    const safeMsg = raw.replace(/(?:postgresql|postgres):\/\/[^\s"'`]+/gi, "[URL_REDACTED]");
+    // Trim to a safe length and strip potentially sensitive details
+    const shortMsg = safeMsg.slice(0, 300);
+
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: {
+        dbConnLastCheckedAt: new Date(),
+        dbConnStatus:        "failed",
+        dbConnErrorMessage:  shortMsg,
+        dbConnEnvironment:   env,
+      },
+    }).catch(() => {});
+
+    await db.projectLog.create({
+      data: {
+        projectId,
+        level:   LogLevel.WARN,
+        source:  LogSource.DEPLOY,
+        message: `DB connection test FAILED for ${env} environment.`,
+        metadata: { environment: env } as object,
+      },
+    }).catch(() => {});
+
+    return {
+      ok:           false,
+      error:        shortMsg,
+      code:         "CONNECTION_FAILED",
+      environment:  env,
+      checkedAt:    new Date().toISOString(),
+      errorMessage: shortMsg,
+    };
+  }
+}
+
+// ── Action: runProjectLoginSmokeTestAction ────────────────────────────────
+
+export type SmokeTestCheck = {
+  name:    string;
+  ok:      boolean;
+  url?:    string;
+  status?: number;
+  error?:  string;
+  details?: Record<string, unknown>;
+};
+
+export type LoginSmokeTestResult = {
+  ok:           boolean;
+  error:        string;
+  environment:  string;
+  checks:       SmokeTestCheck[];
+};
+
+/**
+ * Runs a series of readiness checks for a deployed project:
+ *   1. App process online (PM2 status)
+ *   2. Frontend URL reachable
+ *   3. API health endpoint reachable
+ *   4. Database connection OK
+ *   5. Required secrets present
+ *   6. Login route reachable
+ *
+ * Returns check results with no secret values.
+ * Does NOT submit passwords or attempt real authentication.
+ */
+export async function runProjectLoginSmokeTestAction(
+  projectId:   string,
+  environment: string = "production"
+): Promise<LoginSmokeTestResult> {
+  const EMPTY: LoginSmokeTestResult = {
+    ok: false, error: "", environment, checks: [],
+  };
+
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ...EMPTY, error: "Not found or access denied." };
+
+  const config = await db.projectDeploymentConfig.findUnique({
+    where: { projectId },
+    select: { port: true, pm2Name: true, healthPath: true, publicPreviewUrl: true },
+  });
+  if (!config) {
+    return { ...EMPTY, error: "No deployment config found. Deploy the project first." };
+  }
+
+  const env = environment.toLowerCase().trim();
+  const checks: SmokeTestCheck[] = [];
+
+  // ── 1. PM2 process status ─────────────────────────────────────────────────
+  try {
+    const { getPm2AppStatus } = await import("@/lib/projects/project-deploy-runner");
+    const pm2 = await getPm2AppStatus(config.pm2Name);
+    checks.push({
+      name:    "App process",
+      ok:      pm2?.status === "online",
+      details: pm2 ? { status: pm2.status, pid: pm2.pid, memoryMb: pm2.memoryMb } : undefined,
+      error:   pm2 ? (pm2.status !== "online" ? `PM2 status: ${pm2.status}` : undefined) : "Process not found in PM2",
+    });
+  } catch (e) {
+    checks.push({ name: "App process", ok: false, error: `PM2 query failed: ${(e as Error).message}` });
+  }
+
+  // Resolve best live URL
+  const activeDomain = await db.domain.findFirst({
+    where:   { projectId, status: "ACTIVE" },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    select:  { hostname: true, sslStatus: true },
+  });
+
+  const baseUrl = activeDomain
+    ? (activeDomain.sslStatus === "ACTIVE" ? `https://${activeDomain.hostname}` : `http://${activeDomain.hostname}`)
+    : config.publicPreviewUrl ?? null;
+
+  // ── 2. Frontend URL ───────────────────────────────────────────────────────
+  if (baseUrl) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+      const r = await fetch(baseUrl, { signal: controller.signal, redirect: "follow" });
+      clearTimeout(timer);
+      checks.push({
+        name:   "Frontend",
+        ok:     r.ok || r.status < 500,
+        url:    baseUrl,
+        status: r.status,
+        error:  r.ok || r.status < 500 ? undefined : `HTTP ${r.status}`,
+      });
+    } catch (e) {
+      checks.push({ name: "Frontend", ok: false, url: baseUrl, error: (e as Error).message?.slice(0, 120) });
+    }
+  } else {
+    checks.push({ name: "Frontend", ok: false, error: "No live URL configured. Publish a domain first." });
+  }
+
+  // ── 3. API health endpoint ────────────────────────────────────────────────
+  const healthPath = config.healthPath ?? "/";
+  const healthUrl  = baseUrl ? `${baseUrl.replace(/\/$/, "")}${healthPath}` : null;
+
+  if (healthUrl) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+      const r = await fetch(healthUrl, { signal: controller.signal });
+      clearTimeout(timer);
+      checks.push({
+        name:   "API health",
+        ok:     r.status >= 200 && r.status < 400,
+        url:    healthUrl,
+        status: r.status,
+        error:  r.status >= 400 ? `HTTP ${r.status}` : undefined,
+      });
+    } catch (e) {
+      checks.push({ name: "API health", ok: false, url: healthUrl, error: (e as Error).message?.slice(0, 120) });
+    }
+  } else {
+    checks.push({ name: "API health", ok: false, error: "No live URL to check health against." });
+  }
+
+  // ── 4. Database connection ────────────────────────────────────────────────
+  const dbResult = await testProjectDatabaseConnectionAction(projectId, env);
+  checks.push({
+    name:  "Database",
+    ok:    dbResult.ok,
+    error: dbResult.ok ? undefined : dbResult.error,
+    details: dbResult.code ? { code: dbResult.code } : undefined,
+  });
+
+  // ── 5. Required secrets ───────────────────────────────────────────────────
+  const secretsResult = await checkRequiredProjectSecretsAction(projectId, env);
+  checks.push({
+    name:    "Required secrets",
+    ok:      secretsResult.ok,
+    error:   secretsResult.missingKeys.length > 0
+      ? `Missing: ${secretsResult.missingKeys.join(", ")}`
+      : undefined,
+    details: {
+      missingKeys: secretsResult.missingKeys,
+      alternatives: secretsResult.alternatives
+        .filter((a) => !a.satisfied)
+        .map((a) => a.label),
+    },
+  });
+
+  // ── 6. Login route ────────────────────────────────────────────────────────
+  const loginUrl = baseUrl ? `${baseUrl.replace(/\/$/, "")}/login` : null;
+
+  if (loginUrl) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+      const r = await fetch(loginUrl, { signal: controller.signal, redirect: "follow" });
+      clearTimeout(timer);
+      checks.push({
+        name:   "Login route",
+        ok:     r.status >= 200 && r.status < 500,
+        url:    loginUrl,
+        status: r.status,
+        error:  r.status >= 500 ? `HTTP ${r.status}` : undefined,
+      });
+    } catch (e) {
+      checks.push({ name: "Login route", ok: false, url: loginUrl ?? undefined, error: (e as Error).message?.slice(0, 120) });
+    }
+  } else {
+    checks.push({ name: "Login route", ok: false, error: "No live URL to check login route against." });
+  }
+
+  // ── Final verdict ─────────────────────────────────────────────────────────
+  const allOk = checks.every((c) => c.ok);
+
+  return { ok: allOk, error: allOk ? "" : "Some readiness checks failed.", environment: env, checks };
 }

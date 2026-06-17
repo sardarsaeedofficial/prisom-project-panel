@@ -139,6 +139,50 @@ export function isLikelySecret(name: string): boolean {
   return SECRET_NAME_RE.test(name);
 }
 
+// ── Reserved platform keys ─────────────────────────────────────────────────
+
+/**
+ * Keys that are set by the platform / PM2 ecosystem and MUST NOT be overridden
+ * by user-supplied project secrets.
+ */
+export const RESERVED_PLATFORM_KEYS: ReadonlySet<string> = new Set([
+  "NODE_ENV", "PORT", "HOST", "PWD", "HOME", "PATH", "SHELL", "USER", "PM2_HOME",
+]);
+
+export function isReservedPlatformKey(name: string): boolean {
+  return RESERVED_PLATFORM_KEYS.has(name.trim().toUpperCase());
+}
+
+/**
+ * Validates an env var name.
+ * Returns null if valid, or a human-readable error string if not.
+ *
+ * Rules:
+ *   - Must not be empty
+ *   - Must match ^[A-Z][A-Z0-9_]*$ (after trim + uppercase)
+ *   - Must not be a reserved platform key
+ */
+export function validateEnvVarName(name: string): string | null {
+  const clean = name.trim().toUpperCase();
+  if (!clean) return "Name is required.";
+  if (!/^[A-Z][A-Z0-9_]*$/.test(clean)) {
+    return `Invalid name "${name}". Must start with a letter and contain only uppercase letters, digits, and underscores.`;
+  }
+  if (isReservedPlatformKey(clean)) {
+    return `"${clean}" is a reserved platform key and cannot be set as a project secret.`;
+  }
+  return null;
+}
+
+// ── Environment helpers ────────────────────────────────────────────────────
+
+export const VALID_ENVIRONMENTS = ["development", "preview", "production"] as const;
+export type EnvEnvironment = (typeof VALID_ENVIRONMENTS)[number];
+
+export function isValidEnvironment(env: string): env is EnvEnvironment {
+  return (VALID_ENVIRONMENTS as readonly string[]).includes(env);
+}
+
 /**
  * Parses a .env file string into a Record<string, string>.
  * Handles KEY=value, KEY="value", KEY='value', comments, blank lines.
