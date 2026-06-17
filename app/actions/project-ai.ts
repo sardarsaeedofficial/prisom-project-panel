@@ -180,3 +180,92 @@ export async function askProjectAiAction(
     },
   };
 }
+
+// ── Patch suggestion ───────────────────────────────────────────────────────────
+
+import {
+  buildPatchSuggestion,
+  type SelectedFileForPatch,
+  type PatchSuggestion,
+} from "@/lib/ai/project-patches";
+
+import { isEditableTextFile, MAX_FILE_AI_BYTES } from "@/lib/projects/file-manager";
+
+export interface SuggestPatchInput {
+  projectId:     string;
+  instruction:   string;
+  selectedFiles: Array<{ path: string; content: string }>;
+}
+
+/**
+ * Ask the AI to suggest a patch for the selected files.
+ *
+ * Safety:
+ *  - Ownership is verified.
+ *  - File paths are validated (no .env, no blocked types).
+ *  - File content is redacted before being sent to the AI.
+ *  - The AI cannot apply patches — the user must do that manually.
+ */
+export async function suggestProjectPatchAction(
+  input: SuggestPatchInput,
+): Promise<ActionResult<PatchSuggestion>> {
+  const { projectId, instruction, selectedFiles } = input;
+
+  // Verify ownership
+  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
+  if (!workspaceId) {
+    return { ok: false, error: "Not authenticated.", code: "FORBIDDEN" };
+  }
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { id: true, workspaceId: true },
+  });
+  if (!project || project.workspaceId !== workspaceId) {
+    return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
+  }
+
+  // Validate instruction
+  if (!instruction || instruction.trim().length < 3) {
+    return { ok: false, error: "Please provide a clear instruction." };
+  }
+
+  // Validate selected files
+  if (!selectedFiles || selectedFiles.length === 0) {
+    return { ok: false, error: "Select at least one file for the AI to work on." };
+  }
+  if (selectedFiles.length > 5) {
+    return { ok: false, error: "Maximum 5 files per patch request." };
+  }
+
+  // Sanitise each file: check type, size, redact content
+  const safeFiles: SelectedFileForPatch[] = [];
+  for (const file of selectedFiles) {
+    const path = file.path.trim();
+
+    // Reject blocked file types
+    if (!isEditableTextFile(path)) {
+      return { ok: false, error: `File "${path}" is not an editable file type.` };
+    }
+    // Reject .env
+    const base = path.split("/").pop()?.toLowerCase() ?? "";
+    if (base === ".env" || base.startsWith(".env.")) {
+      return { ok: false, error: `.env files cannot be sent to the AI.` };
+    }
+
+    const content = file.content.slice(0, MAX_FILE_AI_BYTES);
+
+    safeFiles.push({ path, content: redact(content) });
+  }
+
+  const result = await buildPatchSuggestion(
+    projectId,
+    redact(instruction),
+    safeFiles,
+  );
+
+  if (!result.ok) {
+    return { ok: false, error: result.error, code: result.code };
+  }
+
+  return { ok: true, data: result.data };
+}
