@@ -35,8 +35,9 @@ import { DeploymentStatus } from "@prisma/client";
 import { DeploymentSetupForm } from "@/components/projects/deployment-setup-form";
 import { ProjectDeployPanel } from "@/components/projects/project-deploy-panel";
 import { getPm2AppStatus } from "@/lib/projects/project-deploy-runner";
-import { LiveEndpointsCard } from "@/components/projects/live-endpoints-card";
-import { ReadinessPanel }    from "@/components/projects/readiness-panel";
+import { LiveEndpointsCard }       from "@/components/projects/live-endpoints-card";
+import { ReadinessPanel }          from "@/components/projects/readiness-panel";
+import { DeploymentConfigPanel }   from "@/components/projects/deployment-config-panel";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -214,6 +215,37 @@ export default async function ProjectPublishingPage({ params }: Props) {
               latestDeployment={deployments[0] ?? null}
               initialPm2Status={initialPm2Status}
               activeDomain={activeDomainRow?.hostname ?? null}
+            />
+          )}
+
+          {/* ── Deployment config editor (Sprint 3) ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <DeploymentConfigPanel
+              projectId={projectId}
+              config={{
+                id:                  dbDeployConfig.id,
+                port:                dbDeployConfig.port,
+                pm2Name:             dbDeployConfig.pm2Name,
+                runtime:             (dbDeployConfig as unknown as { runtime: string }).runtime ?? "node",
+                installCommand:      dbDeployConfig.installCommand,
+                buildCommand:        dbDeployConfig.buildCommand,
+                startCommand:        dbDeployConfig.startCommand,
+                rootDirectory:       dbDeployConfig.rootDirectory,
+                outputDirectory:     dbDeployConfig.outputDirectory,
+                healthPath:          dbDeployConfig.healthPath,
+                loginPath:           (dbDeployConfig as unknown as { loginPath: string }).loginPath ?? "/login",
+                nodeEnv:             dbDeployConfig.nodeEnv,
+                routeMode:           dbDeployConfig.routeMode,
+                staticOutputDir:     dbDeployConfig.staticOutputDir,
+                apiPrefix:           dbDeployConfig.apiPrefix,
+                primaryDomain:       (dbDeployConfig as unknown as { primaryDomain: string | null }).primaryDomain ?? null,
+                publicPreviewUrl:    dbDeployConfig.publicPreviewUrl,
+                publicPreviewMode:   dbDeployConfig.publicPreviewMode,
+                publicPreviewStatus: dbDeployConfig.publicPreviewStatus,
+                lastValidatedAt:     (dbDeployConfig as unknown as { lastValidatedAt: Date | null }).lastValidatedAt ?? null,
+                validationStatus:    (dbDeployConfig as unknown as { validationStatus: string | null }).validationStatus ?? null,
+                validationError:     (dbDeployConfig as unknown as { validationError: string | null }).validationError ?? null,
+              }}
             />
           )}
 

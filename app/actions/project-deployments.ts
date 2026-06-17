@@ -1369,7 +1369,7 @@ export async function runProjectLoginSmokeTestAction(
 
   const config = await db.projectDeploymentConfig.findUnique({
     where: { projectId },
-    select: { port: true, pm2Name: true, healthPath: true, publicPreviewUrl: true },
+    select: { port: true, pm2Name: true, healthPath: true, loginPath: true, publicPreviewUrl: true, primaryDomain: true },
   });
   if (!config) {
     return { ...EMPTY, error: "No deployment config found. Deploy the project first." };
@@ -1399,9 +1399,12 @@ export async function runProjectLoginSmokeTestAction(
     select:  { hostname: true, sslStatus: true },
   });
 
+  // Resolve best live URL using priority: active domain → saved primaryDomain → IP preview
   const baseUrl = activeDomain
     ? (activeDomain.sslStatus === "ACTIVE" ? `https://${activeDomain.hostname}` : `http://${activeDomain.hostname}`)
-    : config.publicPreviewUrl ?? null;
+    : (config.primaryDomain
+        ? (config.primaryDomain.startsWith("http") ? config.primaryDomain : `http://${config.primaryDomain}`)
+        : config.publicPreviewUrl ?? null);
 
   // ── 2. Frontend URL ───────────────────────────────────────────────────────
   if (baseUrl) {
@@ -1474,7 +1477,8 @@ export async function runProjectLoginSmokeTestAction(
   });
 
   // ── 6. Login route ────────────────────────────────────────────────────────
-  const loginUrl = baseUrl ? `${baseUrl.replace(/\/$/, "")}/login` : null;
+  const loginPath = config.loginPath ?? "/login";
+  const loginUrl = baseUrl ? `${baseUrl.replace(/\/$/, "")}${loginPath}` : null;
 
   if (loginUrl) {
     try {

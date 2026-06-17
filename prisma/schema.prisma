@@ -912,6 +912,13 @@ model ProjectDeploymentConfig {
   dbConnStatus          String?    // "ok" | "failed" | "missing_url"
   dbConnErrorMessage    String?
   dbConnEnvironment     String?
+  // Sprint 3: extended deployment config
+  runtime          String   @default("node")    // node | static | vite | next | express
+  loginPath        String   @default("/login")  // login route used by readiness smoke test
+  primaryDomain    String?                       // primary public domain (e.g. sardar-security-project.doorstepmanchester.uk)
+  lastValidatedAt  DateTime?
+  validationStatus String?   // "valid" | "invalid" | "unchecked"
+  validationError  String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
