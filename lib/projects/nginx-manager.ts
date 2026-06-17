@@ -18,7 +18,7 @@
  *   - Never runs as root — returns clear permission error messages
  *
  * Nginx layout:
- *   /etc/nginx/sites-available/prisom-projects/<domain>.conf
+ *   /etc/nginx/sites-available/<domain>.conf
  *   /etc/nginx/sites-enabled/<domain>.conf  (symlink)
  */
 
@@ -31,8 +31,45 @@ const execFileAsync = promisify(execFile);
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const NGINX_SITES_AVAILABLE = "/etc/nginx/sites-available/prisom-projects";
+const NGINX_SITES_AVAILABLE = "/etc/nginx/sites-available";
 const NGINX_SITES_ENABLED   = "/etc/nginx/sites-enabled";
+
+const RESERVED_HOSTNAMES = new Set([
+  "projects.doorstepmanchester.uk",
+  "doorstepmanchester.uk",
+  "www.doorstepmanchester.uk",
+  "178.105.105.59",
+  "localhost",
+  "127.0.0.1",
+]);
+
+function normalizeHostname(hostname: string): string {
+  return hostname.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+}
+
+export function isReservedHostname(hostname: string): boolean {
+  const clean = normalizeHostname(hostname);
+
+  if (RESERVED_HOSTNAMES.has(clean)) return true;
+
+  // Block bare IPv4 addresses from being used as custom domains.
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(clean)) return true;
+
+  return false;
+}
+
+export function assertPublishableHostname(hostname: string): { ok: true } | { ok: false; error: string } {
+  const clean = normalizeHostname(hostname);
+
+  if (isReservedHostname(clean)) {
+    return {
+      ok: false,
+      error: `${clean} is a reserved control hostname and cannot be used as a project domain.`,
+    };
+  }
+
+  return { ok: true };
+}
 
 // IP preview — per-project location blocks included into a shared server block
 const NGINX_IP_PREVIEW_LOCATIONS = "/etc/nginx/prisom-project-locations";
@@ -200,9 +237,8 @@ export async function publishDomain(
   const enabledPath    = path.join(NGINX_SITES_ENABLED,   configFilename);
   const configContent  = generateNginxConfig({ hostname, port, ...opts });
 
-  // Ensure sites-available/prisom-projects directory exists
+  // Ensure sites-available directory is writable
   try {
-    await fs.mkdir(NGINX_SITES_AVAILABLE, { recursive: true });
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "EACCES" || code === "EPERM")

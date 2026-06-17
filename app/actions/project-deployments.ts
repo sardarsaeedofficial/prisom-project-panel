@@ -29,6 +29,8 @@ import {
 } from "@/lib/projects/project-deploy-runner";
 import {
   publishDomain,
+  assertPublishableHostname,
+  isReservedHostname,
   publishIpPreviewPath,
   isValidDomain,
   verifyDnsARecord,
@@ -799,6 +801,12 @@ export async function addCustomDomainAction(
   }
 
   const clean = hostname.trim().toLowerCase();
+
+  // reservedDomainCheck_addCustomDomainAction
+  const publishable = assertPublishableHostname(clean);
+  if (!publishable.ok) {
+    return { ok: false, error: publishable.error };
+  }
   if (!isValidDomain(clean)) {
     return { ok: false, error: `Invalid domain name: "${clean}"` };
   }
@@ -861,6 +869,12 @@ export async function checkDnsAndPublishDomainAction(
   }
 
   const clean = hostname.trim().toLowerCase();
+
+  // reservedDomainCheck_checkDnsAndPublishDomainAction
+  const publishable = assertPublishableHostname(clean);
+  if (!publishable.ok) {
+    return { ok: false, error: publishable.error };
+  }
 
   const domain = await db.domain.findFirst({ where: { hostname: clean, projectId } });
   if (!domain) {
@@ -1077,4 +1091,58 @@ export async function removeDomainAndNginxAction(
     ok:    true,
     error: nginxWarning ? `Domain removed (nginx warning: ${nginxWarning})` : "",
   };
+}
+
+
+export async function cleanupReservedDomainRecordsAction(projectId: string) {
+  try {
+    const project = await verifyOwnership(projectId);
+
+    if (!project) {
+      return { ok: false, error: "Project not found or access denied." };
+    }
+
+    const domains = await db.domain.findMany({
+      where: { projectId },
+    });
+
+    const reservedDomains = domains.filter((domain) =>
+      isReservedHostname(domain.hostname)
+    );
+
+    if (reservedDomains.length === 0) {
+      return { ok: true, removedCount: 0, removedHostnames: [] };
+    }
+
+    const ids = reservedDomains.map((domain) => domain.id);
+    const hostnames = reservedDomains.map((domain) => domain.hostname);
+
+    await db.domain.deleteMany({
+      where: {
+        id: { in: ids },
+        projectId,
+      },
+    });
+
+    await db.projectLog.create({
+      data: {
+        projectId,
+        level: "WARN",
+        source: LogSource.DEPLOY,
+        message: `Removed reserved domain records: ${hostnames.join(", ")}`,
+      },
+    });
+
+    return {
+      ok: true,
+      removedCount: ids.length,
+      removedHostnames: hostnames,
+    };
+  } catch (error) {
+    console.error("[cleanupReservedDomainRecordsAction]", error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
 }
