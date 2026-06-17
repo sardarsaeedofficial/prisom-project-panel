@@ -903,6 +903,10 @@ model ProjectDeploymentConfig {
   staticOutputDir  String?                              // relative path to built static files (e.g. "dist", "out", ".next/static")
   apiPrefix        String   @default("/api")            // API prefix for static_plus_api mode
   publicStaticPath String?                              // absolute path after static files are published to /var/www
+  // Public preview URL (IP-based or subdomain, distinct from custom domains)
+  publicPreviewUrl    String?                           // e.g. "http://178.105.105.59/" or "http://178.105.105.59/sardar-security-project/"
+  publicPreviewMode   String   @default("disabled")    // "root_ip" | "path_ip" | "preview_subdomain" | "raw_port" | "disabled"
+  publicPreviewStatus String   @default("inactive")    // "active" | "inactive" | "error"
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
-  CheckCircle2,
   XCircle,
   Clock,
   Loader2,
@@ -9,6 +8,7 @@ import {
   ExternalLink,
   GitBranch,
   GitCommit,
+  CheckCircle2,
 } from "lucide-react";
 import {
   DashboardShell,
@@ -24,7 +24,6 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { CreateDeploymentForm } from "@/components/workspace/create-deployment-form";
 import {
   getProjectDeployments,
   getProjectEnvironments,
@@ -36,6 +35,7 @@ import { DeploymentStatus } from "@prisma/client";
 import { DeploymentSetupForm } from "@/components/projects/deployment-setup-form";
 import { ProjectDeployPanel } from "@/components/projects/project-deploy-panel";
 import { getPm2AppStatus } from "@/lib/projects/project-deploy-runner";
+import { LiveEndpointsCard } from "@/components/projects/live-endpoints-card";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -121,16 +121,21 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, environments, dbDeployConfig, activeDomainRow] = await Promise.all([
+  const [deployments, environments, dbDeployConfig, allDomains] = await Promise.all([
     getProjectDeployments(projectId),
     getProjectEnvironments(projectId),
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
-    db.domain.findFirst({
-      where: { projectId, status: "ACTIVE", nginxConfigPath: { not: null } },
-      select: { hostname: true },
-      orderBy: { isPrimary: "desc" },
+    db.domain.findMany({
+      where:   { projectId },
+      select:  { hostname: true, isPrimary: true, status: true, sslStatus: true },
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     }),
   ]);
+
+  // First active domain (highest priority) — still used for the legacy deploy panel prop
+  const activeDomainRow = allDomains.find(
+    (d) => d.status === "ACTIVE" && "nginxConfigPath" in d
+  ) ?? allDomains.find((d) => d.status === "ACTIVE") ?? null;
 
   // Static VPS config (LocalShop only) — must not be touched
   const deployConfig = getDeploymentConfig(project.slug);
@@ -160,6 +165,26 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Live Endpoints (shown for all PM2-deployed projects) ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <LiveEndpointsCard
+              projectId={projectId}
+              port={dbDeployConfig.port}
+              publicPreviewUrl={dbDeployConfig.publicPreviewUrl ?? null}
+              publicPreviewMode={dbDeployConfig.publicPreviewMode ?? "disabled"}
+              publicPreviewStatus={dbDeployConfig.publicPreviewStatus ?? "inactive"}
+              domains={allDomains.map((d) => ({
+                hostname:  d.hostname,
+                isPrimary: d.isPrimary,
+                status:    d.status as string,
+                sslStatus: d.sslStatus as string,
+              }))}
+              isDeployed={!!successDeploy || !!project.liveUrl}
+              domainsHref={`/projects/${projectId}/domains`}
+            />
+          )}
+
           {/* ── LocalShop: static VPS config (unchanged path) ── */}
           {hasDeployConfig && deployConfig && (
             <DeployPanel
@@ -188,28 +213,6 @@ export default async function ProjectPublishingPage({ params }: Props) {
               projectId={projectId}
               projectSlug={project.slug}
             />
-          )}
-
-          {/* ── Live URL banner ── */}
-          {(successDeploy?.url ?? project.liveUrl) && (
-            <div className="flex items-center gap-2 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-3">
-              <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-              <span className="text-sm text-green-800 dark:text-green-300">
-                Live at{" "}
-              </span>
-              <a
-                href={successDeploy?.url ?? project.liveUrl ?? ""}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-green-700 dark:text-green-400 hover:underline flex items-center gap-1"
-              >
-                {(successDeploy?.url ?? project.liveUrl ?? "").replace(
-                  "https://",
-                  ""
-                )}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            </div>
           )}
 
           {/* ── Latest deployment card ── */}

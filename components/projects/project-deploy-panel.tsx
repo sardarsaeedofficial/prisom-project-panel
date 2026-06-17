@@ -36,7 +36,6 @@ import {
   Pencil,
   X,
   WrenchIcon,
-  Globe,
   Copy,
   GitCommit,
   Server,
@@ -436,29 +435,12 @@ export function ProjectDeployPanel({
             </div>
           </div>
 
-          {/* Internal target + public domain status */}
+          {/* Runtime metrics strip */}
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
               <Server className="h-3.5 w-3.5" />
               127.0.0.1:{config.port}
             </span>
-            {activeDomain ? (
-              <a
-                href={`http://${activeDomain}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-sm text-primary hover:underline"
-              >
-                <Globe className="h-3.5 w-3.5" />
-                {activeDomain}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            ) : pm2Status?.status === "online" ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                <Globe className="h-3.5 w-3.5" />
-                Running internally — publish a domain to go public
-              </span>
-            ) : null}
             {pm2Status?.memoryMb != null && (
               <span className="text-xs text-muted-foreground">{pm2Status.memoryMb} MB</span>
             )}

@@ -34,6 +34,11 @@ const execFileAsync = promisify(execFile);
 const NGINX_SITES_AVAILABLE = "/etc/nginx/sites-available/prisom-projects";
 const NGINX_SITES_ENABLED   = "/etc/nginx/sites-enabled";
 
+// IP preview — per-project location blocks included into a shared server block
+const NGINX_IP_PREVIEW_LOCATIONS = "/etc/nginx/prisom-project-locations";
+const NGINX_IP_PREVIEW_CONF      = "/etc/nginx/sites-available/prisom-ip-preview.conf";
+const NGINX_IP_PREVIEW_ENABLED   = "/etc/nginx/sites-enabled/prisom-ip-preview.conf";
+
 export type RouteMode =
   | "fullstack_node"
   | "static_plus_api"
@@ -251,6 +256,160 @@ export async function publishDomain(
   }
 
   return { ok: true, configPath };
+}
+
+// ── IP preview (path-based) ────────────────────────────────────────────────
+
+export interface IpPreviewResult {
+  ok:    boolean;
+  error?: string;
+  url?:  string;
+  mode?: "path_ip";
+}
+
+/**
+ * Writes a per-project nginx location block and (re)creates the shared
+ * IP-preview server block that includes all project locations.
+ *
+ * URL shape: http://<serverIp>/<slug>/
+ *
+ * All nginx ops are non-fatal from the caller's perspective — the caller
+ * should record the error but must NOT fail the whole deployment.
+ */
+export async function publishIpPreviewPath(
+  slug:     string,
+  port:     number,
+  opts?: {
+    routeMode?:  RouteMode;
+    staticRoot?: string;
+    apiPrefix?:  string;
+    serverIp?:   string;
+  }
+): Promise<IpPreviewResult> {
+  if (!Number.isInteger(port) || port < 4100 || port > 4999) {
+    return { ok: false, error: `Port ${port} is outside the allowed range (4100–4999).` };
+  }
+
+  const serverIp  = opts?.serverIp  ?? process.env.VPS_IP ?? "178.105.105.59";
+  // Sanitise slug to a safe nginx path token
+  const slugSafe  = slug.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const prefix    = `/${slugSafe}`;
+  const url       = `http://${serverIp}${prefix}/`;
+  const mode      = opts?.routeMode ?? "fullstack_node";
+  const apiPrefix = (opts?.apiPrefix ?? "/api").replace(/\/+$/, "");
+
+  // ── Build location block ─────────────────────────────────────────────────
+
+  const proxyBlock = (locPrefix: string, proxyPort: number) =>
+    `location ${locPrefix}/ {\n` +
+    `    proxy_pass         http://127.0.0.1:${proxyPort}/;\n` +
+    `    proxy_http_version 1.1;\n` +
+    `    proxy_set_header   Upgrade           $http_upgrade;\n` +
+    `    proxy_set_header   Connection        'upgrade';\n` +
+    `    proxy_set_header   Host              $host;\n` +
+    `    proxy_set_header   X-Real-IP         $remote_addr;\n` +
+    `    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;\n` +
+    `    proxy_set_header   X-Forwarded-Proto $scheme;\n` +
+    `    proxy_cache_bypass $http_upgrade;\n` +
+    `}\n`;
+
+  let locationContent = `# Prisom project — ${slug} [${mode}] — auto-generated\n`;
+
+  if ((mode === "static_only" || mode === "static_plus_api") && opts?.staticRoot) {
+    // Serve static files via alias; alias must end with /
+    locationContent +=
+      `location ${prefix}/ {\n` +
+      `    alias     ${opts.staticRoot}/;\n` +
+      `    try_files $uri $uri/ ${prefix}/index.html;\n` +
+      `}\n`;
+    if (mode === "static_plus_api") {
+      locationContent += proxyBlock(`${prefix}${apiPrefix}`, port);
+    }
+  } else {
+    // fullstack_node / api_only — proxy everything at this path
+    locationContent += proxyBlock(prefix, port);
+  }
+
+  // ── Ensure locations directory ───────────────────────────────────────────
+
+  try {
+    await fs.mkdir(NGINX_IP_PREVIEW_LOCATIONS, { recursive: true });
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      return {
+        ok: false,
+        error: permError(NGINX_IP_PREVIEW_LOCATIONS, NGINX_IP_PREVIEW_LOCATIONS),
+      };
+    }
+    return { ok: false, error: `Cannot create locations dir: ${(e as Error).message}` };
+  }
+
+  // ── Write per-project location block ────────────────────────────────────
+
+  const locPath = path.join(NGINX_IP_PREVIEW_LOCATIONS, `${slugSafe}.conf`);
+  try {
+    await fs.writeFile(locPath, locationContent, { encoding: "utf8", flag: "w" });
+  } catch (e) {
+    return { ok: false, error: `Cannot write location block: ${(e as Error).message}` };
+  }
+
+  // ── Ensure shared IP preview server block ────────────────────────────────
+
+  const serverBlockContent =
+    `# Prisom IP preview server — auto-managed by Prisom Project Panel.\n` +
+    `# Do not edit manually; changes will be overwritten on next deploy.\n` +
+    `server {\n` +
+    `    listen 80;\n` +
+    `    server_name ${serverIp};\n\n` +
+    `    # Per-project path-based location blocks (auto-included)\n` +
+    `    include ${NGINX_IP_PREVIEW_LOCATIONS}/*.conf;\n\n` +
+    `    location / {\n` +
+    `        return 404 "No Prisom project at this path.";\n` +
+    `    }\n` +
+    `}\n`;
+
+  try {
+    await fs.mkdir(path.dirname(NGINX_IP_PREVIEW_CONF), { recursive: true });
+    await fs.writeFile(NGINX_IP_PREVIEW_CONF, serverBlockContent, { encoding: "utf8", flag: "w" });
+  } catch (e) {
+    return { ok: false, error: `Cannot write IP preview server block: ${(e as Error).message}` };
+  }
+
+  // Symlink in sites-enabled (idempotent)
+  try {
+    await fs.unlink(NGINX_IP_PREVIEW_ENABLED).catch(() => {});
+    await fs.symlink(NGINX_IP_PREVIEW_CONF, NGINX_IP_PREVIEW_ENABLED);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      return { ok: false, error: permError(NGINX_IP_PREVIEW_ENABLED, NGINX_SITES_ENABLED) };
+    }
+    return { ok: false, error: `Cannot create IP preview symlink: ${(e as Error).message}` };
+  }
+
+  // ── Test + reload ────────────────────────────────────────────────────────
+
+  try {
+    await execFileAsync("nginx", ["-t"], { timeout: 10_000 });
+  } catch (e) {
+    // Roll back location file so subsequent nginx starts aren't broken
+    await fs.unlink(locPath).catch(() => {});
+    const stderr = (e as { stderr?: string }).stderr ?? "";
+    return { ok: false, error: `nginx config test failed:\n${stderr.trim() || (e instanceof Error ? e.message : String(e))}` };
+  }
+
+  try {
+    await execFileAsync("systemctl", ["reload", "nginx"], { timeout: 15_000 });
+  } catch (e) {
+    const stderr = (e as { stderr?: string }).stderr ?? "";
+    return {
+      ok: false,
+      error: `Config written, but nginx reload failed: ${stderr.trim() || (e instanceof Error ? e.message : String(e))}`,
+    };
+  }
+
+  return { ok: true, url, mode: "path_ip" };
 }
 
 // ── SSL via certbot ────────────────────────────────────────────────────────

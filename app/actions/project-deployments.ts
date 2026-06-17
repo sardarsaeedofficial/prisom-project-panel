@@ -27,7 +27,7 @@ import {
   validateAndParseCommand,
   type Pm2AppStatus,
 } from "@/lib/projects/project-deploy-runner";
-import { publishDomain, isValidDomain } from "@/lib/projects/nginx-manager";
+import { publishDomain, publishIpPreviewPath, isValidDomain } from "@/lib/projects/nginx-manager";
 import { getDecryptedEnvVarsForDeploy } from "@/app/actions/project-envvars";
 
 // ── Config ─────────────────────────────────────────────────────────────────
@@ -319,6 +319,58 @@ export async function deployProjectAction(
     }).catch(() => {}); // non-fatal
   }
 
+  // ── Auto-publish IP preview (path-based, non-fatal) ─────────────────────
+  // Only attempt if the deploy succeeded and no existing preview is active at root_ip
+  // (root_ip means it was set up manually and we must not overwrite it with path_ip).
+  let previewUrl: string | null    = null;
+  let previewMode: string          = "disabled";
+  let previewStatus: string        = "inactive";
+
+  if (result.ok) {
+    const existingMode = (config as unknown as { publicPreviewMode?: string }).publicPreviewMode ?? "disabled";
+
+    if (existingMode === "root_ip") {
+      // Root IP was configured manually — preserve it, just mark active
+      previewUrl    = (config as unknown as { publicPreviewUrl?: string }).publicPreviewUrl ?? null;
+      previewMode   = "root_ip";
+      previewStatus = "active";
+    } else {
+      // Attempt automatic path-based IP preview setup
+      const ipResult = await publishIpPreviewPath(project.slug, config.port, {
+        routeMode:   (config.routeMode as import("@/lib/projects/nginx-manager").RouteMode) ?? "fullstack_node",
+        staticRoot:  result.publicStaticPath ?? undefined,
+        apiPrefix:   config.apiPrefix ?? "/api",
+        serverIp:    VPS_IP,
+      });
+
+      previewUrl    = ipResult.ok ? (ipResult.url ?? null) : null;
+      previewMode   = ipResult.ok ? "path_ip"  : "disabled";
+      previewStatus = ipResult.ok ? "active"   : "error";
+
+      // Log IP preview outcome (non-fatal either way)
+      await db.projectLog.create({
+        data: {
+          projectId,
+          level:   ipResult.ok ? LogLevel.INFO : LogLevel.WARN,
+          source:  LogSource.DEPLOY,
+          message: ipResult.ok
+            ? `IP preview set up at ${ipResult.url}`
+            : `IP preview auto-setup failed (non-fatal): ${ipResult.error ?? "unknown"}`,
+        },
+      }).catch(() => {});
+    }
+
+    // Persist preview URL/mode/status back onto the config
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data: {
+        publicPreviewUrl:    previewUrl,
+        publicPreviewMode:   previewMode,
+        publicPreviewStatus: previewStatus,
+      },
+    }).catch(() => {}); // non-fatal — deploy already succeeded
+  }
+
   // Update deployment record with outcome.
   // url is intentionally left null — it's set by publishProjectDomainAction when
   // a public domain is connected.  Internal port URLs are not "live" URLs.
@@ -506,6 +558,94 @@ export async function getProjectRuntimeLogsAction(
 
   const logs = await getPm2AppLogs(config.pm2Name, 200);
   return { ok: true, error: "", logs };
+}
+
+// ── Action: setPublicPreviewUrlAction ────────────────────────────────────
+
+/**
+ * Manually sets the public preview URL for a project.
+ * Use this to backfill existing deployments or override the auto-detected URL.
+ *
+ * mode values:
+ *   "root_ip"           — served at http://IP/ (manually set up on VPS)
+ *   "path_ip"           — served at http://IP/<slug>/ (auto or manual)
+ *   "preview_subdomain" — served at https://<slug>.domain.com
+ *   "raw_port"          — served at http://IP:PORT (raw, not recommended publicly)
+ *   "disabled"          — no public IP preview
+ */
+export async function setPublicPreviewUrlAction(
+  projectId: string,
+  {
+    publicPreviewUrl,
+    publicPreviewMode,
+    publicPreviewStatus,
+  }: {
+    publicPreviewUrl:    string;
+    publicPreviewMode:   string;
+    publicPreviewStatus: string;
+  }
+): Promise<{ ok: boolean; error: string }> {
+  const project = await verifyOwnership(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  if (!project.deploymentConfig) {
+    return { ok: false, error: "No deployment config found. Deploy the project first." };
+  }
+
+  const VALID_MODES = ["root_ip", "path_ip", "preview_subdomain", "raw_port", "disabled"] as const;
+  const VALID_STATUSES = ["active", "inactive", "error"] as const;
+  if (!VALID_MODES.includes(publicPreviewMode as typeof VALID_MODES[number])) {
+    return { ok: false, error: `Invalid mode: ${publicPreviewMode}` };
+  }
+  if (!VALID_STATUSES.includes(publicPreviewStatus as typeof VALID_STATUSES[number])) {
+    return { ok: false, error: `Invalid status: ${publicPreviewStatus}` };
+  }
+
+  // Validate URL if not disabling
+  const urlTrimmed = publicPreviewUrl.trim();
+  if (publicPreviewMode !== "disabled") {
+    if (!urlTrimmed.startsWith("http://") && !urlTrimmed.startsWith("https://")) {
+      return { ok: false, error: "Preview URL must start with http:// or https://" };
+    }
+  }
+
+  await db.projectDeploymentConfig.update({
+    where: { projectId },
+    data: {
+      publicPreviewUrl:    publicPreviewMode === "disabled" ? null : urlTrimmed,
+      publicPreviewMode,
+      publicPreviewStatus: publicPreviewMode === "disabled" ? "inactive" : publicPreviewStatus,
+    },
+  });
+
+  // If setting root_ip or path_ip, also update project.liveUrl so it's consistent
+  if ((publicPreviewMode === "root_ip" || publicPreviewMode === "path_ip") && urlTrimmed) {
+    // Only set liveUrl if there's no active custom domain overriding it
+    const activeDomain = await db.domain.findFirst({
+      where: { projectId, status: "ACTIVE" },
+      select: { hostname: true, sslStatus: true },
+    });
+    if (!activeDomain) {
+      await db.project.update({
+        where: { id: projectId },
+        data:  { liveUrl: urlTrimmed },
+      });
+    }
+  }
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: publicPreviewMode === "disabled"
+        ? "Public IP preview disabled"
+        : `Public IP preview set: ${urlTrimmed} (${publicPreviewMode})`,
+    },
+  });
+
+  revalidatePath(`/projects/${projectId}/publishing`);
+  return { ok: true, error: "" };
 }
 
 // ── Action: publishProjectDomainAction ────────────────────────────────────
