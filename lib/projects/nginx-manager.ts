@@ -269,7 +269,7 @@ export async function publishDomain(
 
   // Test nginx config
   try {
-    await execFileAsync("nginx", ["-t"], { timeout: 10_000 });
+    await execFileAsync("sudo", ["-n", "/usr/sbin/nginx", "-t"], { timeout: 10_000 });
   } catch (e) {
     await fs.unlink(enabledPath).catch(() => {});
     const stderr = (e as { stderr?: string }).stderr ?? "";
@@ -279,7 +279,7 @@ export async function publishDomain(
 
   // Reload nginx
   try {
-    await execFileAsync("systemctl", ["reload", "nginx"], { timeout: 15_000 });
+    await execFileAsync("sudo", ["-n", "/bin/systemctl", "reload", "nginx"], { timeout: 15_000 });
   } catch (e) {
     const stderr = (e as { stderr?: string }).stderr ?? "";
     const msg    = stderr.trim() || (e instanceof Error ? e.message : String(e));
@@ -427,7 +427,7 @@ export async function publishIpPreviewPath(
   // ── Test + reload ────────────────────────────────────────────────────────
 
   try {
-    await execFileAsync("nginx", ["-t"], { timeout: 10_000 });
+    await execFileAsync("sudo", ["-n", "/usr/sbin/nginx", "-t"], { timeout: 10_000 });
   } catch (e) {
     // Roll back location file so subsequent nginx starts aren't broken
     await fs.unlink(locPath).catch(() => {});
@@ -436,7 +436,7 @@ export async function publishIpPreviewPath(
   }
 
   try {
-    await execFileAsync("systemctl", ["reload", "nginx"], { timeout: 15_000 });
+    await execFileAsync("sudo", ["-n", "/bin/systemctl", "reload", "nginx"], { timeout: 15_000 });
   } catch (e) {
     const stderr = (e as { stderr?: string }).stderr ?? "";
     return {
@@ -521,7 +521,7 @@ export async function removeDomainNginxConfig(
 
   // Test nginx config (must pass before reload)
   try {
-    await execFileAsync("nginx", ["-t"], { timeout: 10_000 });
+    await execFileAsync("sudo", ["-n", "/usr/sbin/nginx", "-t"], { timeout: 10_000 });
   } catch (e) {
     const stderr = (e as { stderr?: string }).stderr ?? "";
     const msg    = stderr.trim() || (e instanceof Error ? e.message : String(e));
@@ -530,7 +530,7 @@ export async function removeDomainNginxConfig(
 
   // Reload nginx
   try {
-    await execFileAsync("systemctl", ["reload", "nginx"], { timeout: 15_000 });
+    await execFileAsync("sudo", ["-n", "/bin/systemctl", "reload", "nginx"], { timeout: 15_000 });
   } catch (e) {
     const stderr = (e as { stderr?: string }).stderr ?? "";
     const msg    = stderr.trim() || (e instanceof Error ? e.message : String(e));
