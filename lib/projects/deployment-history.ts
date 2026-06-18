@@ -209,7 +209,7 @@ export async function listProjectDeploymentHistory(input: {
   const rows = await db.deployment.findMany({
     where:   { projectId },
     orderBy: { createdAt: "desc" },
-    take:    Math.min(limit, 50),
+    take:    Math.min(limit, 100),
     select: {
       id: true, projectId: true, status: true, source: true,
       url: true, errorMessage: true, metadata: true,
@@ -579,4 +579,94 @@ export async function rollbackProjectDeployment(input: {
       },
     },
   };
+}
+
+// ── Backfill ───────────────────────────────────────────────────────────────────
+
+export type BackfillResult = {
+  deploymentId:  string;
+  deploymentRef: string;
+};
+
+/**
+ * Mark the newest successful deployment that has an existing release folder as
+ * active, when no deployment currently has isActive=true.
+ *
+ * Only runs if no deployment is already marked active.
+ * Requires an explicit button click — never auto-invoked.
+ */
+export async function backfillActiveDeployment(input: {
+  projectId: string;
+}): Promise<ActionResult<BackfillResult>> {
+  const { projectId } = input;
+
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { id: true, slug: true },
+  });
+  if (!project) return { ok: false, error: "Project not found.", code: "NOT_FOUND" };
+
+  // Abort if any deployment is already marked active
+  const existingActive = await db.deployment.findFirst({
+    where:  { projectId, isActive: true },
+    select: { id: true },
+  });
+  if (existingActive) {
+    return {
+      ok:    false,
+      error: "A deployment is already marked as active. No backfill needed.",
+      code:  "ALREADY_ACTIVE",
+    };
+  }
+
+  // Find candidates: newest successful deployments (check up to 10 for release folder)
+  const candidates = await db.deployment.findMany({
+    where:   { projectId, status: DeploymentStatus.SUCCESS },
+    orderBy: { createdAt: "desc" },
+    take:    10,
+    select:  { id: true, metadata: true },
+  });
+
+  let chosenId:  string | null = null;
+  let chosenRef: string | null = null;
+
+  for (const c of candidates) {
+    const meta = extractMeta(c.metadata);
+    const ref  = meta.deploymentRef ?? null;
+    if (!ref) continue;
+    const exists = await checkReleaseExists(project.slug, ref);
+    if (exists) {
+      chosenId  = c.id;
+      chosenRef = ref;
+      break;
+    }
+  }
+
+  if (!chosenId || !chosenRef) {
+    return {
+      ok:    false,
+      error: "No successful deployment with an existing release folder was found.",
+      code:  "NO_CANDIDATE",
+    };
+  }
+
+  const now = new Date();
+
+  await db.deployment.update({
+    where: { id: chosenId },
+    data:  { isActive: true, activatedAt: now },
+  });
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      deploymentId: chosenId,
+      level:   LogLevel.INFO,
+      source:  LogSource.DEPLOY,
+      message: `Backfill: marked deployment ${chosenRef} as active (manual).`,
+      metadata: { deploymentRef: chosenRef, backfill: true } as object,
+    },
+  }).catch(() => {});
+
+  return { ok: true, data: { deploymentId: chosenId, deploymentRef: chosenRef } };
 }

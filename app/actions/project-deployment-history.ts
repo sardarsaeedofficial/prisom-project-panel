@@ -20,9 +20,11 @@ import {
   listProjectDeploymentHistory,
   getProjectDeploymentDetail,
   rollbackProjectDeployment,
+  backfillActiveDeployment,
   type DeploymentHistoryResponse,
   type DeploymentHistoryDetail,
   type RollbackResult,
+  type BackfillResult,
 } from "@/lib/projects/deployment-history";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ export type {
   DeploymentHistoryResponse,
   DeploymentHistoryDetail,
   RollbackResult,
+  BackfillResult,
   DeploymentHistoryItem,
   DeploymentLogEntry,
   RollbackReadinessCheck,
@@ -62,7 +65,7 @@ async function verifyOwnership(
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 /**
- * Retrieve the deployment history for a project.
+ * Retrieve the deployment history for a project (up to 100 most recent).
  */
 export async function getProjectDeploymentHistoryAction(
   projectId: string,
@@ -70,7 +73,7 @@ export async function getProjectDeploymentHistoryAction(
   const auth = await verifyOwnership(projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
-  return listProjectDeploymentHistory({ projectId, limit: 20 });
+  return listProjectDeploymentHistory({ projectId, limit: 100 });
 }
 
 /**
@@ -104,6 +107,27 @@ export async function rollbackProjectDeploymentAction(input: {
 
   if (result.ok) {
     revalidatePath(`/projects/${input.projectId}/publishing`);
+  }
+
+  return result;
+}
+
+/**
+ * Backfill: mark the newest successful deployment (with existing release folder)
+ * as active, when no deployment currently has isActive=true.
+ *
+ * Requires an explicit button click. Never auto-invoked.
+ */
+export async function backfillActiveDeploymentAction(
+  projectId: string,
+): Promise<ActionResult<BackfillResult>> {
+  const auth = await verifyOwnership(projectId);
+  if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
+
+  const result = await backfillActiveDeployment({ projectId });
+
+  if (result.ok) {
+    revalidatePath(`/projects/${projectId}/publishing`);
   }
 
   return result;
