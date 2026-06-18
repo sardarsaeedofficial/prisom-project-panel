@@ -4,18 +4,27 @@
  * Sprint 8 — Safe git operations for the project Git panel.
  *
  * Safety rules enforced here:
- *  - Only an explicit allowlist of git sub-commands
- *  - Path traversal / absolute-path validation on every file arg
- *  - Secret files (*.pem, .env, *.key, …) blocked from staging
- *  - No destructive operations (no reset --hard, no clean, no force-push, no rebase)
- *  - Remote URLs are redacted before being returned to the client
- *  - execFile only (never shell: true) via the shared runCommand helper
- *  - GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS=echo prevent interactive credential prompts
- *  - git pull only allowed on a clean working tree
- *  - git push requires confirmed:true (UI confirmation gate)
+ *  ─ Parent-repo isolation (NEW):
+ *      • .git must exist DIRECTLY inside the project root (dir or worktree file).
+ *        If not found, the project is not a git repo — no parent walking allowed.
+ *      • GIT_CEILING_DIRECTORIES is set to path.dirname(root) on EVERY git call.
+ *        This prevents git from discovering the panel's own .git above storage/projects/.
+ *      • git rev-parse --show-toplevel is verified against root via realpath.
+ *        If it resolves to any parent directory the call is rejected.
+ *      • Any file path from git status that starts with ../ is silently dropped.
+ *  ─ Command allowlist: only an explicit set of git sub-commands is accepted.
+ *  ─ Path traversal / absolute-path validation on every file arg.
+ *  ─ Secret files (*.pem, .env, *.key, …) blocked from staging.
+ *  ─ No destructive operations (no reset, no clean, no force-push, no rebase).
+ *  ─ Remote URLs are redacted before being returned to the client.
+ *  ─ execFile only (never shell: true) via the shared runCommand helper.
+ *  ─ GIT_TERMINAL_PROMPT=0 / GIT_ASKPASS=echo prevent credential prompts.
+ *  ─ git pull only allowed on a clean working tree.
+ *  ─ git push requires confirmed:true (UI gate).
  */
 
-import path from "path";
+import path    from "path";
+import { promises as fs } from "fs";
 import { runCommand, sanitizeOutput } from "@/lib/server/command-runner";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -30,67 +39,77 @@ export type GitActionResult<T = void> =
   | { ok: false; error: string };
 
 export interface GitRepoStatus {
-  isRepo: boolean;
-  root: string;
-  branch: string | null;
-  upstream: string | null;
-  ahead: number;
-  behind: number;
-  clean: boolean;
-  changedFiles: GitChangedFile[];
-  remotes: GitRemote[];
+  isRepo:        boolean;
+  root:          string;
+  branch:        string | null;
+  upstream:      string | null;
+  ahead:         number;
+  behind:        number;
+  clean:         boolean;
+  changedFiles:  GitChangedFile[];
+  remotes:       GitRemote[];
   recentCommits: GitCommitSummary[];
 }
 
 export interface GitChangedFile {
-  path: string;
-  status: "modified" | "added" | "deleted" | "renamed" | "untracked" | "unknown";
-  staged: boolean;
-  unstaged: boolean;
-  safeToStage: boolean;
+  path:             string;
+  status:           "modified" | "added" | "deleted" | "renamed" | "untracked" | "unknown";
+  staged:           boolean;
+  unstaged:         boolean;
+  safeToStage:      boolean;
   stageBlockReason?: string;
 }
 
 export interface GitRemote {
-  name: string;
+  name:     string;
   fetchUrl: string;
-  pushUrl: string;
+  pushUrl:  string;
 }
 
 export interface GitCommitSummary {
-  hash: string;
+  hash:      string;
   shortHash: string;
-  message: string;
-  author: string;
-  date: string;
+  message:   string;
+  author:    string;
+  date:      string;
 }
 
 // ── Allowed git subcommands (exhaustive allowlist) ────────────────────────────
 
 const ALLOWED_SUBCOMMANDS = new Set([
-  "add",      // staging
-  "commit",   // committing staged changes
-  "diff",     // viewing diffs (no --output= allowed)
-  "fetch",    // fetch (read-only network)
-  "log",      // recent commits
-  "pull",     // pull --ff-only only
-  "push",     // push origin <branch> — no --force
-  "remote",   // remote -v (read-only)
-  "restore",  // restore --staged (unstage only)
-  "rev-parse",// repo detection, branch name
-  "status",   // porcelain status
+  "add",       // staging
+  "commit",    // committing staged changes
+  "diff",      // viewing diffs
+  "fetch",     // fetch (read-only network)
+  "log",       // recent commits
+  "pull",      // pull --ff-only only
+  "push",      // push origin <branch> — no --force
+  "remote",    // remote -v (read-only)
+  "restore",   // restore --staged (unstage only)
+  "rev-parse", // repo detection, branch name, top-level
+  "status",    // porcelain status
 ]);
 
-// ── Git env — suppress all interactive prompts ────────────────────────────────
+// ── Per-call git environment (with ceiling) ───────────────────────────────────
 
-const GIT_ENV: Record<string, string> = {
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_ASKPASS:         "echo",
-  GIT_AUTHOR_NAME:     "Prisom Project Panel",
-  GIT_AUTHOR_EMAIL:    "panel@prisom.local",
-  GIT_COMMITTER_NAME:  "Prisom Project Panel",
-  GIT_COMMITTER_EMAIL: "panel@prisom.local",
-};
+/**
+ * Build a git env block for a specific project root.
+ *
+ * GIT_CEILING_DIRECTORIES is set to the PARENT of root so that git cannot
+ * walk upward past root to discover any .git above (e.g. the panel repo).
+ */
+function buildGitEnv(root: string): Record<string, string> {
+  return {
+    GIT_TERMINAL_PROMPT:     "0",
+    GIT_ASKPASS:             "echo",
+    // Key safety: git will not ascend past root's parent when searching for .git
+    GIT_CEILING_DIRECTORIES: path.dirname(root),
+    GIT_AUTHOR_NAME:         "Prisom Project Panel",
+    GIT_AUTHOR_EMAIL:        "panel@prisom.local",
+    GIT_COMMITTER_NAME:      "Prisom Project Panel",
+    GIT_COMMITTER_EMAIL:     "panel@prisom.local",
+  };
+}
 
 // ── Internal git runner ───────────────────────────────────────────────────────
 
@@ -98,7 +117,7 @@ interface GitRun {
   ok:     boolean;
   stdout: string;
   stderr: string;
-  output: string; // combined stdout + stderr (trimmed)
+  output: string; // combined, trimmed
 }
 
 async function runGit(subcommand: string, args: string[], root: string): Promise<GitRun> {
@@ -108,9 +127,9 @@ async function runGit(subcommand: string, args: string[], root: string): Promise
   }
 
   const result = await runCommand("git", [subcommand, ...args], {
-    cwd: root,
+    cwd:      root,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: GIT_ENV,
+    env:      buildGitEnv(root),
   });
 
   const stdout = sanitizeOutput(result.stdout).trim();
@@ -120,11 +139,72 @@ async function runGit(subcommand: string, args: string[], root: string): Promise
   return { ok: result.exitCode === 0, stdout, stderr, output };
 }
 
+// ── Strict project-local git repo detection ───────────────────────────────────
+
+/**
+ * The ONLY gate that determines whether a directory is considered a git repo
+ * for the purposes of the project Git panel.
+ *
+ * Rules (all three must pass):
+ *  1. <root>/.git must exist as a directory (normal repo) or a file (worktree).
+ *     A missing .git means no repo — we do NOT rely on git's own upward walk.
+ *  2. git rev-parse --show-toplevel (run with GIT_CEILING_DIRECTORIES set)
+ *     must succeed and return a path that, after realpath resolution, equals root.
+ *     If it resolves to any parent directory, the call is rejected — this is the
+ *     "parent repo" safety check.
+ */
+async function assertProjectGitRepo(
+  root: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // Step 1 — physical .git presence check (no git subprocess needed)
+  const gitEntry = path.join(root, ".git");
+  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stat = await fs.stat(gitEntry);
+  } catch {
+    return { ok: false, reason: "This project source is not connected to Git yet." };
+  }
+
+  if (!stat.isDirectory() && !stat.isFile()) {
+    // .git exists but is neither dir (normal) nor file (worktree) — unexpected
+    return { ok: false, reason: "This project source is not connected to Git yet." };
+  }
+
+  // Step 2 — git top-level must match root (detects parent-repo takeover)
+  const topResult = await runGit("rev-parse", ["--show-toplevel"], root);
+  if (!topResult.ok || !topResult.stdout) {
+    return { ok: false, reason: "This project source is not connected to Git yet." };
+  }
+
+  const rawTop = topResult.stdout.trim();
+
+  // Resolve symlinks for both paths so the comparison is reliable
+  const [resolvedTop, resolvedRoot] = await Promise.all([
+    fs.realpath(rawTop).catch(() => rawTop),
+    fs.realpath(root).catch(() => root),
+  ]);
+
+  // Normalise separators (matters on Windows dev machines, harmless on Linux VPS)
+  const normTop  = resolvedTop.split(path.sep).join("/");
+  const normRoot = resolvedRoot.split(path.sep).join("/");
+
+  if (normTop !== normRoot) {
+    // Top-level is NOT the project root.
+    // Most likely cause: git walked up to a parent repo.
+    // (normRoot.startsWith(normTop + "/") catches exactly that case.)
+    return {
+      ok: false,
+      reason: "This project source is not connected to Git yet.",
+    };
+  }
+
+  return { ok: true };
+}
+
 // ── Remote URL redaction ──────────────────────────────────────────────────────
 
 function redactRemoteUrl(url: string): string {
   return url
-    // https://ghp_xxx@github.com/...  or  https://user:token@github.com/...
     .replace(/https?:\/\/[^@\s]+@/, "https://[REDACTED]@")
     .trim();
 }
@@ -133,7 +213,6 @@ function redactRemoteUrl(url: string): string {
 
 interface StageCheck { safe: boolean; reason?: string; }
 
-/** Files that must never be staged regardless of user intent. */
 const BLOCKED_STAGE_EXTENSIONS = [
   ".pem", ".key", ".crt", ".p12", ".pfx", ".p8",
   ".sqlite", ".sqlite3", ".db",
@@ -149,39 +228,31 @@ export function isSafeToStage(relativePath: string): StageCheck {
   if (!relativePath || typeof relativePath !== "string") {
     return { safe: false, reason: "Invalid path" };
   }
-
-  // No absolute paths
   if (path.isAbsolute(relativePath)) {
     return { safe: false, reason: "Absolute paths not allowed" };
   }
-
-  // No null bytes or shell metacharacters
   if (/[\0|;&`$<>!]/.test(relativePath)) {
     return { safe: false, reason: "Invalid characters in path" };
   }
 
-  // No path traversal
   const normalized = path.posix.normalize(relativePath.replace(/\\/g, "/"));
-  if (normalized.startsWith("..")) {
+
+  // Block any path that escapes the project root
+  if (normalized === ".." || normalized.startsWith("../")) {
     return { safe: false, reason: "Path traversal not allowed" };
   }
 
-  const lower = relativePath.toLowerCase().replace(/\\/g, "/");
+  const lower    = relativePath.toLowerCase().replace(/\\/g, "/");
   const basename = lower.split("/").pop() ?? lower;
 
-  // Block .env files
   if (basename === ".env" || basename.startsWith(".env.") || basename === ".envrc") {
     return { safe: false, reason: "Environment files cannot be staged" };
   }
-
-  // Block by extension
   for (const ext of BLOCKED_STAGE_EXTENSIONS) {
     if (lower.endsWith(ext)) {
       return { safe: false, reason: `${ext} files cannot be staged` };
     }
   }
-
-  // Block blocked directory prefixes
   for (const dir of BLOCKED_STAGE_DIR_PREFIXES) {
     if (lower === dir.slice(0, -1) || lower.startsWith(dir)) {
       return { safe: false, reason: `${dir.slice(0, -1)} directory cannot be staged` };
@@ -198,7 +269,7 @@ function isValidRelativePath(p: string): boolean {
   if (path.isAbsolute(p)) return false;
   if (/[\0]/.test(p)) return false;
   const normalized = path.posix.normalize(p.replace(/\\/g, "/"));
-  if (normalized.startsWith("..")) return false;
+  if (normalized === ".." || normalized.startsWith("../")) return false;
   return true;
 }
 
@@ -217,18 +288,15 @@ function parseBranchLine(line: string): BranchInfo {
 
   const rest = line.slice(3);
 
-  // Detached HEAD
   if (rest.startsWith("HEAD (no branch)")) {
     return { branch: "HEAD", upstream: null, ahead: 0, behind: 0 };
   }
 
-  // No commits yet
   const noCommitsMatch = rest.match(/^No commits yet on (\S+)/);
   if (noCommitsMatch) {
     return { branch: noCommitsMatch[1], upstream: null, ahead: 0, behind: 0 };
   }
 
-  // "branch...upstream [ahead N, behind M]" or plain "branch"
   const ellipsisIdx = rest.indexOf("...");
   const branchPart  = ellipsisIdx >= 0 ? rest.slice(0, ellipsisIdx) : rest.split(" ")[0];
   const branch      = branchPart.trim() || null;
@@ -239,7 +307,7 @@ function parseBranchLine(line: string): BranchInfo {
 
   if (ellipsisIdx >= 0) {
     const afterEllipsis = rest.slice(ellipsisIdx + 3);
-    const spaceIdx = afterEllipsis.indexOf(" ");
+    const spaceIdx      = afterEllipsis.indexOf(" ");
     upstream = (spaceIdx >= 0 ? afterEllipsis.slice(0, spaceIdx) : afterEllipsis).trim() || null;
 
     const aheadMatch  = afterEllipsis.match(/ahead (\d+)/);
@@ -256,33 +324,30 @@ function parseBranchLine(line: string): BranchInfo {
 function parseStatusLine(line: string): GitChangedFile | null {
   if (line.length < 4) return null;
 
-  const X        = line[0]; // index / staged status
-  const Y        = line[1]; // worktree / unstaged status
-  // line[2] is always a space in porcelain=v1
+  const X        = line[0];
+  const Y        = line[1];
   const filePath = line.slice(3).trim();
 
   if (!filePath) return null;
+  if (X === "!" && Y === "!") return null; // ignored
 
-  // Ignored files — skip entirely
-  if (X === "!" && Y === "!") return null;
+  // ── Safety: drop any path that escapes the project root ──────────────────
+  // With GIT_CEILING_DIRECTORIES this should never happen, but be explicit.
+  const normalized = path.posix.normalize(filePath.replace(/\\/g, "/"));
+  if (normalized === ".." || normalized.startsWith("../")) return null;
 
-  // Untracked
   if (X === "?" && Y === "?") {
     const check = isSafeToStage(filePath);
     return {
-      path: filePath,
-      status: "untracked",
-      staged: false,
-      unstaged: true,
-      safeToStage: check.safe,
-      stageBlockReason: check.reason,
+      path: filePath, status: "untracked",
+      staged: false, unstaged: true,
+      safeToStage: check.safe, stageBlockReason: check.reason,
     };
   }
 
   const staged   = X !== " ";
   const unstaged = Y !== " " && Y !== "?";
 
-  // Determine display status from the more significant of X or Y
   const dominant = X !== " " ? X : Y;
   let status: GitChangedFile["status"] = "unknown";
   switch (dominant) {
@@ -295,14 +360,10 @@ function parseStatusLine(line: string): GitChangedFile | null {
   }
 
   const check = isSafeToStage(filePath);
-
   return {
-    path: filePath,
-    status,
-    staged,
-    unstaged,
-    safeToStage: check.safe,
-    stageBlockReason: check.reason,
+    path: filePath, status,
+    staged, unstaged,
+    safeToStage: check.safe, stageBlockReason: check.reason,
   };
 }
 
@@ -310,49 +371,53 @@ function parseStatusLine(line: string): GitChangedFile | null {
 
 function parseRemotes(output: string): GitRemote[] {
   const map = new Map<string, GitRemote>();
-
   for (const line of output.split("\n")) {
     const m = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
     if (!m) continue;
     const [, name, rawUrl, type] = m;
     const url = redactRemoteUrl(rawUrl);
-
-    if (!map.has(name)) {
-      map.set(name, { name, fetchUrl: url, pushUrl: url });
-    }
-    const remote = map.get(name)!;
-    if (type === "fetch") remote.fetchUrl = url;
-    if (type === "push")  remote.pushUrl  = url;
+    if (!map.has(name)) map.set(name, { name, fetchUrl: url, pushUrl: url });
+    const r = map.get(name)!;
+    if (type === "fetch") r.fetchUrl = url;
+    if (type === "push")  r.pushUrl  = url;
   }
-
   return Array.from(map.values());
+}
+
+// ── Not-a-repo sentinel ───────────────────────────────────────────────────────
+
+function notRepo(root: string): GitActionResult<GitRepoStatus> {
+  return {
+    ok: true,
+    data: {
+      isRepo: false, root,
+      branch: null, upstream: null,
+      ahead: 0, behind: 0,
+      clean: true,
+      changedFiles: [], remotes: [], recentCommits: [],
+    },
+  };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Returns full git status for the project root.
- * Never throws — returns { isRepo: false } if directory is not a git repo.
+ * Returns the full git status for the project root.
+ *
+ * Returns { isRepo: false } (never throws) if:
+ *  - <root>/.git doesn't exist directly (parent-repo guard, step 1)
+ *  - git rev-parse --show-toplevel doesn't resolve to root (step 2)
  */
 export async function getProjectGitStatus(
   root: string,
 ): Promise<GitActionResult<GitRepoStatus>> {
-  // Is it a git repo at all?
-  const revParse = await runGit("rev-parse", ["--git-dir"], root);
-  if (!revParse.ok) {
-    return {
-      ok: true,
-      data: {
-        isRepo: false, root,
-        branch: null, upstream: null,
-        ahead: 0, behind: 0,
-        clean: true,
-        changedFiles: [], remotes: [], recentCommits: [],
-      },
-    };
+  // ── Strict project-local repo check ────────────────────────────────────────
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) {
+    return notRepo(root);
   }
 
-  // Status (porcelain=v1 with branch info)
+  // ── Status ─────────────────────────────────────────────────────────────────
   const statusResult = await runGit("status", ["--porcelain=v1", "-b"], root);
   const lines = statusResult.stdout.split("\n").filter(Boolean);
 
@@ -364,11 +429,11 @@ export async function getProjectGitStatus(
     .map(parseStatusLine)
     .filter((f): f is GitChangedFile => f !== null);
 
-  // Remotes (read-only, redacted)
+  // ── Remotes (read-only, credentials redacted) ───────────────────────────────
   const remotesResult = await runGit("remote", ["-v"], root);
   const remotes = remotesResult.ok ? parseRemotes(remotesResult.stdout) : [];
 
-  // Recent commits
+  // ── Recent commits ──────────────────────────────────────────────────────────
   const logResult = await runGit(
     "log",
     ["--pretty=format:%H|%s|%an|%ai", "-15"],
@@ -380,16 +445,15 @@ export async function getProjectGitStatus(
     for (const logLine of logResult.stdout.split("\n").filter(Boolean)) {
       const pipeIdx = logLine.indexOf("|");
       if (pipeIdx < 7) continue;
-      const hash = logLine.slice(0, pipeIdx);
-      const rest = logLine.slice(pipeIdx + 1);
-      // Remaining format: message|author|date (date is last)
-      const lastPipe  = rest.lastIndexOf("|");
-      if (lastPipe < 0) continue;
-      const date      = rest.slice(lastPipe + 1).split(" ").slice(0, 2).join(" ");
-      const rest2     = rest.slice(0, lastPipe);
-      const penult    = rest2.lastIndexOf("|");
-      const author    = penult >= 0 ? rest2.slice(penult + 1) : rest2;
-      const message   = penult >= 0 ? rest2.slice(0, penult) : "";
+      const hash  = logLine.slice(0, pipeIdx);
+      const rest  = logLine.slice(pipeIdx + 1);
+      const lastP = rest.lastIndexOf("|");
+      if (lastP < 0) continue;
+      const date  = rest.slice(lastP + 1).split(" ").slice(0, 2).join(" ");
+      const rest2 = rest.slice(0, lastP);
+      const penP  = rest2.lastIndexOf("|");
+      const author  = penP >= 0 ? rest2.slice(penP + 1) : rest2;
+      const message = penP >= 0 ? rest2.slice(0, penP) : "";
       recentCommits.push({
         hash,
         shortHash: hash.slice(0, 7),
@@ -403,29 +467,28 @@ export async function getProjectGitStatus(
   return {
     ok: true,
     data: {
-      isRepo: true,
-      root,
-      branch,
-      upstream,
-      ahead,
-      behind,
+      isRepo: true, root,
+      branch, upstream, ahead, behind,
       clean: changedFiles.length === 0,
-      changedFiles,
-      remotes,
-      recentCommits,
+      changedFiles, remotes, recentCommits,
     },
   };
 }
 
 /**
- * Returns the diff for a single file (or the entire working tree if path is null).
+ * Returns the diff for a single file (or the full working tree if path is null).
  * Truncated at 100 KB.
+ *
+ * Requires the project to have its own .git (parent-repo guard applied).
  */
 export async function getProjectGitDiff(
   root:         string,
   relativePath: string | null,
   staged:       boolean,
 ): Promise<GitActionResult<{ diff: string; truncated: boolean }>> {
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   const args: string[] = [];
   if (staged) args.push("--cached");
   args.push("--no-color");
@@ -437,11 +500,10 @@ export async function getProjectGitDiff(
     args.push("--", relativePath);
   }
 
-  const result = await runGit("diff", args, root);
-  // git diff exits 0 even when there is no diff — that's fine
-  const raw       = result.stdout;
+  const result   = await runGit("diff", args, root);
+  const raw      = result.stdout;
   const truncated = raw.length > DIFF_MAX_BYTES;
-  const diff      = truncated
+  const diff     = truncated
     ? raw.slice(0, DIFF_MAX_BYTES) + "\n\n[... diff truncated at 100 KB ...]"
     : raw;
 
@@ -450,7 +512,7 @@ export async function getProjectGitDiff(
 
 /**
  * Stages the given relative paths via `git add -- <paths>`.
- * Silently skips paths that fail the safety check; errors only if ALL are blocked.
+ * Silently skips blocked paths; errors only if ALL paths are blocked.
  */
 export async function stageProjectFiles(
   root:  string,
@@ -458,19 +520,16 @@ export async function stageProjectFiles(
 ): Promise<GitActionResult<{ staged: number; blocked: string[] }>> {
   if (!paths.length) return { ok: false, error: "No files specified." };
 
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   const safe: string[]    = [];
   const blocked: string[] = [];
 
   for (const p of paths) {
-    if (!isValidRelativePath(p)) {
-      blocked.push(`${p}: invalid path`);
-      continue;
-    }
+    if (!isValidRelativePath(p)) { blocked.push(`${p}: invalid path`); continue; }
     const check = isSafeToStage(p);
-    if (!check.safe) {
-      blocked.push(`${p}: ${check.reason}`);
-      continue;
-    }
+    if (!check.safe) { blocked.push(`${p}: ${check.reason}`); continue; }
     safe.push(p);
   }
 
@@ -479,9 +538,7 @@ export async function stageProjectFiles(
   }
 
   const result = await runGit("add", ["--", ...safe], root);
-  if (!result.ok) {
-    return { ok: false, error: result.output || "git add failed." };
-  }
+  if (!result.ok) return { ok: false, error: result.output || "git add failed." };
 
   return { ok: true, data: { staged: safe.length, blocked } };
 }
@@ -495,15 +552,14 @@ export async function unstageProjectFiles(
 ): Promise<GitActionResult<{ unstaged: number }>> {
   if (!paths.length) return { ok: false, error: "No files specified." };
 
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   const valid = paths.filter(isValidRelativePath);
-  if (valid.length === 0) {
-    return { ok: false, error: "No valid file paths provided." };
-  }
+  if (valid.length === 0) return { ok: false, error: "No valid file paths provided." };
 
   const result = await runGit("restore", ["--staged", "--", ...valid], root);
-  if (!result.ok) {
-    return { ok: false, error: result.output || "git restore --staged failed." };
-  }
+  if (!result.ok) return { ok: false, error: result.output || "git restore --staged failed." };
 
   return { ok: true, data: { unstaged: valid.length } };
 }
@@ -515,10 +571,13 @@ export async function commitProjectChanges(
   root:    string,
   message: string,
 ): Promise<GitActionResult<{ hash: string; output: string }>> {
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   const trimmed = message.trim();
-  if (!trimmed)           return { ok: false, error: "Commit message cannot be empty." };
+  if (!trimmed)               return { ok: false, error: "Commit message cannot be empty." };
   if (trimmed.length > 5_000) return { ok: false, error: "Commit message too long (max 5 000 chars)." };
-  if (/\0/.test(trimmed)) return { ok: false, error: "Commit message contains invalid characters." };
+  if (/\0/.test(trimmed))     return { ok: false, error: "Commit message contains invalid characters." };
 
   const result = await runGit("commit", ["-m", trimmed], root);
 
@@ -530,7 +589,6 @@ export async function commitProjectChanges(
     return { ok: false, error: result.output || "git commit failed." };
   }
 
-  // "[main abc1234] message" — extract short hash
   const hashMatch = result.output.match(/\[[\w/\-.]+\s+([a-f0-9]{5,})\]/);
   const hash      = hashMatch ? hashMatch[1] : "unknown";
 
@@ -538,61 +596,56 @@ export async function commitProjectChanges(
 }
 
 /**
- * Fetches from origin (read-only network call, no changes to working tree).
+ * Fetches from origin (read-only network call).
  */
 export async function fetchProjectRepo(
   root: string,
 ): Promise<GitActionResult<{ output: string }>> {
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   const result = await runGit("fetch", ["origin"], root);
-  if (!result.ok) {
-    return { ok: false, error: result.output || "git fetch failed." };
-  }
+  if (!result.ok) return { ok: false, error: result.output || "git fetch failed." };
   return { ok: true, data: { output: result.output || "Fetch complete." } };
 }
 
 /**
  * Pulls with --ff-only.
- *
- * Sprint 8 rule: "Do not auto-pull if working tree has uncommitted changes."
- * The caller (server action) must verify the tree is clean first and pass
- * clean:true. This function refuses to pull on a dirty tree.
+ * Sprint 8 rule: refused on a dirty working tree.
  */
 export async function pullProjectRepo(
   root:  string,
   clean: boolean,
 ): Promise<GitActionResult<{ output: string }>> {
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   if (!clean) {
     return {
       ok: false,
-      error:
-        "You have uncommitted changes. Please commit or stash them before pulling.",
+      error: "You have uncommitted changes. Please commit or stash them before pulling.",
     };
   }
 
   const result = await runGit("pull", ["--ff-only"], root);
-  if (!result.ok) {
-    return { ok: false, error: result.output || "git pull --ff-only failed." };
-  }
+  if (!result.ok) return { ok: false, error: result.output || "git pull --ff-only failed." };
   return { ok: true, data: { output: result.output || "Pull complete (fast-forward)." } };
 }
 
 /**
  * Pushes the current branch to origin.
- *
- * Sprint 8 rules:
- *  - No --force or --force-with-lease
- *  - confirmed must be true (UI gate)
+ * Sprint 8 rules: no --force; confirmed must be true.
  */
 export async function pushProjectRepo(
   root:      string,
   branch:    string,
   confirmed: boolean,
 ): Promise<GitActionResult<{ output: string; isAuthError: boolean }>> {
-  if (!confirmed) {
-    return { ok: false, error: "Push requires explicit confirmation." };
-  }
+  if (!confirmed) return { ok: false, error: "Push requires explicit confirmation." };
 
-  // Branch name validation
+  const repoCheck = await assertProjectGitRepo(root);
+  if (!repoCheck.ok) return { ok: false, error: repoCheck.reason };
+
   if (!branch || !/^[a-zA-Z0-9_\-.\/]+$/.test(branch) || branch.length > 200) {
     return { ok: false, error: "Invalid branch name." };
   }
@@ -600,16 +653,6 @@ export async function pushProjectRepo(
   const result = await runGit("push", ["origin", branch], root);
 
   if (!result.ok) {
-    const lower       = result.output.toLowerCase();
-    const isAuthError =
-      lower.includes("authentication failed") ||
-      lower.includes("permission denied") ||
-      lower.includes("could not read username") ||
-      lower.includes("repository not found") ||
-      lower.includes("403") ||
-      lower.includes("401") ||
-      lower.includes("could not resolve host") ||
-      lower.includes("ssh: connect to host");
     return { ok: false, error: result.output || "git push failed." };
   }
 
