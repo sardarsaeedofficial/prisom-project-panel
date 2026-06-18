@@ -40,6 +40,12 @@ export interface ProjectPackageInfo {
   packageManager:       DetectedPackageManager;
   hasLockfile:          boolean;
   lockfileName:         string | null;
+  /**
+   * True when the root contains pnpm-workspace.yaml or package.json has a
+   * `workspaces` field and the detected PM is pnpm.  Operations against such
+   * roots need `--workspace-root` to avoid ERR_PNPM_ADDING_TO_ROOT.
+   */
+  isPnpmWorkspaceRoot:  boolean;
   scripts:              Record<string, string>;
   dependencies:         Record<string, string>;
   devDependencies:      Record<string, string>;
@@ -94,33 +100,59 @@ const PACKAGE_FILE_NAMES = new Set([
 // ── Package manager detection ─────────────────────────────────────────────────
 
 async function detectPM(root: string): Promise<{
-  pm:           DetectedPackageManager;
-  lockfileName: string | null;
+  pm:                  DetectedPackageManager;
+  lockfileName:        string | null;
+  isPnpmWorkspaceRoot: boolean;
 }> {
   const exists = async (file: string): Promise<boolean> => {
     try { await fs.access(path.join(root, file)); return true; }
     catch { return false; }
   };
 
+  let pm:           DetectedPackageManager = "pnpm";
+  let lockfileName: string | null          = null;
+
   // Lockfile takes priority — unambiguous
-  if (await exists("pnpm-lock.yaml"))    return { pm: "pnpm", lockfileName: "pnpm-lock.yaml" };
-  if (await exists("package-lock.json")) return { pm: "npm",  lockfileName: "package-lock.json" };
-  if (await exists("yarn.lock"))         return { pm: "yarn", lockfileName: "yarn.lock" };
+  if (await exists("pnpm-lock.yaml")) {
+    pm = "pnpm"; lockfileName = "pnpm-lock.yaml";
+  } else if (await exists("package-lock.json")) {
+    pm = "npm"; lockfileName = "package-lock.json";
+  } else if (await exists("yarn.lock")) {
+    pm = "yarn"; lockfileName = "yarn.lock";
+  } else {
+    // packageManager field in package.json
+    try {
+      const raw = await fs.readFile(path.join(root, "package.json"), "utf8");
+      const pkg = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof pkg.packageManager === "string") {
+        const pmField = pkg.packageManager.toLowerCase();
+        if (pmField.startsWith("pnpm"))       pm = "pnpm";
+        else if (pmField.startsWith("npm"))   pm = "npm";
+        else if (pmField.startsWith("yarn"))  pm = "yarn";
+      }
+    } catch { /* no package.json or not parseable — keep fallback pnpm */ }
+  }
 
-  // packageManager field in package.json
-  try {
-    const raw = await fs.readFile(path.join(root, "package.json"), "utf8");
-    const pkg = JSON.parse(raw) as Record<string, unknown>;
-    if (typeof pkg.packageManager === "string") {
-      const pmField = pkg.packageManager.toLowerCase();
-      if (pmField.startsWith("pnpm"))  return { pm: "pnpm",  lockfileName: null };
-      if (pmField.startsWith("npm"))   return { pm: "npm",   lockfileName: null };
-      if (pmField.startsWith("yarn"))  return { pm: "yarn",  lockfileName: null };
+  // ── pnpm workspace root detection ────────────────────────────────────────
+  // Only meaningful for pnpm; npm/yarn don't emit ERR_PNPM_ADDING_TO_ROOT.
+  let isPnpmWorkspaceRoot = false;
+  if (pm === "pnpm") {
+    // Signal 1: pnpm-workspace.yaml present
+    if (await exists("pnpm-workspace.yaml")) {
+      isPnpmWorkspaceRoot = true;
+    } else {
+      // Signal 2: `workspaces` field in package.json
+      try {
+        const raw = await fs.readFile(path.join(root, "package.json"), "utf8");
+        const pkg = JSON.parse(raw) as Record<string, unknown>;
+        if (pkg.workspaces !== undefined && pkg.workspaces !== null) {
+          isPnpmWorkspaceRoot = true;
+        }
+      } catch { /* ignore */ }
     }
-  } catch { /* no package.json or not parseable */ }
+  }
 
-  // Fallback: pnpm (it's the panel's own package manager)
-  return { pm: "pnpm", lockfileName: null };
+  return { pm, lockfileName, isPnpmWorkspaceRoot };
 }
 
 // ── Binary resolver ───────────────────────────────────────────────────────────
@@ -136,20 +168,28 @@ function resolvePMBinary(pm: DetectedPackageManager): string {
 // ── Argument builder ──────────────────────────────────────────────────────────
 
 function buildPMArgs(
-  pm:        DetectedPackageManager,
-  operation: PackageOperation,
-  pkgSpec:   string,
+  pm:              DetectedPackageManager,
+  operation:       PackageOperation,
+  pkgSpec:         string,
+  isWorkspaceRoot: boolean,
 ): string[] {
   switch (pm) {
-    case "pnpm":
+    case "pnpm": {
+      // When the root is a pnpm workspace root, pnpm refuses to install without
+      // an explicit --workspace-root flag (ERR_PNPM_ADDING_TO_ROOT).
+      // Place --workspace-root immediately after the sub-command, before -D and
+      // the specifier, so pnpm sees it as a command flag rather than a package.
+      const wr = isWorkspaceRoot ? ["--workspace-root"] : [];
       switch (operation) {
-        case "install":     return ["add",    pkgSpec, "--ignore-scripts"];
-        case "install-dev": return ["add",    "-D", pkgSpec, "--ignore-scripts"];
-        case "remove":      return ["remove", pkgSpec, "--ignore-scripts"];
-        case "update":      return ["update", pkgSpec, "--ignore-scripts"];
+        case "install":     return ["add",    ...wr,       pkgSpec, "--ignore-scripts"];
+        case "install-dev": return ["add",    ...wr, "-D", pkgSpec, "--ignore-scripts"];
+        case "remove":      return ["remove", ...wr,       pkgSpec, "--ignore-scripts"];
+        case "update":      return ["update", ...wr,       pkgSpec, "--ignore-scripts"];
       }
       break;
+    }
     case "npm":
+      // npm workspaces use -w <workspace> — not applicable here; no flag needed.
       switch (operation) {
         case "install":     return ["install",   pkgSpec, "--ignore-scripts"];
         case "install-dev": return ["install",   "-D", pkgSpec, "--ignore-scripts"];
@@ -158,6 +198,7 @@ function buildPMArgs(
       }
       break;
     case "yarn":
+      // yarn add at workspace root works without a special flag.
       switch (operation) {
         case "install":     return ["add",     pkgSpec, "--ignore-scripts"];
         case "install-dev": return ["add",     "-D", pkgSpec, "--ignore-scripts"];
@@ -188,7 +229,7 @@ function toStringRecord(val: unknown): Record<string, string> {
  * Returns sensible defaults if package.json doesn't exist.
  */
 export async function getPackageInfo(root: string): Promise<Result<ProjectPackageInfo>> {
-  const { pm, lockfileName } = await detectPM(root);
+  const { pm, lockfileName, isPnpmWorkspaceRoot } = await detectPM(root);
 
   let pkg: Record<string, unknown> = {};
   try {
@@ -203,6 +244,7 @@ export async function getPackageInfo(root: string): Promise<Result<ProjectPackag
         packageManager: pm,
         hasLockfile: lockfileName !== null,
         lockfileName,
+        isPnpmWorkspaceRoot,
         scripts: {}, dependencies: {}, devDependencies: {},
         optionalDependencies: {}, peerDependencies: {},
       },
@@ -218,6 +260,7 @@ export async function getPackageInfo(root: string): Promise<Result<ProjectPackag
       packageManager:       pm,
       hasLockfile:          lockfileName !== null,
       lockfileName,
+      isPnpmWorkspaceRoot,
       scripts:              toStringRecord(pkg.scripts),
       dependencies:         toStringRecord(pkg.dependencies),
       devDependencies:      toStringRecord(pkg.devDependencies),
@@ -239,9 +282,9 @@ export async function runPackageOperation(
   operation: PackageOperation,
   specifier: { raw: string; display: string },
 ): Promise<Result<PackageOperationResult>> {
-  const { pm } = await detectPM(root);
+  const { pm, isPnpmWorkspaceRoot } = await detectPM(root);
   const binary  = resolvePMBinary(pm);
-  const args    = buildPMArgs(pm, operation, specifier.raw);
+  const args    = buildPMArgs(pm, operation, specifier.raw, isPnpmWorkspaceRoot);
 
   if (!args.length) {
     return { ok: false, error: "Could not build package operation arguments." };

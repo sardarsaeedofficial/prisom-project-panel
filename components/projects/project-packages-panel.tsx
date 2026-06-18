@@ -90,17 +90,21 @@ function pmColor(pm: string): string {
 }
 
 function buildDisplayCommand(
-  pm:        string,
-  operation: PackageOperation,
-  specifier: string,
+  pm:                  string,
+  operation:           PackageOperation,
+  specifier:           string,
+  isPnpmWorkspaceRoot: boolean,
 ): string {
+  // When the project root is a pnpm workspace root, --workspace-root is
+  // required to avoid ERR_PNPM_ADDING_TO_ROOT.
+  const wr = isPnpmWorkspaceRoot && pm === "pnpm" ? " --workspace-root" : "";
   switch (pm) {
     case "pnpm":
       switch (operation) {
-        case "install":     return `pnpm add ${specifier} --ignore-scripts`;
-        case "install-dev": return `pnpm add -D ${specifier} --ignore-scripts`;
-        case "remove":      return `pnpm remove ${specifier} --ignore-scripts`;
-        case "update":      return `pnpm update ${specifier} --ignore-scripts`;
+        case "install":     return `pnpm add${wr} ${specifier} --ignore-scripts`;
+        case "install-dev": return `pnpm add${wr} -D ${specifier} --ignore-scripts`;
+        case "remove":      return `pnpm remove${wr} ${specifier} --ignore-scripts`;
+        case "update":      return `pnpm update${wr} ${specifier} --ignore-scripts`;
       }
       break;
     case "npm":
@@ -302,6 +306,7 @@ export function ProjectPackagesPanel({ projectId }: Props) {
       info?.packageManager ?? "pnpm",
       operation,
       v.specifier.display,
+      info?.isPnpmWorkspaceRoot ?? false,
     );
     setPendingOp({ operation, specifier: v.specifier.display, displayCommand: displayCmd });
     setOpResult(null);
