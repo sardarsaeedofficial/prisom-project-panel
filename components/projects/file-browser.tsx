@@ -95,19 +95,36 @@ function getExt(name: string): string {
   return i > 0 ? name.slice(i + 1).toLowerCase() : "";
 }
 
+/** Strip leading `./` and trim whitespace — canonical identity key for tabs. */
+function normalizeTabPath(p: string): string {
+  return p.trim().replace(/^\.\//, "");
+}
+
+/** Keep the first tab for each normalized path, discarding later duplicates. */
+function dedupeTabs(tabList: OpenFileTab[]): OpenFileTab[] {
+  const seen = new Set<string>();
+  return tabList.filter((t) => {
+    const key = normalizeTabPath(t.path);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function makeTab(
   path:       string,
   content:    string,
   modifiedAt: string,
   size:       number,
 ): OpenFileTab {
+  const normPath = normalizeTabPath(path);
   return {
-    path,
+    path:          normPath,
     content,
     editedContent: content,
     modifiedAt,
     size,
-    language:   getEditorLanguage(path),
+    language:   getEditorLanguage(normPath),
     isDirty:    false,
     isSaving:   false,
     saveStatus: "idle",
@@ -210,7 +227,7 @@ function FileTree({
       {visible.map((file) => {
         const isDir    = file.isDir;
         const isCollap = isDir && collapsed.has(file.path) && !q;
-        const isSel    = activeTabPath === file.path;
+        const isSel    = activeTabPath !== null && normalizeTabPath(activeTabPath) === normalizeTabPath(file.path);
         return (
           <div
             key={file.path}
@@ -270,10 +287,10 @@ function TabBar({
     >
       {tabs.map((tab) => {
         const name     = tab.path.split("/").pop() ?? tab.path;
-        const isActive = tab.path === activeTabPath;
+        const isActive = normalizeTabPath(tab.path) === normalizeTabPath(activeTabPath ?? "");
         return (
           <div
-            key={tab.path}
+            key={normalizeTabPath(tab.path)}
             onClick={() => onSelect(tab.path)}
             title={tab.path}
             className={`group flex items-center gap-1.5 px-3 border-r cursor-pointer select-none whitespace-nowrap text-xs transition-colors ${
@@ -336,7 +353,7 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
   const [isPending, startTransition] = useTransition();
 
   // Derived
-  const activeTab = tabs.find((t) => t.path === activeTabPath) ?? null;
+  const activeTab = tabs.find((t) => normalizeTabPath(t.path) === normalizeTabPath(activeTabPath ?? "")) ?? null;
 
   // ── Load file tree ───────────────────────────────────────────────────────
 
@@ -361,11 +378,12 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
 
   const openFileInTab = useCallback(async (file: FileTreeItem) => {
     if (file.isDir) return;
+    const normalizedPath = normalizeTabPath(file.path);
 
-    // Focus existing tab if already open
-    const existing = tabs.find((t) => t.path === file.path);
+    // Focus existing tab if already open — compare by normalized path
+    const existing = tabs.find((t) => normalizeTabPath(t.path) === normalizedPath);
     if (existing) {
-      setActiveTabPath(file.path);
+      setActiveTabPath(existing.path);
       return;
     }
 
@@ -377,9 +395,15 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
 
     if (res.ok && res.data) {
       const d   = res.data;
-      const tab = makeTab(d.path, d.content, d.modifiedAt, d.size);
-      setTabs((prev) => [...prev, tab]);
-      setActiveTabPath(d.path);
+      const tab = makeTab(d.path, d.content, d.modifiedAt, d.size); // makeTab normalizes path
+      setTabs((prev) => {
+        // Race guard: a concurrent open may have already added this path
+        if (prev.some((t) => normalizeTabPath(t.path) === normalizeTabPath(tab.path))) {
+          return prev;
+        }
+        return dedupeTabs([...prev, tab]);
+      });
+      setActiveTabPath(normalizeTabPath(d.path));
       setFormatErr(null);
       setGitHint(false);
       setCursorPos({ line: 1, col: 1 });
@@ -391,15 +415,16 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
   // ── Close tab ────────────────────────────────────────────────────────────
 
   const closeTab = useCallback((path: string) => {
-    const tab = tabs.find((t) => t.path === path);
+    const normPath = normalizeTabPath(path);
+    const tab = tabs.find((t) => normalizeTabPath(t.path) === normPath);
     if (tab?.isDirty) {
-      const name = path.split("/").pop() ?? path;
+      const name = tab.path.split("/").pop() ?? tab.path;
       if (!confirm(`"${name}" has unsaved changes. Close anyway?`)) return;
     }
     setTabs((prev) => {
-      const remaining = prev.filter((t) => t.path !== path);
-      if (activeTabPath === path) {
-        const idx  = prev.findIndex((t) => t.path === path);
+      const remaining = prev.filter((t) => normalizeTabPath(t.path) !== normPath);
+      if (activeTabPath && normalizeTabPath(activeTabPath) === normPath) {
+        const idx  = prev.findIndex((t) => normalizeTabPath(t.path) === normPath);
         const next = remaining[Math.min(idx, remaining.length - 1)];
         setActiveTabPath(next?.path ?? null);
       }
@@ -548,9 +573,14 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
     if (res.ok && res.data) {
       setNewFileName(null);
       loadTree();
-      const tab = makeTab(res.data.path, "", res.data.modifiedAt, 0);
-      setTabs((prev) => [...prev, tab]);
-      setActiveTabPath(res.data.path);
+      const tab = makeTab(res.data.path, "", res.data.modifiedAt, 0); // makeTab normalizes path
+      setTabs((prev) => {
+        if (prev.some((t) => normalizeTabPath(t.path) === normalizeTabPath(tab.path))) {
+          return prev;
+        }
+        return dedupeTabs([...prev, tab]);
+      });
+      setActiveTabPath(normalizeTabPath(res.data.path));
     } else if (!res.ok) {
       setNewFileError((res as { ok: false; error: string }).error);
     }
@@ -563,10 +593,11 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
       let next = [...prev];
       for (const result of results) {
         const { path: patchPath, action, newContent, size, modifiedAt } = result;
+        const normPatch = normalizeTabPath(patchPath);
         if (action === "modify") {
-          // Update existing open tab
+          // Update existing open tab by normalized path
           next = next.map((t) =>
-            t.path === patchPath
+            normalizeTabPath(t.path) === normPatch
               ? {
                   ...t,
                   content:       newContent,
@@ -581,20 +612,20 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
           );
         } else if (action === "create") {
           // Open a new tab for the created file (only if not already open)
-          const alreadyOpen = next.some((t) => t.path === patchPath);
+          const alreadyOpen = next.some((t) => normalizeTabPath(t.path) === normPatch);
           if (!alreadyOpen) {
             next = [...next, makeTab(patchPath, newContent, modifiedAt, size)];
           } else {
             next = next.map((t) =>
-              t.path === patchPath
+              normalizeTabPath(t.path) === normPatch
                 ? { ...t, content: newContent, editedContent: newContent, size, modifiedAt, isDirty: false, saveStatus: "saved" as const, saveError: null }
                 : t
             );
           }
-          setActiveTabPath(patchPath);
+          setActiveTabPath(normPatch);
         }
       }
-      return next;
+      return dedupeTabs(next);
     });
     loadTree();
     setCursorPos({ line: 1, col: 1 });
