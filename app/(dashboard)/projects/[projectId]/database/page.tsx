@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AddDatabaseForm } from "@/components/workspace/add-database-form";
 import { DbConnectionTestPanel } from "@/components/projects/db-connection-test-panel";
+import { DatabaseExplorerPanel } from "@/components/projects/database-explorer-panel";
 import {
   getProjectDatabases,
   getProjectEnvironments,
@@ -108,6 +109,13 @@ export default async function ProjectDatabasePage({ params }: Props) {
               environment:  deployConfig?.dbConnEnvironment ?? null,
             }}
           />
+
+          {/* ── Database Explorer (Sprint 12) ── */}
+          <Card>
+            <CardContent className="pt-5 pb-5">
+              <DatabaseExplorerPanel projectId={projectId} />
+            </CardContent>
+          </Card>
 
           {/* Add form */}
           <AddDatabaseForm projectId={projectId} environments={environments} />
