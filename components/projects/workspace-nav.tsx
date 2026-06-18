@@ -14,6 +14,7 @@ import {
   Bot,
   KeyRound,
   PackageOpen,
+  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,9 +27,10 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
   const base = `/projects/${projectId}`;
 
   const tabs = [
-    { label: "Files", href: `${base}/files`, icon: Code2 },
-    { label: "GitHub", href: `${base}/github`, icon: Github },
-    { label: "AI Assistant", href: `${base}/ai`, icon: Bot },
+    { label: "Files",     href: `${base}/files`,    icon: Code2    },
+    { label: "Terminal",  href: `${base}/terminal`, icon: Terminal },
+    { label: "GitHub",    href: `${base}/github`,   icon: Github   },
+    { label: "AI Assistant", href: `${base}/ai`,    icon: Bot      },
     { label: "Preview", href: `${base}/preview`, icon: Eye },
     { label: "Publishing", href: `${base}/publishing`, icon: Rocket },
     { label: "Domains", href: `${base}/domains`, icon: Globe },
