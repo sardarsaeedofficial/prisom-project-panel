@@ -35,9 +35,10 @@ import { DeploymentStatus } from "@prisma/client";
 import { DeploymentSetupForm } from "@/components/projects/deployment-setup-form";
 import { ProjectDeployPanel } from "@/components/projects/project-deploy-panel";
 import { getPm2AppStatus } from "@/lib/projects/project-deploy-runner";
-import { LiveEndpointsCard }       from "@/components/projects/live-endpoints-card";
-import { ReadinessPanel }          from "@/components/projects/readiness-panel";
-import { DeploymentConfigPanel }   from "@/components/projects/deployment-config-panel";
+import { LiveEndpointsCard }         from "@/components/projects/live-endpoints-card";
+import { ReadinessPanel }            from "@/components/projects/readiness-panel";
+import { DeploymentConfigPanel }     from "@/components/projects/deployment-config-panel";
+import { DeploymentHistoryPanel }    from "@/components/projects/deployment-history-panel";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -434,6 +435,19 @@ export default async function ProjectPublishingPage({ params }: Props) {
               </CardContent>
             </Card>
           )}
+          {/* ── Sprint 13: Deployment history + safe rollback panel ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <Card>
+              <CardContent className="pt-5 pb-5">
+                <DeploymentHistoryPanel
+                  projectId={projectId}
+                  projectSlug={project.slug}
+                  pm2Name={dbDeployConfig.pm2Name}
+                />
+              </CardContent>
+            </Card>
+          )}
+
         </div>
       </DashboardShell>
     </div>

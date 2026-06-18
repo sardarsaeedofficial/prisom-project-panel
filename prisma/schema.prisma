@@ -679,6 +679,9 @@ model Deployment {
   startedAt     DateTime         @default(now())
   finishedAt    DateTime?
   createdAt     DateTime         @default(now())
+  // Sprint 13: active tracking
+  isActive      Boolean          @default(false)
+  activatedAt   DateTime?
 
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)

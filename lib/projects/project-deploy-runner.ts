@@ -30,6 +30,9 @@ export { FULL_PATH_PNPM };
 const PROJECT_STORAGE = path.resolve(process.cwd(), "storage", "projects");
 const RELEASE_STORAGE = path.resolve(process.cwd(), "storage", "releases");
 
+/** Exported for use by rollback/history — same base path as deploy snapshots. */
+export { RELEASE_STORAGE };
+
 export const PORT_START = 4100;
 export const PORT_MAX   = 4999;
 
@@ -861,4 +864,34 @@ export async function runProjectDeployment(
     log(`\n✗ Unexpected error: ${msg}`);
     return fail(msg);
   }
+}
+
+// ── Rollback helper ────────────────────────────────────────────────────────
+
+/**
+ * Re-activates an existing release folder with PM2.
+ * Used by the rollback workflow — the release folder already exists (no copy/build).
+ *
+ * Safety:
+ *  - Caller must have validated that releasePath is inside
+ *    storage/releases/<slug>/<deploymentRef> via assertReleasePathExists.
+ *  - pm2Name must belong to the selected project (verified by caller).
+ *  - Never restarts unrelated processes.
+ */
+export async function activateReleaseWithPm2(input: {
+  pm2Name:      string;
+  startCommand: string;
+  releasePath:  string;
+  port:         number;
+  nodeEnv:      string;
+  envVars?:     Record<string, string>;
+}): Promise<{ ok: boolean; output: string }> {
+  const { pm2Name, startCommand, releasePath, port, nodeEnv, envVars = {} } = input;
+
+  const parsed = validateAndParseCommand(startCommand);
+  if (!parsed.ok) {
+    return { ok: false, output: `Invalid start command: ${parsed.error}` };
+  }
+
+  return pm2StartFresh(pm2Name, parsed.cmd, releasePath, port, nodeEnv, envVars);
 }
