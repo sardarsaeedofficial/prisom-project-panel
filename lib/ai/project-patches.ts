@@ -11,7 +11,7 @@
  *  - Raw AI response is parsed defensively; JSON failure is surfaced cleanly.
  */
 
-import { completeWithProjectAi }     from "@/lib/ai/provider";
+import { completeWithProjectAi, MAX_TOKENS_PATCH_GEN } from "@/lib/ai/provider";
 import { redact }                    from "@/lib/ai/redaction";
 import { buildProjectAiContext }     from "@/lib/ai/project-context";
 import { isEditableTextFile, MAX_FILE_AI_BYTES } from "@/lib/projects/file-manager";
@@ -281,3 +281,246 @@ function normaliseParsedPatch(
 
   return { summary, patches, commandsToRunManually, risks };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sprint 11 — Structured AI Patch Plan
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sprint 11 patch plan — replaces the old PatchSuggestion for the review
+ * workflow.  Validation (safeToApply, blockedReason) is set server-side
+ * in the action after running the validator; oldContent is also set
+ * server-side from open editor contents or disk.
+ */
+export interface AiPatchPlan {
+  summary:           string;
+  riskLevel:         "low" | "medium" | "high";
+  warnings:          string[];
+  verificationSteps: string[];
+  patches:           AiFilePatch[];
+  /** Populated if JSON parsing failed — show raw text to user. */
+  rawFallback?: string;
+}
+
+export interface AiFilePatch {
+  /** UUID assigned server-side after parsing. */
+  id:             string;
+  path:           string;
+  action:         "modify" | "create" | "delete";
+  title:          string;
+  explanation:    string;
+  /** Current content — populated server-side from open editor tabs or disk. */
+  oldContent?:    string;
+  /** AI-proposed full content after the change. */
+  newContent?:    string;
+  /** AI-generated unified diff (display hint — not used for apply). */
+  unifiedDiff?:   string;
+  /** Set by server-side validator. */
+  safeToApply:    boolean;
+  blockedReason?: string;
+}
+
+// ── System prompt for Sprint 11 structured patch plan ─────────────────────────
+
+function buildPatchPlanSystemPrompt(projectSystemPrompt: string): string {
+  return `${projectSystemPrompt}
+
+---
+
+## STRUCTURED PATCH PLAN MODE (Sprint 11)
+
+You are operating in safe, structured patch plan mode.
+
+### Rules you MUST follow:
+- Propose ONLY changes to the files explicitly listed in the "Selected files" section.
+- For new files ("create" action), use a relative path like \`docs/notes.md\` — never absolute.
+- Never propose changes to: .env, .env.*, .git/config, node_modules/*, .next/*, dist/*, build/*, binary files, or secret files.
+- Never reveal secret values or database credentials.
+- Never include shell commands, npm install instructions, or pm2 restart commands in newContent.
+- Never propose more than 10 patches in one plan.
+- For "modify" action: return the COMPLETE new file content in newContent, not just the changed lines.
+- For "create" action: return the COMPLETE new file content in newContent.
+- For "delete" action: do NOT include newContent; just set the action to "delete" with a clear explanation.
+
+### Response format — return ONLY valid JSON, no markdown fences, no prose:
+
+{
+  "summary": "One concise sentence describing the overall change",
+  "riskLevel": "low",
+  "warnings": ["Any caution the user should know before applying"],
+  "verificationSteps": ["pnpm run typecheck", "pnpm run build"],
+  "patches": [
+    {
+      "path": "src/App.tsx",
+      "action": "modify",
+      "title": "Add loading state to root component",
+      "explanation": "Adds a boolean isLoading state and renders a spinner...",
+      "newContent": "...complete file content after the change..."
+    }
+  ]
+}
+
+riskLevel values: "low" (cosmetic/safe), "medium" (logic change), "high" (deletes data, changes auth, touches config)
+
+If no change is needed:
+{ "summary": "No changes needed", "riskLevel": "low", "warnings": [], "verificationSteps": [], "patches": [] }
+
+Return ONLY the JSON — nothing else.`;
+}
+
+// ── Raw shape returned by AI (before validation) ──────────────────────────────
+
+interface RawAiPatchItem {
+  path?:        unknown;
+  action?:      unknown;
+  title?:       unknown;
+  explanation?: unknown;
+  newContent?:  unknown;
+  unifiedDiff?: unknown;
+}
+
+interface RawAiPatchPlanObj {
+  summary?:           unknown;
+  riskLevel?:         unknown;
+  warnings?:          unknown;
+  verificationSteps?: unknown;
+  patches?:           unknown;
+}
+
+// ── Normalise raw parsed plan (no validation — caller does that) ──────────────
+
+function normaliseAiPatchPlan(
+  raw:           unknown,
+  selectedPaths: Set<string>,
+): Omit<AiPatchPlan, "patches"> & { rawPatches: RawAiPatchItem[] } {
+  if (typeof raw !== "object" || raw === null) {
+    return {
+      summary:           "Invalid AI response",
+      riskLevel:         "high",
+      warnings:          ["Could not parse AI response as JSON."],
+      verificationSteps: [],
+      rawPatches:        [],
+    };
+  }
+
+  const o = raw as RawAiPatchPlanObj;
+
+  const summary = typeof o.summary === "string" ? o.summary.slice(0, 500) : "AI patch plan";
+
+  const riskLevelRaw = typeof o.riskLevel === "string" ? o.riskLevel.toLowerCase() : "medium";
+  const riskLevel: AiPatchPlan["riskLevel"] =
+    riskLevelRaw === "low" ? "low" : riskLevelRaw === "high" ? "high" : "medium";
+
+  const warnings = Array.isArray(o.warnings)
+    ? (o.warnings as unknown[]).filter((w) => typeof w === "string").map((w) => String(w).slice(0, 400))
+    : [];
+
+  const verificationSteps = Array.isArray(o.verificationSteps)
+    ? (o.verificationSteps as unknown[]).filter((s) => typeof s === "string").map((s) => String(s).slice(0, 200))
+    : [];
+
+  const rawPatches: RawAiPatchItem[] = Array.isArray(o.patches)
+    ? (o.patches as unknown[]).filter((p) => typeof p === "object" && p !== null) as RawAiPatchItem[]
+    : [];
+
+  return { summary, riskLevel, warnings, verificationSteps, rawPatches };
+}
+
+// ── Main Sprint 11 function ───────────────────────────────────────────────────
+
+/**
+ * Generate a structured AI patch plan for the given instruction and files.
+ *
+ * Returns raw parsed patches (not yet validated for path safety — that step
+ * happens in the server action which has access to the project root).
+ *
+ * Caller must:
+ *  - Verify ownership.
+ *  - Sanitise + redact file content before calling.
+ *  - Run each patch through ai-patch-validator.ts after receiving the plan.
+ */
+export async function generateAiPatchPlan(
+  projectId:     string,
+  instruction:   string,
+  selectedFiles: SelectedFileForPatch[],
+): Promise<
+  | { ok: true;  data: { raw: ReturnType<typeof normaliseAiPatchPlan> } }
+  | { ok: false; error: string; code?: string }
+> {
+  // Build base project context
+  const contextResult = await buildProjectAiContext(projectId, {
+    includeEnvKeys:    true,
+    includeDomains:    false,
+    includeDeployment: true,
+    includeLiveStatus: false,
+    includeGitInfo:    false,
+  });
+  if (!contextResult.ok) {
+    return { ok: false, error: contextResult.error, code: "CONTEXT_ERROR" };
+  }
+
+  const systemPrompt = buildPatchPlanSystemPrompt(contextResult.systemPrompt);
+
+  // Build user message
+  const fileBlocks = selectedFiles.map((f) => {
+    const content = f.content.length > MAX_FILE_AI_BYTES
+      ? f.content.slice(0, MAX_FILE_AI_BYTES) + "\n\n[... file truncated ...]"
+      : f.content;
+    return `### File: ${f.path}\n\`\`\`\n${redact(content)}\n\`\`\``;
+  });
+
+  const userMessage = [
+    `## Instruction`,
+    redact(instruction),
+    "",
+    `## Selected files`,
+    ...fileBlocks,
+    "",
+    "Return ONLY the JSON patch plan object. No markdown. No prose.",
+  ].join("\n");
+
+  // Call AI with larger token budget for patch generation
+  const aiResult = await completeWithProjectAi(
+    systemPrompt,
+    [{ role: "user", content: userMessage }],
+    { maxTokens: MAX_TOKENS_PATCH_GEN },
+  );
+
+  if (!aiResult.ok) {
+    return { ok: false, error: aiResult.error, code: aiResult.code };
+  }
+
+  // Parse JSON
+  const rawText = aiResult.text.trim();
+  const jsonText = rawText
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    return {
+      ok: true,
+      data: {
+        raw: {
+          summary:           "AI returned a suggestion (could not parse as JSON)",
+          riskLevel:         "high" as const,
+          warnings:          ["The AI response could not be parsed as a structured patch plan."],
+          verificationSteps: [],
+          rawPatches:        [],
+          rawFallback:       rawText,
+        },
+      },
+    };
+  }
+
+  const selectedPaths = new Set(selectedFiles.map((f) => f.path));
+  const normalised = normaliseAiPatchPlan(parsed, selectedPaths);
+
+  return { ok: true, data: { raw: normalised } };
+}
+
+// Re-export normaliseAiPatchPlan return type helper for use in server action
+export type NormalisedPatchPlanRaw = ReturnType<typeof normaliseAiPatchPlan>;

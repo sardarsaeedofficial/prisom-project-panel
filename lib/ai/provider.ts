@@ -43,9 +43,12 @@ export type AiResult = AiCompletionResult | AiCompletionError;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const DEFAULT_MODEL    = "claude-opus-4-8";
-const MAX_TOKENS       = 2048;
-const MAX_INPUT_CHARS  = 120_000; // ~30K tokens — safe for 200K context window
+const DEFAULT_MODEL         = "claude-opus-4-8";
+const MAX_TOKENS            = 2048;
+const MAX_TOKENS_PATCH_GEN  = 16_000;   // Sprint 11: patch generation needs more room
+const MAX_INPUT_CHARS       = 120_000;  // ~30K tokens — safe for 200K context window
+
+export { MAX_TOKENS_PATCH_GEN };
 
 // ── Provider ───────────────────────────────────────────────────────────────
 
@@ -60,6 +63,7 @@ const MAX_INPUT_CHARS  = 120_000; // ~30K tokens — safe for 200K context windo
 export async function completeWithProjectAi(
   systemPrompt: string,
   messages: AiMessage[],
+  options?: { maxTokens?: number },
 ): Promise<AiResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -89,7 +93,7 @@ export async function completeWithProjectAi(
 
     const response = await client.messages.create({
       model:      modelId,
-      max_tokens: MAX_TOKENS,
+      max_tokens: options?.maxTokens ?? MAX_TOKENS,
       system:     truncatedSystem,
       messages:   truncatedMessages,
       thinking:   { type: "adaptive" },

@@ -4,22 +4,17 @@
  * components/projects/file-browser.tsx
  *
  * Sprint 10: Multi-tab Monaco-powered code editor shell.
+ * Sprint 11: AI patch review panel integration.
  *
  * Sprint 6 safety guarantees preserved:
- *  - All file I/O goes through server actions (readProjectFileAction,
- *    saveProjectFileAction, createProjectFileAction, applyAiPatchAction).
+ *  - All file I/O goes through server actions.
  *  - No absolute paths, no traversal, no .env, no secrets.
  *  - Optimistic concurrency (expectedModifiedAt) on every save.
- *  - Read-only fallback for oversized/unsupported files.
  *
- * Sprint 10 additions:
- *  - Multi-file tabs (OpenFileTab[])
- *  - Monaco Editor (syntax highlighting, line numbers, Ctrl+S)
- *  - File tree search filter
- *  - JSON formatting (marks dirty, does not auto-save)
- *  - Cursor line/col status bar
- *  - Word-wrap toggle
- *  - Git save hint after successful save
+ * Sprint 11 additions:
+ *  - AiPatchReviewPanel replaces the old inline AiPatchPanel.
+ *  - handlePatchApplied accepts multi-file AppliedPatchResult[] and opens
+ *    new tabs for created files.
  */
 
 import {
@@ -37,15 +32,11 @@ import {
   ChevronDown,
   Loader2,
   AlertTriangle,
-  Info,
   Save,
   RotateCcw,
-  Copy,
-  Check,
   Sparkles,
   RefreshCcw,
   FolderOpen,
-  Send,
   X,
   AlertCircle,
   WrapText,
@@ -57,12 +48,14 @@ import {
   readProjectFileAction,
   saveProjectFileAction,
   createProjectFileAction,
-  applyAiPatchAction,
   type FileTreeItem,
 } from "@/app/actions/project-files";
-import { suggestProjectPatchAction } from "@/app/actions/project-ai";
 import { CodeEditor } from "@/components/projects/code-editor";
 import { getEditorLanguage } from "@/lib/projects/editor-language";
+import {
+  AiPatchReviewPanel,
+  type AppliedPatchResult,
+} from "@/components/projects/ai-patch-review-panel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -86,24 +79,6 @@ interface OpenFileTab {
   isSaving:      boolean;
   saveStatus:    "idle" | "saving" | "saved" | "conflict" | "error";
   saveError:     string | null;
-}
-
-// ── AI panel local type mirrors ───────────────────────────────────────────────
-
-interface PatchHunk {
-  path:             string;
-  type:             "modify" | "create";
-  unifiedDiff:      string;
-  proposedContent?: string;
-  warnings:         string[];
-}
-
-interface PatchSuggestion {
-  summary:                string;
-  patches:                PatchHunk[];
-  commandsToRunManually?: string[];
-  risks:                  string[];
-  rawFallback?:           string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -151,285 +126,6 @@ function FileIcon({ name, className = "" }: { name: string; className?: string }
     ["md","mdx","txt"].includes(e)                    ? "text-gray-400"         :
     "text-muted-foreground";
   return <FileCode2 className={`h-3.5 w-3.5 shrink-0 ${color} ${className}`} />;
-}
-
-// ── Copy button ───────────────────────────────────────────────────────────────
-
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = useCallback(async () => {
-    await navigator.clipboard.writeText(text).catch(() => null);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [text]);
-  return (
-    <button
-      onClick={copy}
-      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-    >
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-      {copied ? "Copied" : label}
-    </button>
-  );
-}
-
-// ── Diff viewer ───────────────────────────────────────────────────────────────
-
-function DiffViewer({ diff }: { diff: string }) {
-  if (!diff.trim()) return <p className="text-xs text-muted-foreground italic">No diff produced.</p>;
-  return (
-    <pre className="font-mono text-[11px] leading-relaxed overflow-x-auto bg-muted/60 border border-border rounded p-3 whitespace-pre">
-      {diff.split("\n").map((line, i) => {
-        const cls =
-          line.startsWith("+") && !line.startsWith("+++") ? "text-green-500 bg-green-500/10 block" :
-          line.startsWith("-") && !line.startsWith("---") ? "text-red-500 bg-red-500/10 block"     :
-          line.startsWith("@@")                           ? "text-cyan-500 block"                  :
-          "block";
-        return <span key={i} className={cls}>{line || " "}</span>;
-      })}
-    </pre>
-  );
-}
-
-// ── AI Patch Panel ────────────────────────────────────────────────────────────
-
-function AiPatchPanel({
-  projectId,
-  activeTab,
-  onApplyPatch,
-  onClose,
-}: {
-  projectId:    string;
-  activeTab:    OpenFileTab | null;
-  onApplyPatch: (content: string, path: string) => void;
-  onClose:      () => void;
-}) {
-  const [instruction, setInstruction] = useState("");
-  const [suggestion,  setSuggestion]  = useState<PatchSuggestion | null>(null);
-  const [error,       setError]       = useState<string | null>(null);
-  const [isPending,   startTransition] = useTransition();
-  const [applying,    setApplying]    = useState<string | null>(null);
-  const [applyErrors, setApplyErrors] = useState<Record<string, string>>({});
-
-  const handleAsk = useCallback(() => {
-    if (!activeTab || !instruction.trim()) return;
-    setError(null);
-    setSuggestion(null);
-    startTransition(async () => {
-      const res = await suggestProjectPatchAction({
-        projectId,
-        instruction,
-        selectedFiles: [{
-          path:    activeTab.path,
-          // Use current editor content (includes unsaved edits), not stale server content
-          content: activeTab.editedContent,
-        }],
-      });
-      if (res.ok && res.data) {
-        setSuggestion(res.data);
-      } else if (!res.ok) {
-        setError((res as { ok: false; error: string }).error);
-      }
-    });
-  }, [activeTab, instruction, projectId]);
-
-  const handleApply = useCallback(async (patchPath: string, proposedContent: string) => {
-    setApplying(patchPath);
-    setApplyErrors({});
-    const res = await applyAiPatchAction({
-      projectId,
-      patches: [{
-        path:               patchPath,
-        proposedContent,
-        expectedModifiedAt: activeTab?.modifiedAt,
-      }],
-    });
-    setApplying(null);
-    if (res.ok && res.data) {
-      if (res.data.skipped.length > 0) {
-        const err: Record<string, string> = {};
-        res.data.skipped.forEach((s) => { err[s.path] = s.reason; });
-        setApplyErrors(err);
-      } else {
-        onApplyPatch(proposedContent, patchPath);
-      }
-    } else if (!res.ok) {
-      setApplyErrors({ [patchPath]: (res as { ok: false; error: string }).error });
-    }
-  }, [projectId, activeTab, onApplyPatch]);
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0">
-        <Sparkles className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium flex-1">AI Patch Suggestions</span>
-        <button onClick={onClose} className="rounded p-1 hover:bg-muted transition-colors">
-          <X className="h-4 w-4 text-muted-foreground" />
-        </button>
-      </div>
-
-      {activeTab ? (
-        <div className="px-4 py-2 border-b bg-muted/30 shrink-0 space-y-0.5">
-          <p className="text-xs text-muted-foreground">
-            Working on: <code className="font-mono bg-muted px-1 rounded">{activeTab.path}</code>
-          </p>
-          {activeTab.isDirty && (
-            <p className="text-[10px] text-amber-600 flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" />
-              Unsaved changes included — will not be auto-saved.
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="flex-1 flex items-center justify-center p-6 text-center">
-          <div className="space-y-2">
-            <FileCode2 className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-            <p className="text-sm text-muted-foreground">Open a file in the editor first.</p>
-          </div>
-        </div>
-      )}
-
-      {activeTab && (
-        <>
-          {/* Instruction */}
-          <div className="px-4 py-3 border-b shrink-0 space-y-2">
-            <label className="text-xs font-medium text-foreground">Instruction</label>
-            <div className="flex gap-2">
-              <textarea
-                value={instruction}
-                onChange={(e) => setInstruction(e.target.value)}
-                placeholder="e.g. Add TypeScript types, add error handling…"
-                disabled={isPending}
-                rows={3}
-                className="flex-1 resize-none rounded border border-border bg-background px-3 py-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-              />
-              <button
-                onClick={handleAsk}
-                disabled={isPending || !instruction.trim()}
-                className="shrink-0 self-end rounded-lg bg-primary text-primary-foreground p-2 hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Ask AI"
-              >
-                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </button>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              AI suggests a diff only. No files change until you click Apply. Secrets are never sent.
-            </p>
-          </div>
-
-          {error && (
-            <div className="mx-4 my-2 flex items-start gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shrink-0">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
-
-          {isPending && !suggestion && (
-            <div className="flex-1 flex items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Thinking…</span>
-            </div>
-          )}
-
-          {suggestion && (
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
-                <p className="text-xs font-medium text-foreground mb-1">Summary</p>
-                <p className="text-sm">{suggestion.summary}</p>
-              </div>
-
-              {suggestion.rawFallback && (
-                <div className="rounded-lg border border-amber-300/40 bg-amber-50/10 px-3 py-2 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="text-xs font-medium text-amber-600">Unstructured suggestion</span>
-                  </div>
-                  <pre className="text-xs whitespace-pre-wrap font-mono leading-relaxed">{suggestion.rawFallback}</pre>
-                  <CopyButton text={suggestion.rawFallback ?? ""} label="Copy suggestion" />
-                </div>
-              )}
-
-              {suggestion.patches.map((patch, i) => (
-                <div key={i} className="border border-border rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
-                    <FileCode2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <code className="text-xs font-mono flex-1 truncate">{patch.path}</code>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      patch.type === "create"
-                        ? "bg-green-500/10 text-green-600"
-                        : "bg-blue-500/10 text-blue-600"
-                    }`}>{patch.type}</span>
-                  </div>
-                  {patch.warnings.length > 0 && (
-                    <div className="px-3 py-2 bg-amber-50/10 border-b border-border space-y-0.5">
-                      {patch.warnings.map((w, j) => (
-                        <p key={j} className="text-xs text-amber-600 flex items-start gap-1.5">
-                          <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />{w}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                  {patch.unifiedDiff && !patch.warnings.some((w) => w.startsWith("⛔")) && (
-                    <div className="p-3 space-y-2">
-                      <DiffViewer diff={patch.unifiedDiff} />
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <CopyButton text={patch.unifiedDiff} label="Copy diff" />
-                        {patch.proposedContent && (
-                          <CopyButton text={patch.proposedContent} label="Copy full file" />
-                        )}
-                        {patch.proposedContent && !patch.warnings.some((w) => w.startsWith("⛔")) && (
-                          <button
-                            onClick={() => handleApply(patch.path, patch.proposedContent!)}
-                            disabled={applying === patch.path}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                          >
-                            {applying === patch.path
-                              ? <Loader2 className="h-3 w-3 animate-spin" />
-                              : <Check className="h-3 w-3" />}
-                            Apply patch
-                          </button>
-                        )}
-                      </div>
-                      {applyErrors[patch.path] && (
-                        <p className="text-xs text-destructive">⚠ {applyErrors[patch.path]}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {suggestion.risks.length > 0 && (
-                <div className="rounded border border-amber-200/40 bg-amber-50/10 px-3 py-2 space-y-1">
-                  <p className="text-xs font-medium text-amber-600 flex items-center gap-1">
-                    <AlertTriangle className="h-3.5 w-3.5" /> Risks to consider
-                  </p>
-                  {suggestion.risks.map((r, i) => (
-                    <p key={i} className="text-xs text-muted-foreground">{r}</p>
-                  ))}
-                </div>
-              )}
-
-              {suggestion.commandsToRunManually && suggestion.commandsToRunManually.length > 0 && (
-                <div className="rounded border border-border bg-muted/30 px-3 py-2 space-y-2">
-                  <p className="text-xs font-medium text-foreground flex items-center gap-1">
-                    <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                    Run manually after applying
-                  </p>
-                  {suggestion.commandsToRunManually.map((cmd, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <code className="flex-1 font-mono text-xs bg-muted/80 border border-border rounded px-2 py-1">{cmd}</code>
-                      <CopyButton text={cmd} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
 }
 
 // ── File tree ─────────────────────────────────────────────────────────────────
@@ -860,22 +556,49 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
     }
   }, [projectId, loadTree]);
 
-  // ── AI patch applied ─────────────────────────────────────────────────────
+  // ── AI patch applied (Sprint 11 multi-file) ──────────────────────────────
 
-  const handlePatchApplied = useCallback((content: string, patchPath: string) => {
-    setTabs((prev) => prev.map((t) =>
-      t.path === patchPath
-        ? {
-            ...t,
-            content,
-            editedContent: content,
-            isDirty:       false,
-            modifiedAt:    new Date().toISOString(),
-            saveStatus:    "saved",
+  const handlePatchApplied = useCallback((results: AppliedPatchResult[]) => {
+    setTabs((prev) => {
+      let next = [...prev];
+      for (const result of results) {
+        const { path: patchPath, action, newContent, size, modifiedAt } = result;
+        if (action === "modify") {
+          // Update existing open tab
+          next = next.map((t) =>
+            t.path === patchPath
+              ? {
+                  ...t,
+                  content:       newContent,
+                  editedContent: newContent,
+                  size,
+                  modifiedAt,
+                  isDirty:       false,
+                  saveStatus:    "saved" as const,
+                  saveError:     null,
+                }
+              : t
+          );
+        } else if (action === "create") {
+          // Open a new tab for the created file (only if not already open)
+          const alreadyOpen = next.some((t) => t.path === patchPath);
+          if (!alreadyOpen) {
+            next = [...next, makeTab(patchPath, newContent, modifiedAt, size)];
+          } else {
+            next = next.map((t) =>
+              t.path === patchPath
+                ? { ...t, content: newContent, editedContent: newContent, size, modifiedAt, isDirty: false, saveStatus: "saved" as const, saveError: null }
+                : t
+            );
           }
-        : t
-    ));
+          setActiveTabPath(patchPath);
+        }
+      }
+      return next;
+    });
     loadTree();
+    setCursorPos({ line: 1, col: 1 });
+    setFormatErr(null);
   }, [loadTree]);
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1155,13 +878,14 @@ export function ProjectFileBrowser({ projectId, projectName }: Props) {
           )}
         </div>
 
-        {/* AI panel */}
+        {/* AI patch review panel (Sprint 11) */}
         {showAi && (
-          <div className="w-96 flex flex-col overflow-hidden shrink-0">
-            <AiPatchPanel
+          <div className="w-[420px] flex flex-col overflow-hidden shrink-0 border-l">
+            <AiPatchReviewPanel
               projectId={projectId}
-              activeTab={activeTab}
-              onApplyPatch={handlePatchApplied}
+              tabs={tabs}
+              activeTabPath={activeTabPath}
+              onPatchApplied={handlePatchApplied}
               onClose={() => setShowAi(false)}
             />
           </div>
