@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { SyncButton } from "@/components/github/sync-button";
 import { RepairInstallationIdButton } from "@/components/github/repair-installation-id-button";
 import { GithubLocalGitPanel } from "@/components/projects/github-local-git-panel";
+import { ProjectGitPanel } from "@/components/projects/project-git-panel";
 import { db } from "@/lib/db";
 import { getProjectGitHubData } from "@/lib/data/github";
 import { unlinkGitHubRepositoryAction } from "@/app/actions/github";
@@ -174,13 +175,25 @@ export default async function ProjectGithubPage({ params }: Props) {
 
         {showLocalPanel ? (
           /* ── Local git workflow panel for uploaded / blank projects ── */
-          <GithubLocalGitPanel
-            projectId={projectId}
-            projectSlug={project.slug}
-            initialGitStatus={localGitStatus}
-            isGitHubConfigured={githubConfigured}
-            initialRepo={localPanelRepo}
-          />
+          <div className="space-y-6">
+            <GithubLocalGitPanel
+              projectId={projectId}
+              projectSlug={project.slug}
+              initialGitStatus={localGitStatus}
+              isGitHubConfigured={githubConfigured}
+              initialRepo={localPanelRepo}
+            />
+
+            {/* Sprint 8 — Show full Git operations panel once a repo is initialised */}
+            {localGitStatus.initialized && (
+              <div className="space-y-2">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-0.5">
+                  Git Operations
+                </h2>
+                <ProjectGitPanel projectId={projectId} />
+              </div>
+            )}
+          </div>
         ) : repo ? (
           <div className="space-y-6 max-w-2xl">
             {/* ── Repository info + sync health ── */}

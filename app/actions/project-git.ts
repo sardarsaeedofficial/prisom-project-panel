@@ -26,9 +26,26 @@ import {
   isValidBranchName,
   isBlockedRepoUrl,
   stableGitHubRepoPlaceholderId,
+  resolveStoragePath,
   BLOCKED_REPO_SLUG,
   type LocalGitStatus,
 } from "@/lib/projects/storage-git";
+import {
+  getProjectGitStatus,
+  getProjectGitDiff,
+  stageProjectFiles,
+  unstageProjectFiles,
+  commitProjectChanges,
+  fetchProjectRepo,
+  pullProjectRepo,
+  pushProjectRepo,
+} from "@/lib/projects/git-manager";
+// Import Sprint 8 types under aliases to avoid collision with the existing
+// non-generic `GitActionResult` type that the older actions in this file use.
+import type {
+  GitActionResult as GitOpResult,
+  GitRepoStatus,
+} from "@/lib/projects/git-manager";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -433,4 +450,261 @@ export async function pushToGitHubAction(
   }
 
   return pushResult;
+}
+
+// ── Sprint 8: Git Operations Panel ───────────────────────────────────────────
+//
+// These actions power the ProjectGitPanel component.
+// Every action verifies project ownership before touching the filesystem.
+// Remote URLs are redacted inside git-manager before being returned here.
+//
+// Re-exported types (import type only — not values, to avoid Turbopack errors):
+// GitRepoStatus, GitChangedFile, GitRemote, GitCommitSummary, GitActionResult
+// are all importable directly from "@/lib/projects/git-manager".
+
+/** Resolves the storage root for a project, throws on invalid slug. */
+function getStorageRoot(slug: string): string {
+  return resolveStoragePath(slug);
+}
+
+// ── Ownership helper (Sprint 8 version — returns slug too) ───────────────────
+
+async function verifyOwnershipWithSlug(projectId: string) {
+  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
+  if (!workspaceId) return null;
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { id: true, slug: true, workspaceId: true },
+  });
+  if (!project || project.workspaceId !== workspaceId) return null;
+  return project;
+}
+
+// ── Action: getProjectGitStatusAction ────────────────────────────────────────
+
+export async function getProjectGitStatusAction(
+  projectId: string,
+): Promise<GitOpResult<GitRepoStatus>> {
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  return getProjectGitStatus(root);
+}
+
+// ── Action: getProjectGitDiffAction ──────────────────────────────────────────
+
+export async function getProjectGitDiffAction(input: {
+  projectId: string;
+  path:      string | null;
+  staged:    boolean;
+}): Promise<GitOpResult<{ diff: string; truncated: boolean }>> {
+  const { projectId, path: filePath, staged } = input;
+
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  return getProjectGitDiff(root, filePath, staged);
+}
+
+// ── Action: stageProjectFilesAction ──────────────────────────────────────────
+
+export async function stageProjectFilesAction(input: {
+  projectId: string;
+  paths:     string[];
+}): Promise<GitOpResult<{ staged: number; blocked: string[] }>> {
+  const { projectId, paths } = input;
+
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  const result = await stageProjectFiles(root, paths);
+
+  if (result.ok) {
+    await db.projectLog.create({
+      data: {
+        projectId,
+        level:   LogLevel.INFO,
+        source:  LogSource.SYSTEM,
+        message: `Staged ${result.data.staged} file(s)`,
+      },
+    }).catch(() => null);
+  }
+
+  return result;
+}
+
+// ── Action: unstageProjectFilesAction ────────────────────────────────────────
+
+export async function unstageProjectFilesAction(input: {
+  projectId: string;
+  paths:     string[];
+}): Promise<GitOpResult<{ unstaged: number }>> {
+  const { projectId, paths } = input;
+
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  return unstageProjectFiles(root, paths);
+}
+
+// ── Action: commitProjectChangesAction ───────────────────────────────────────
+
+export async function commitProjectChangesAction(input: {
+  projectId: string;
+  message:   string;
+}): Promise<GitOpResult<{ hash: string; output: string }>> {
+  const { projectId, message } = input;
+
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  const result = await commitProjectChanges(root, message);
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   result.ok ? LogLevel.INFO : LogLevel.ERROR,
+      source:  LogSource.SYSTEM,
+      message: result.ok
+        ? `Committed: ${result.data.hash} — ${message.trim().slice(0, 100)}`
+        : `Commit failed: ${result.error}`,
+    },
+  }).catch(() => null);
+
+  if (result.ok) {
+    revalidatePath(`/projects/${projectId}/github`);
+  }
+
+  return result;
+}
+
+// ── Action: fetchProjectRepoAction ───────────────────────────────────────────
+
+export async function fetchProjectRepoAction(
+  projectId: string,
+): Promise<GitOpResult<{ output: string }>> {
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  const result = await fetchProjectRepo(root);
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   result.ok ? LogLevel.INFO : LogLevel.WARN,
+      source:  LogSource.GITHUB,
+      message: result.ok ? "Fetched from origin" : `Fetch failed: ${result.error}`,
+    },
+  }).catch(() => null);
+
+  return result;
+}
+
+// ── Action: pullProjectRepoAction ────────────────────────────────────────────
+//
+// Sprint 8 rule: "Do not auto-pull if working tree has uncommitted changes."
+// We read the current status here and refuse if not clean.
+
+export async function pullProjectRepoAction(
+  projectId: string,
+): Promise<GitOpResult<{ output: string }>> {
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  // Check working-tree cleanliness before attempting pull
+  const statusResult = await getProjectGitStatus(root);
+  if (!statusResult.ok) return { ok: false, error: statusResult.error };
+  const clean = statusResult.data.clean;
+
+  const result = await pullProjectRepo(root, clean);
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   result.ok ? LogLevel.INFO : LogLevel.WARN,
+      source:  LogSource.GITHUB,
+      message: result.ok
+        ? "Pulled from origin (--ff-only)"
+        : `Pull failed: ${result.error}`,
+    },
+  }).catch(() => null);
+
+  return result;
+}
+
+// ── Action: pushProjectRepoAction ────────────────────────────────────────────
+//
+// Sprint 8 rules: no force-push; confirmed:true required.
+
+export async function pushProjectRepoAction(input: {
+  projectId: string;
+  confirmed: boolean;
+}): Promise<GitOpResult<{ output: string; isAuthError: boolean }>> {
+  const { projectId, confirmed } = input;
+
+  if (!confirmed) {
+    return { ok: false, error: "Push requires explicit confirmation." };
+  }
+
+  const project = await verifyOwnershipWithSlug(projectId);
+  if (!project) return { ok: false, error: "Project not found or access denied." };
+
+  let root: string;
+  try { root = getStorageRoot(project.slug); }
+  catch { return { ok: false, error: "Invalid project storage path." }; }
+
+  // Resolve current branch
+  const statusResult = await getProjectGitStatus(root);
+  if (!statusResult.ok) return { ok: false, error: statusResult.error };
+  const branch = statusResult.data.branch;
+  if (!branch || branch === "HEAD") {
+    return { ok: false, error: "Cannot push: no branch checked out (detached HEAD)." };
+  }
+
+  const result = await pushProjectRepo(root, branch, true);
+
+  await db.projectLog.create({
+    data: {
+      projectId,
+      level:   result.ok ? LogLevel.INFO : LogLevel.ERROR,
+      source:  LogSource.GITHUB,
+      message: result.ok
+        ? `Pushed branch "${branch}" to origin`
+        : `Push failed: ${result.error}`,
+    },
+  }).catch(() => null);
+
+  if (result.ok) {
+    revalidatePath(`/projects/${projectId}/github`);
+  }
+
+  return result;
 }
