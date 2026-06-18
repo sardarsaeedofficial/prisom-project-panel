@@ -81,11 +81,13 @@ export type ProjectMonitoringSnapshot = {
   };
 
   secrets: {
-    status:        MonitorCheckStatus;
-    totalCount:    number;
-    requiredCount: number;
-    presentCount:  number;
-    missingKeys:   string[];
+    status:             MonitorCheckStatus;
+    totalCount:         number;
+    requiredCount:      number;
+    presentCount:       number;
+    missingKeys:        string[];
+    /** All env var KEY names configured for this project (no values). Used by alert evaluator. */
+    configuredKeyNames: string[];
   };
 
   domains: Array<{
@@ -100,11 +102,15 @@ export type ProjectMonitoringSnapshot = {
   }>;
 
   deployments: {
-    activeDeploymentRef?:   string | null;
-    lastDeploymentStatus?:  string | null;
-    lastDeploymentAt?:      string | null;
-    recentFailureCount:     number;
-    lastRollbackAt?:        string | null;
+    activeDeploymentRef?:          string | null;
+    lastDeploymentStatus?:         string | null;
+    lastDeploymentAt?:             string | null;
+    recentFailureCount:            number;
+    lastRollbackAt?:               string | null;
+    /** True only when the most recent terminal deployment is FAILED (not resolved by a later success). */
+    unresolvedDeploymentFailure:   boolean;
+    lastSuccessfulDeploymentAt?:   string | null;
+    lastFailedDeploymentAt?:       string | null;
   };
 
   logs: Array<{
@@ -315,18 +321,20 @@ async function checkSecrets(
 
     return {
       status,
-      totalCount:    rows.length,
-      requiredCount: TYPICAL_KEYS.length,
-      presentCount:  TYPICAL_KEYS.filter((k) => presentSet.has(k)).length,
+      totalCount:         rows.length,
+      requiredCount:      TYPICAL_KEYS.length,
+      presentCount:       TYPICAL_KEYS.filter((k) => presentSet.has(k)).length,
       missingKeys,
+      configuredKeyNames: rows.map((r) => r.name),
     };
   } catch {
     return {
-      status:        "unknown",
-      totalCount:    0,
-      requiredCount: TYPICAL_KEYS.length,
-      presentCount:  0,
-      missingKeys:   [],
+      status:             "unknown",
+      totalCount:         0,
+      requiredCount:      TYPICAL_KEYS.length,
+      presentCount:       0,
+      missingKeys:        [],
+      configuredKeyNames: [],
     };
   }
 }
@@ -380,8 +388,8 @@ function computeSeverity(
     warnReasons.push("DATABASE_URL is not configured");
   }
 
-  if (deployments.recentFailureCount >= 2) {
-    warnReasons.push(`${deployments.recentFailureCount} recent deployment failures`);
+  if (deployments.unresolvedDeploymentFailure) {
+    warnReasons.push("latest deployment failed");
   }
 
   const frontendLatency = frontend?.latencyMs ?? null;
@@ -659,11 +667,12 @@ export async function getProjectMonitoringSnapshot(input: {
   // ── Build secrets section ─────────────────────────────────────────────────
 
   const secretsSection: ProjectMonitoringSnapshot["secrets"] = secretsData ?? {
-    status:        "unknown",
-    totalCount:    0,
-    requiredCount: TYPICAL_KEYS.length,
-    presentCount:  0,
-    missingKeys:   [],
+    status:             "unknown",
+    totalCount:         0,
+    requiredCount:      TYPICAL_KEYS.length,
+    presentCount:       0,
+    missingKeys:        [],
+    configuredKeyNames: [],
   };
 
   // ── Build domains section ─────────────────────────────────────────────────
@@ -682,10 +691,18 @@ export async function getProjectMonitoringSnapshot(input: {
 
   // ── Build deployments section ─────────────────────────────────────────────
 
-  const activeRow  = deployRows.find((d) => d.isActive);
-  const latestRow  = deployRows[0] ?? null;
-  const failCount  = deployRows.filter((d) => d.status === DeploymentStatus.FAILED).length;
+  const activeRow    = deployRows.find((d) => d.isActive);
+  const latestRow    = deployRows[0] ?? null;
+  const failCount    = deployRows.filter((d) => d.status === DeploymentStatus.FAILED).length;
   const lastRollback = deployRows.find((d) => d.source === DeploymentSource.ROLLBACK);
+
+  // Determine whether the most recent TERMINAL deployment is a failure.
+  // Terminal = SUCCESS | FAILED | CANCELLED (excludes BUILDING/PENDING/QUEUED).
+  const TERMINAL: DeploymentStatus[] = [DeploymentStatus.SUCCESS, DeploymentStatus.FAILED, DeploymentStatus.CANCELLED];
+  const latestTerminal  = deployRows.find((d) => TERMINAL.includes(d.status));
+  const latestSuccess   = deployRows.find((d) => d.status === DeploymentStatus.SUCCESS);
+  const latestFailed    = deployRows.find((d) => d.status === DeploymentStatus.FAILED);
+  const unresolvedDeploymentFailure = latestTerminal?.status === DeploymentStatus.FAILED;
 
   type MetaMaybe = { deploymentRef?: string | null } | null | undefined;
   function safeRef(meta: unknown): string | null {
@@ -694,11 +711,14 @@ export async function getProjectMonitoringSnapshot(input: {
   }
 
   const deploymentsSection: ProjectMonitoringSnapshot["deployments"] = {
-    activeDeploymentRef: activeRow ? safeRef(activeRow.metadata) : null,
-    lastDeploymentStatus: latestRow?.status ?? null,
-    lastDeploymentAt:    latestRow?.createdAt.toISOString() ?? null,
-    recentFailureCount:  failCount,
-    lastRollbackAt:      lastRollback?.createdAt.toISOString() ?? null,
+    activeDeploymentRef:         activeRow ? safeRef(activeRow.metadata) : null,
+    lastDeploymentStatus:        latestRow?.status ?? null,
+    lastDeploymentAt:            latestRow?.createdAt.toISOString() ?? null,
+    recentFailureCount:          failCount,
+    lastRollbackAt:              lastRollback?.createdAt.toISOString() ?? null,
+    unresolvedDeploymentFailure,
+    lastSuccessfulDeploymentAt:  latestSuccess?.createdAt.toISOString() ?? null,
+    lastFailedDeploymentAt:      latestFailed?.createdAt.toISOString()  ?? null,
   };
 
   // ── Build logs section ────────────────────────────────────────────────────
@@ -791,10 +811,12 @@ export async function getProjectMonitoringSnapshot(input: {
     checksTable.push({
       key:     "deployments",
       label:   "Deployment health",
-      status:  failCount > 0 ? "warn" : "pass",
-      message: failCount > 0
-        ? `${failCount} failed deployment${failCount !== 1 ? "s" : ""} in recent history`
-        : "No recent deployment failures",
+      status:  unresolvedDeploymentFailure ? "fail" : failCount > 0 ? "warn" : "pass",
+      message: unresolvedDeploymentFailure
+        ? `Latest deployment failed. ${failCount} failure${failCount !== 1 ? "s" : ""} in recent history.`
+        : failCount > 0
+        ? `Latest deployment is successful. ${failCount} historical failure${failCount !== 1 ? "s" : ""} — no action required.`
+        : "No recent deployment failures.",
     });
   }
 

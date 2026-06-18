@@ -130,6 +130,8 @@ type FormState = {
   restartCountThreshold: number;
   latencyMsThreshold:    number;
   endpointName:          NonNullable<AlertRuleConfig["endpointName"]>;
+  /** For required_secrets_missing: comma/space-separated key names. */
+  requiredKeys:          string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -141,6 +143,7 @@ const EMPTY_FORM: FormState = {
   restartCountThreshold: DEFAULT_THRESHOLDS.restartCountThreshold,
   latencyMsThreshold:    DEFAULT_THRESHOLDS.latencyMsThreshold,
   endpointName:          "frontend",
+  requiredKeys:          "",
 };
 
 function formToConfig(form: FormState): AlertRuleConfig {
@@ -150,6 +153,15 @@ function formToConfig(form: FormState): AlertRuleConfig {
   if (form.type === "high_latency") {
     c.latencyMsThreshold = form.latencyMsThreshold;
     c.endpointName       = form.endpointName;
+  }
+  if (form.type === "required_secrets_missing" && form.requiredKeys.trim()) {
+    const keys = form.requiredKeys
+      .split(/[\s,;]+/)
+      .map((k) => k.trim().toUpperCase())
+      .filter((k) => k.length > 0 && k.length <= 100);
+    if (keys.length > 0) {
+      c.requiredKeys = [...new Set(keys)].slice(0, 50);
+    }
   }
   return c;
 }
@@ -164,6 +176,7 @@ function ruleToForm(rule: AlertRule): FormState {
     restartCountThreshold: rule.config.restartCountThreshold ?? DEFAULT_THRESHOLDS.restartCountThreshold,
     latencyMsThreshold:    rule.config.latencyMsThreshold    ?? DEFAULT_THRESHOLDS.latencyMsThreshold,
     endpointName:          rule.config.endpointName          ?? "frontend",
+    requiredKeys:          rule.config.requiredKeys?.join(", ") ?? "",
   };
 }
 
@@ -289,6 +302,27 @@ function RuleForm({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Required keys — only for required_secrets_missing */}
+      {form.type === "required_secrets_missing" && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Required keys{" "}
+            <span className="text-muted-foreground/50">(comma or space-separated)</span>
+          </label>
+          <textarea
+            value={form.requiredKeys}
+            onChange={(e) => set("requiredKeys", e.target.value)}
+            placeholder="DATABASE_URL, SESSION_SECRET"
+            rows={2}
+            className="border border-border rounded px-2 py-1 text-xs bg-background font-mono focus:outline-none resize-none"
+          />
+          <p className="text-[11px] text-muted-foreground/60">
+            Alert only fires when these specific env var keys are missing from the project.
+            Leave blank to never trigger this rule.
+          </p>
         </div>
       )}
 

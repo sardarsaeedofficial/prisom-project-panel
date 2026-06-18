@@ -431,10 +431,25 @@ export function ProjectMonitoringPanel({ projectId, projectSlug }: Props) {
             />
             <SummaryCard
               icon={Rocket}
-              title="Recent failures"
-              value={`${s.deployments.recentFailureCount} failure${s.deployments.recentFailureCount !== 1 ? "s" : ""}`}
-              sub={s.deployments.lastDeploymentAt ? `Last deploy ${fmtRelTime(s.deployments.lastDeploymentAt)}` : undefined}
-              status={s.deployments.recentFailureCount > 0 ? "warn" : "pass"}
+              title="Deployments"
+              value={
+                s.deployments.unresolvedDeploymentFailure
+                  ? "Deploy failed"
+                  : s.deployments.lastDeploymentStatus === "SUCCESS"
+                  ? "Latest: Success"
+                  : s.deployments.lastDeploymentStatus ?? "No deploys"
+              }
+              sub={
+                s.deployments.recentFailureCount > 0 && !s.deployments.unresolvedDeploymentFailure
+                  ? `${s.deployments.recentFailureCount} historical failure${s.deployments.recentFailureCount !== 1 ? "s" : ""} (resolved)`
+                  : s.deployments.lastDeploymentAt
+                  ? `Last deploy ${fmtRelTime(s.deployments.lastDeploymentAt)}`
+                  : undefined
+              }
+              status={
+                s.deployments.unresolvedDeploymentFailure ? "fail"    :
+                s.deployments.lastDeploymentStatus === "SUCCESS" ? "pass" : "unknown"
+              }
             />
           </div>
 
@@ -643,7 +658,7 @@ export function ProjectMonitoringPanel({ projectId, projectSlug }: Props) {
               <Metric icon={Rocket}   label="Active ref"     value={s.deployments.activeDeploymentRef?.slice(0, 16) ?? "—"} mono />
               <Metric icon={Activity} label="Last status"    value={s.deployments.lastDeploymentStatus ?? "—"} />
               <Metric icon={Clock}    label="Last deploy"    value={fmtRelTime(s.deployments.lastDeploymentAt)} />
-              <Metric icon={XCircle}  label="Recent failures" value={String(s.deployments.recentFailureCount)} />
+              <Metric icon={XCircle}  label="Historical failures" value={String(s.deployments.recentFailureCount)} />
               {s.deployments.lastRollbackAt && (
                 <Metric icon={RotateCcw} label="Last rollback" value={fmtRelTime(s.deployments.lastRollbackAt)} />
               )}

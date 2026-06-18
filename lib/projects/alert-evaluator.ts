@@ -262,16 +262,32 @@ function evaluateRule(
     }
 
     case "required_secrets_missing": {
-      const missing = snap.secrets.missingKeys;
+      // Only trigger based on explicitly configured requiredKeys in the rule.
+      // The monitoring snapshot's missingKeys uses broad common-framework defaults
+      // (TYPICAL_KEYS) which are informational only — do NOT use them here.
+      const requiredKeys: string[] = (config.requiredKeys ?? [])
+        .map((k) => k.trim().toUpperCase())
+        .filter((k) => k.length > 0);
+
+      if (requiredKeys.length === 0) {
+        return {
+          triggered: false,
+          message:   "No project-defined required secret keys configured — skipped.",
+        };
+      }
+
+      const configuredSet = new Set(snap.secrets.configuredKeyNames);
+      const missing = requiredKeys.filter((k) => !configuredSet.has(k));
+
       if (missing.length > 0) {
         return {
           triggered: true,
-          message:   `${missing.length} required secret${missing.length !== 1 ? "s" : ""} not configured: ${missing.join(", ")}.`,
+          message:   `Missing required project secret key${missing.length !== 1 ? "s" : ""}: ${missing.join(", ")}.`,
         };
       }
       return {
         triggered: false,
-        message:   `All ${snap.secrets.presentCount} required secrets are present.`,
+        message:   `All ${requiredKeys.length} required secret key${requiredKeys.length !== 1 ? "s" : ""} are present.`,
       };
     }
 
@@ -305,22 +321,38 @@ function evaluateRule(
     }
 
     case "recent_deployment_failed": {
-      const { recentFailureCount, lastDeploymentStatus } = snap.deployments;
+      const {
+        unresolvedDeploymentFailure,
+        lastDeploymentStatus,
+        recentFailureCount,
+        lastSuccessfulDeploymentAt,
+      } = snap.deployments;
+
+      if (lastDeploymentStatus == null && recentFailureCount === 0) {
+        return { triggered: false, message: "No deployment history available." };
+      }
+
+      if (unresolvedDeploymentFailure) {
+        // Most recent terminal deployment is failed — not resolved by a later success
+        return {
+          triggered: true,
+          message:   lastSuccessfulDeploymentAt == null
+            ? "Latest deployment failed — no successful deployment on record."
+            : "Latest deployment failed. The most recent failure has not been followed by a successful deployment.",
+        };
+      }
+
+      // Latest terminal deployment is successful — historical failures are resolved
       if (recentFailureCount > 0) {
         return {
-          triggered: true,
-          message:   `${recentFailureCount} recent deployment failure${recentFailureCount !== 1 ? "s" : ""} recorded.`,
+          triggered: false,
+          message:   `Latest deployment is successful. ${recentFailureCount} historical failure${recentFailureCount !== 1 ? "s" : ""} exist but do not require action.`,
         };
       }
-      if (lastDeploymentStatus === "FAILED") {
-        return {
-          triggered: true,
-          message:   "Last deployment status is FAILED.",
-        };
-      }
+
       return {
         triggered: false,
-        message:   `No recent deployment failures (last status: ${lastDeploymentStatus ?? "none"}).`,
+        message:   `Latest deployment is successful (last status: ${lastDeploymentStatus ?? "—"}).`,
       };
     }
 

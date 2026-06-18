@@ -27,10 +27,17 @@ export type AlertEvaluationStatus = "ok" | "triggered" | "unknown" | "disabled";
 
 /** Optional config stored as JSON alongside a rule. */
 export type AlertRuleConfig = {
-  memoryMbThreshold?:      number;   // default 512
-  restartCountThreshold?:  number;   // default 5
-  latencyMsThreshold?:     number;   // default 3000
+  memoryMbThreshold?:      number;    // default 512
+  restartCountThreshold?:  number;    // default 5
+  latencyMsThreshold?:     number;    // default 3000
   endpointName?:           "frontend" | "health" | "login";
+  /**
+   * required_secrets_missing only.
+   * Explicit list of env var KEY names that must be present in the project.
+   * If empty or undefined, the rule is skipped (returns ok/unknown).
+   * Values are never stored or compared — only key names.
+   */
+  requiredKeys?:           string[];
 };
 
 /** Full rule as returned from the database. */
@@ -173,6 +180,17 @@ export function validateRuleConfig(
     const v = config.latencyMsThreshold;
     if (v !== undefined && (v < 100 || v > 60000)) {
       return "latencyMsThreshold must be between 100 and 60000 ms.";
+    }
+  }
+  if (type === "required_secrets_missing" && config.requiredKeys !== undefined) {
+    const rk = config.requiredKeys;
+    if (rk.length > 50) {
+      return "requiredKeys cannot exceed 50 entries.";
+    }
+    for (const k of rk) {
+      if (k.length === 0 || k.length > 100) {
+        return "Each required key must be 1–100 characters.";
+      }
     }
   }
   return null;
