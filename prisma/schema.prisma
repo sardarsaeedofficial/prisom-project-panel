@@ -344,6 +344,10 @@ model Project {
   // Database migration records
   dbMigrations     DbMigration[]
 
+  // Sprint 15: per-project alert rules & evaluation history
+  alertRules       ProjectAlertRule[]
+  alertEvaluations ProjectAlertEvaluation[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -963,4 +967,58 @@ model DbMigration {
 
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT ALERT RULES  (Sprint 15)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectAlertRule {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name     String
+  type     String  // AlertRuleType string
+  severity String  @default("warning")  // "info" | "warning" | "critical"
+  enabled  Boolean @default(true)
+
+  /// JSON config for thresholds/options (e.g. memoryMbThreshold, restartCountThreshold)
+  config Json?
+
+  lastCheckedAt   DateTime?
+  lastStatus      String?   // "ok" | "triggered" | "unknown" | "disabled"
+  lastMessage     String?
+  lastTriggeredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([projectId, enabled])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT ALERT EVALUATION  (Sprint 15 — manual evaluation history)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectAlertEvaluation {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  ruleId   String?
+  ruleName String?
+  type     String
+  severity String
+  status   String  // "ok" | "triggered" | "unknown" | "disabled"
+  message  String
+
+  /// Full monitoring snapshot (JSON) — optional, only stored for triggered results
+  snapshot Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
 }

@@ -21,6 +21,7 @@
  */
 
 import { useState, useCallback, useTransition, useEffect } from "react";
+import { ProjectAlertRulesPanel } from "@/components/projects/project-alert-rules-panel";
 import {
   Activity,
   RefreshCw,
@@ -684,6 +685,11 @@ export function ProjectMonitoringPanel({ projectId, projectSlug }: Props) {
           </div>
         </>
       )}
+
+      {/* ── Alert Rules (Sprint 15) — always rendered; has its own empty state ── */}
+      <div className="border-t border-border/50 pt-5">
+        <ProjectAlertRulesPanel projectId={projectId} />
+      </div>
     </div>
   );
 }
