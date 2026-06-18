@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.2",
+    "@monaco-editor/react": "^4.7.0",
     "@octokit/auth-app": "^8.2.0",
     "@octokit/rest": "^22.0.1",
     "@prisma/client": "^5.22.0",
@@ -40,6 +41,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.454.0",
+    "monaco-editor": "^0.55.1",
     "next": "^16.2.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
