@@ -32,16 +32,8 @@ import {
   validateRuleConfig,
 } from "@/lib/projects/alert-rules";
 
-// ── Re-exports ────────────────────────────────────────────────────────────────
-
-export type {
-  AlertRule,
-  AlertRuleType,
-  AlertSeverity,
-  AlertRuleConfig,
-  AlertEvaluationResult,
-  EvaluationBatchResult,
-};
+// Note: types are NOT re-exported here. Client components must import types
+// directly from lib/projects/alert-rules.ts (which has no server-only deps).
 
 export type ActionResult<T = unknown> =
   | { ok: true;  data: T }

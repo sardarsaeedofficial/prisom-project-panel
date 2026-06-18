@@ -62,6 +62,20 @@ export type AlertEvaluationResult = {
   checkedAt:  string;   // ISO
 };
 
+/**
+ * Result of a full evaluation batch.
+ * Defined here (not in alert-evaluator.ts) so client components can import it
+ * without pulling in any server-only code.
+ */
+export type EvaluationBatchResult = {
+  generatedAt:          string;
+  snapshotSeverity:     string;
+  environment:          string;
+  results:              AlertEvaluationResult[];
+  triggeredCount:       number;
+  notificationDelivery: "disabled_in_sprint_15";
+};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 export const ALERT_RULE_TYPES: AlertRuleType[] = [

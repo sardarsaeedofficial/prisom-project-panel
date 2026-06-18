@@ -47,13 +47,15 @@ import {
   deleteProjectAlertRuleAction,
   evaluateProjectAlertRulesAction,
   createDefaultProjectAlertRulesAction,
+} from "@/app/actions/project-alert-rules";
+import {
+  // types — imported directly from lib so they never cross the "use server" boundary
   type AlertRule,
   type AlertRuleType,
   type AlertSeverity,
   type AlertRuleConfig,
   type EvaluationBatchResult,
-} from "@/app/actions/project-alert-rules";
-import {
+  // runtime constants / helpers
   ALERT_RULE_TYPES,
   ALERT_RULE_TYPE_LABELS,
   ALERT_SEVERITY_LABELS,

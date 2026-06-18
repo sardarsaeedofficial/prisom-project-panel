@@ -20,21 +20,15 @@ import {
   type AlertEvaluationStatus,
   type AlertEvaluationResult,
   type AlertRuleConfig,
+  type EvaluationBatchResult,
   DEFAULT_THRESHOLDS,
   isValidRuleType,
   isValidSeverity,
 } from "@/lib/projects/alert-rules";
 
-// ── Input / output ────────────────────────────────────────────────────────────
-
-export type EvaluationBatchResult = {
-  generatedAt:          string;
-  snapshotSeverity:     string;
-  environment:          string;
-  results:              AlertEvaluationResult[];
-  triggeredCount:       number;
-  notificationDelivery: "disabled_in_sprint_15";
-};
+// EvaluationBatchResult is defined in alert-rules.ts so client components can
+// import it without pulling in server-only dependencies.
+export type { EvaluationBatchResult };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
 
