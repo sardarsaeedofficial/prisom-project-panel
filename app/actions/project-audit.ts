@@ -10,6 +10,11 @@
  *  - Never returns secret values, raw tokens, env values, or DB rows.
  *  - Metadata stored in the DB is already sanitised at write time.
  *  - Page size is capped at 100 per request.
+ *
+ * Sprint 18 Hotfix:
+ *  - NO type re-exports from this file. Client components must import
+ *    DTO types directly from @/lib/audit/project-audit-types.
+ *  - Only server action functions are exported from here.
  */
 
 import { requireProjectPermission } from "@/lib/auth/project-membership";
@@ -17,9 +22,11 @@ import {
   listProjectAuditEvents,
   getProjectAuditEventDetail,
   listProjectAuditActors,
-  type ProjectAuditEventDTO,
-  type AuditActor,
 } from "@/lib/audit/project-audit";
+import type {
+  ProjectAuditEventDTO,
+  AuditActor,
+} from "@/lib/audit/project-audit-types";
 
 // Allowed filter values — validated server-side before passing to the DB query
 const VALID_CATEGORIES = [
@@ -30,18 +37,17 @@ const VALID_CATEGORIES = [
 
 const VALID_RESULTS = ["success", "failed", "denied", "skipped"] as const;
 
-// ── Re-export DTO type so client components can import from here ───────────────
-export type { ProjectAuditEventDTO, AuditActor };
-
 // ── Shared result type ─────────────────────────────────────────────────────────
+// NOTE: ActionResult is defined here (not re-exported from a lib) so it is
+// always a plain TypeScript type that never leaks into the runtime proxy.
 
-export type ActionResult<T = unknown> =
+type ActionResult<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: string; code?: string };
 
 // ── List audit events ──────────────────────────────────────────────────────────
 
-export type GetAuditEventsInput = {
+type GetAuditEventsInput = {
   projectId: string;
   page?: number;
   pageSize?: number;
@@ -53,7 +59,7 @@ export type GetAuditEventsInput = {
   to?: string;   // ISO date string
 };
 
-export type GetAuditEventsOutput = {
+type GetAuditEventsOutput = {
   events: ProjectAuditEventDTO[];
   total: number;
   page: number;

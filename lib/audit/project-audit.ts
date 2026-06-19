@@ -10,10 +10,22 @@
  *    permission enforcement happens in the server action layer.
  *  - Metadata is always sanitised through sanitizeAuditMetadata before storage.
  *  - Raw env values, tokens, DB rows, and terminal output are never stored.
+ *
+ * Sprint 18 Hotfix:
+ *  - DTO types (ProjectAuditEventDTO, AuditActor) now live in
+ *    lib/audit/project-audit-types.ts (no server deps) so client components
+ *    can import them without going through a "use server" boundary.
  */
 
 import { db } from "@/lib/db";
 import { sanitizeAuditMetadata } from "@/lib/audit/audit-sanitize";
+import type {
+  ProjectAuditEventDTO,
+  AuditActor,
+} from "@/lib/audit/project-audit-types";
+
+// Re-export so existing server-side importers keep working
+export type { ProjectAuditEventDTO, AuditActor } from "@/lib/audit/project-audit-types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,32 +73,6 @@ export type WriteProjectAuditEventInput = {
 
   ipAddress?: string | null;
   userAgent?: string | null;
-};
-
-export type ProjectAuditEventDTO = {
-  id: string;
-  projectId: string;
-
-  actorUserId: string | null;
-  actorEmail: string | null;
-  actorName: string | null;
-  actorRole: string | null;
-
-  action: string;
-  category: string;
-  result: string;
-
-  targetType: string | null;
-  targetId: string | null;
-  targetLabel: string | null;
-
-  summary: string;
-  metadata: Record<string, unknown> | null;
-
-  ipAddress: string | null;
-  userAgent: string | null;
-
-  createdAt: string; // ISO
 };
 
 // ── Write (fire-and-forget safe) ──────────────────────────────────────────────
@@ -298,12 +284,6 @@ function rowToDTO(row: {
 }
 
 // ── Convenience: list unique actors for a project ─────────────────────────────
-
-export type AuditActor = {
-  actorUserId: string | null;
-  actorName: string | null;
-  actorEmail: string | null;
-};
 
 export async function listProjectAuditActors(
   projectId: string,

@@ -20,13 +20,17 @@
  */
 
 import { useState, useCallback, useEffect, useTransition } from "react";
+// Runtime functions — imported from the server action file (callable from client via RPC)
 import {
   getProjectAuditEventsAction,
   getProjectAuditEventDetailAction,
-  type GetAuditEventsOutput,
-  type ProjectAuditEventDTO,
-  type AuditActor,
 } from "@/app/actions/project-audit";
+// DTO types — imported from the client-safe types file (never from "use server")
+import type {
+  ProjectAuditEventDTO,
+  AuditActor,
+  GetAuditEventsOutput,
+} from "@/lib/audit/project-audit-types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
