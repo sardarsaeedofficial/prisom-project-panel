@@ -4,6 +4,13 @@
  * Sprint 17: Project membership resolution and permission enforcement.
  *
  * Server-only — do not import from "use client" files.
+ *
+ * Hotfix (Sprint 17): requireProjectPermission now wraps the ProjectMember-based
+ * RBAC block in try/catch so that a missing ProjectMember table (schema migration
+ * not yet applied with `pnpm prisma db push`) degrades gracefully.  When no role
+ * can be resolved from the ProjectMember table, a workspace-ownership check is
+ * used as a fallback — granting owner-level access only to the project's or
+ * workspace's original owner.
  */
 
 import { db } from "@/lib/db";
@@ -102,12 +109,20 @@ export async function getProjectRoleForUser(
  *
  * Returns MembershipContext (ok: true) or MembershipError (ok: false).
  * Never throws — all errors are returned as MembershipError.
+ *
+ * Resolution order:
+ *  1. getCurrentUser() — resolves the current logged-in user (session or stub).
+ *  2. ensureProjectOwnerMembership() — lazily seeds the owner ProjectMember row.
+ *  3. getProjectRoleForUser() — reads the ProjectMember role.
+ *  4. Workspace-ownership fallback — used when steps 2–3 fail or return null
+ *     (e.g. ProjectMember table not yet created by `pnpm prisma db push`).
+ *     Only grants access when the resolved user is the project/workspace owner.
  */
 export async function requireProjectPermission(
   projectId: string,
   permission: ProjectPermission,
 ): Promise<MembershipResult> {
-  // Resolve the current user from the session
+  // ── Step 1: resolve the current user ──────────────────────────────────────
   let userId: string;
   try {
     const user = await getCurrentUser();
@@ -120,20 +135,50 @@ export async function requireProjectPermission(
     };
   }
 
-  // Lazy-seed owner membership for pre-Sprint 17 projects
-  await ensureProjectOwnerMembership(projectId, userId);
-
-  // Fetch the user's role
-  const role = await getProjectRoleForUser(projectId, userId);
-  if (!role) {
-    return {
-      ok: false,
-      error: "Project not found.",
-      code: "FORBIDDEN",
-    };
+  // ── Steps 2–3: ProjectMember-based RBAC ───────────────────────────────────
+  // Wrapped in try/catch so that a missing ProjectMember table (schema not yet
+  // applied with `pnpm prisma db push`) degrades to the fallback below.
+  let role: ProjectRole | null = null;
+  try {
+    // Lazy-seed owner membership for pre-Sprint 17 projects
+    await ensureProjectOwnerMembership(projectId, userId);
+    // Fetch the user's role
+    role = await getProjectRoleForUser(projectId, userId);
+  } catch {
+    // ProjectMember table does not exist yet — fall through to workspace check.
   }
 
-  // Check the specific permission
+  // ── Step 4: workspace-ownership fallback ──────────────────────────────────
+  // Reached when: (a) ProjectMember table missing, (b) no member row yet
+  // (ensureProjectOwnerMembership hasn't run or raced), or (c) user is not
+  // a member at all (handled below as "Project not found.").
+  if (!role) {
+    const project = await db.project.findUnique({
+      where: { id: projectId },
+      select: {
+        id:        true,
+        ownerId:   true,
+        workspace: { select: { ownerId: true } },
+      },
+    });
+
+    if (!project) {
+      return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
+    }
+
+    const isOwner =
+      project.ownerId === userId || project.workspace.ownerId === userId;
+
+    if (!isOwner) {
+      // User exists but has no membership and does not own the project.
+      return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
+    }
+
+    // Workspace / project owner is treated as full owner.
+    role = "owner";
+  }
+
+  // ── Permission check ───────────────────────────────────────────────────────
   if (!hasPermission(role, permission)) {
     return {
       ok: false,

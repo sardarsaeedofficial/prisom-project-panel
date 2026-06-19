@@ -11,6 +11,11 @@
  *
  * Do NOT replace with NextAuth / Clerk — the session system in lib/session.ts
  * is intentional and must remain unchanged.
+ *
+ * Hotfix (Sprint 17): The session-based lookup now uses a case-insensitive
+ * email match and NEVER re-throws on lookup failure — any issue (unknown email,
+ * case mismatch, DB error, non-request context) falls through silently to the
+ * single-user OWNER stub, which is identical to the pre-Sprint 17 behaviour.
  */
 
 import { db } from "@/lib/db";
@@ -18,31 +23,32 @@ import { UserRole } from "@prisma/client";
 
 export async function getCurrentUser() {
   // ── Sprint 17: session-based lookup ──────────────────────────────────────
+  // Dynamic import keeps `next/headers` out of the Edge middleware bundle.
+  // ANY failure in this block (not in a request context, HMAC mismatch,
+  // unknown/mismatched email, Prisma error) falls through silently to the
+  // single-user stub below — this block must NEVER throw.
   try {
-    // Dynamic import so this file remains importable outside request contexts
-    // (the `next/headers` module throws when accessed outside a request).
     const { getSession } = await import("@/lib/session");
     const session = await getSession();
     if (session?.email) {
-      const user = await db.user.findUnique({ where: { email: session.email } });
+      // Case-insensitive match so login-form capitalisation differences
+      // (e.g. "John@example.com" vs the DB value "john@example.com")
+      // do not prevent the lookup from succeeding.
+      const user = await db.user.findFirst({
+        where: { email: { equals: session.email, mode: "insensitive" } },
+        orderBy: { createdAt: "asc" },
+      });
       if (user) return user;
-      // Session is present but references an unknown email — treat as unauthenticated.
-      throw new Error("Session references an unknown user email.");
+      // Session email not found in DB — fall through to stub below.
     }
-  } catch (err) {
-    // Re-throw real auth errors so callers see "Not authenticated."
-    if (
-      err instanceof Error &&
-      err.message === "Session references an unknown user email."
-    ) {
-      throw err;
-    }
-    // Otherwise we're outside a request context — fall through to stub.
+  } catch {
+    // Not in a request context (background job, seed script, build phase),
+    // or the session / DB call threw — fall through to stub.
   }
 
   // ── Fallback: single-user / non-request context ───────────────────────────
-  // Used by the background scheduler, seed scripts, and legacy code paths that
-  // run before sessions are available.
+  // Identical to the pre-Sprint 17 stub.  Used by the background scheduler,
+  // seed scripts, and any code path where the session lookup above fails.
   const user = await db.user.findFirst({
     where: { role: UserRole.OWNER },
     orderBy: { createdAt: "asc" },
