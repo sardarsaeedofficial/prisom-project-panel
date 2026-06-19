@@ -15,6 +15,7 @@ import {
   AlertCircle,
   FileArchive,
   Info,
+  LayoutTemplate,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,10 +30,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { createProjectAction, createBlankProjectAction } from "@/app/actions/projects";
 import { slugify } from "@/lib/utils";
+import { CreateFromTemplateForm } from "@/components/projects/create-from-template-form";
+import { listProjectTemplates } from "@/lib/templates/project-templates";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Mode = "blank" | "github" | "upload" | "ai";
+type Mode = "blank" | "github" | "upload" | "ai" | "template";
 
 // ── Shared sub-components ─────────────────────────────────────────────────────
 
@@ -135,10 +138,11 @@ const MODES: Array<{
   sub: string;
   Icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: "blank",  label: "Blank Project",      sub: "Start with an empty project",  Icon: FolderPlus },
-  { id: "github", label: "Import from GitHub", sub: "Link a repository",             Icon: Github     },
-  { id: "upload", label: "Upload ZIP",          sub: "Upload a .zip archive",         Icon: Upload     },
-  { id: "ai",     label: "AI Generate",         sub: "Describe what to build",        Icon: Sparkles   },
+  { id: "blank",    label: "Blank Project",      sub: "Start with an empty project",  Icon: FolderPlus    },
+  { id: "template", label: "From Template",       sub: "Scaffold from a starter",      Icon: LayoutTemplate },
+  { id: "github",   label: "Import from GitHub", sub: "Link a repository",             Icon: Github        },
+  { id: "upload",   label: "Upload ZIP",          sub: "Upload a .zip archive",         Icon: Upload        },
+  { id: "ai",       label: "AI Generate",         sub: "Describe what to build",        Icon: Sparkles      },
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -361,7 +365,7 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
       </div>
 
       {/* ── Mode selector ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 mb-8 sm:grid-cols-5">
         {MODES.map(({ id, label, sub, Icon }) => (
           <button
             key={id}
@@ -392,6 +396,13 @@ export function CreateProjectForm({ aiAvailable = false }: { aiAvailable?: boole
           </button>
         ))}
       </div>
+
+      {/* ══════════════════════════════════════════════════════════════
+          Template Mode
+      ══════════════════════════════════════════════════════════════ */}
+      {mode === "template" && (
+        <CreateFromTemplateForm templates={listProjectTemplates()} />
+      )}
 
       {/* ══════════════════════════════════════════════════════════════
           Blank Project
