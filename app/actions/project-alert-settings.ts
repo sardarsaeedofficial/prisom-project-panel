@@ -19,6 +19,8 @@
 import { revalidatePath }                           from "next/cache";
 import { db }                                       from "@/lib/db";
 import { requireProjectPermission }                 from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent }                   from "@/lib/audit/project-audit";
+import { getAuditRequestContext }                   from "@/lib/audit/request-context";
 import {
   runScheduledAlertCheckForProject,
   sendTestNotificationForProject,
@@ -53,10 +55,11 @@ async function verifyCanView(
 /** Write guard: monitoring.manage required (operator, admin, owner). */
 async function verifyOwnership(
   projectId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; userId: string; role: string } | { ok: false; error: string }> {
   const auth = await requireProjectPermission(projectId, "monitoring.manage");
   if (!auth.ok) return { ok: false, error: auth.error };
-  return { ok: true };
+  // Sprint 18: include auth data for audit
+  return { ok: true, userId: auth.userId, role: auth.role };
 }
 
 // ── Map DB row → AlertSettings ────────────────────────────────────────────────
@@ -247,6 +250,29 @@ export async function updateProjectAlertSettingsAction(input: {
   });
 
   revalidatePath(`/projects/${input.projectId}/monitoring`);
+
+  // Sprint 18: audit — no email values
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.scheduler.updated",
+    category: "alerts",
+    result: "success",
+    summary: "Alert scheduler settings updated",
+    metadata: {
+      schedulerEnabled: input.schedulerEnabled,
+      intervalMinutes: input.intervalMinutes,
+      deliveryMode: input.deliveryMode,
+      notifyOnRecovery: input.notifyOnRecovery,
+      repeatCooldownMinutes: input.repeatCooldownMinutes,
+      // never log the email value or even the masked version in audit metadata
+      emailUpdated: input.notificationEmail !== undefined,
+    },
+    ...ctx,
+  });
+
   return { ok: true, data: mapSettings(row) };
 }
 
@@ -277,6 +303,27 @@ export async function runScheduledAlertCheckNowAction(input: {
   if (result.ok) {
     revalidatePath(`/projects/${input.projectId}/monitoring`);
   }
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.evaluation.run",
+    category: "alerts",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Manual alert check run: ${result.data.triggeredCount} triggered`
+      : `Manual alert check failed`,
+    metadata: result.ok ? {
+      triggeredCount: result.data.triggeredCount,
+      notificationStatus: result.data.notificationStatus,
+      source: "manual_scheduler_test",
+    } : undefined,
+    ...ctx,
+  });
+
   return result;
 }
 
@@ -298,6 +345,23 @@ export async function sendTestAlertNotificationAction(input: {
   if (result.ok) {
     revalidatePath(`/projects/${input.projectId}/monitoring`);
   }
+
+  // Sprint 18: audit — no email values
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.notification.tested",
+    category: "alerts",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Test notification sent: ${result.data.notificationStatus}`
+      : "Test notification failed",
+    metadata: result.ok ? { notificationStatus: result.data.notificationStatus } : undefined,
+    ...ctx,
+  });
+
   return result;
 }
 

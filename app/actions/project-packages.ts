@@ -17,6 +17,8 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
 import { getProjectFileRoot } from "@/lib/projects/file-manager";
 import {
   validatePackageSpecifier,
@@ -41,7 +43,7 @@ export type PkgActionResult<T = unknown> =
 
 async function verifyOwnership(
   projectId: string,
-): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: string; slug: string; userId: string; role: string } | { ok: false; error: string }> {
   // Sprint 17: package management requires packages.manage permission
   const auth = await requireProjectPermission(projectId, "packages.manage");
   if (!auth.ok) return { ok: false, error: auth.error };
@@ -51,7 +53,8 @@ async function verifyOwnership(
     select: { id: true, slug: true },
   });
   if (!project) return { ok: false, error: "Project not found." };
-  return { ok: true, id: project.id, slug: project.slug };
+  // Sprint 18: include auth data for audit
+  return { ok: true, id: project.id, slug: project.slug, userId: auth.userId, role: auth.role };
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -133,6 +136,26 @@ export async function runProjectPackageOperationAction(input: {
     : { isGitRepo: false, changedFiles: [], packageJsonDiff: null, lockfileDiff: null };
 
   revalidatePath(`/projects/${projectId}`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: `packages.${operation}`,
+    category: "packages",
+    result: opResult.data.success ? "success" : "failed",
+    targetLabel: validation.specifier.display,
+    summary: `Package ${operation}: ${validation.specifier.display} (exit ${opResult.data.exitCode})`,
+    metadata: {
+      operation,
+      packageName: validation.specifier.display,
+      exitCode: opResult.data.exitCode,
+      durationMs: opResult.data.durationMs,
+    },
+    ...ctx,
+  });
 
   return {
     ok:   true,

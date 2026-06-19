@@ -17,6 +17,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { DeploymentStatus, DeploymentSource, DomainStatus, SslStatus, LogLevel, LogSource } from "@prisma/client";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
 import {
   assignNextPort,
   runProjectDeployment,
@@ -99,7 +101,7 @@ async function verifyOwnership(projectId: string) {
   // Sprint 17: deployment actions require deploy.trigger permission
   const auth = await requireProjectPermission(projectId, "deploy.trigger");
   if (!auth.ok) return null;
-  return db.project.findUnique({
+  const project = await db.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
@@ -108,6 +110,9 @@ async function verifyOwnership(projectId: string) {
       deploymentConfig: true,
     },
   });
+  if (!project) return null;
+  // Sprint 18: attach auth fields so callers can write audit events
+  return { ...project, _userId: auth.userId, _role: auth.role };
 }
 
 // ── Action: saveDeploymentConfigAction ────────────────────────────────────
@@ -223,6 +228,29 @@ export async function saveDeploymentConfigAction(
   });
 
   revalidatePath(`/projects/${projectId}/publishing`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "publishing.config.updated",
+    category: "publishing",
+    result: "success",
+    summary: isUpdate ? "Deployment config updated" : "Deployment config created",
+    metadata: {
+      startCommand: input.startCommand.trim(),
+      installCommand: input.installCommand.trim() || null,
+      buildCommand: input.buildCommand.trim() || null,
+      rootDirectory: input.rootDirectory.trim() || ".",
+      healthPath,
+      nodeEnv: input.nodeEnv.trim() || "production",
+      routeMode,
+    },
+    ...ctx,
+  });
+
   return { ok: true, error: "" };
 }
 
@@ -430,6 +458,32 @@ export async function deployProjectAction(
 
   revalidatePath(`/projects/${projectId}/publishing`);
 
+  // Sprint 18: audit
+  const auditCtx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: result.ok ? "publishing.deploy.succeeded" : "publishing.deploy.failed",
+    category: "publishing",
+    result: result.ok ? "success" : "failed",
+    targetType: "deployment",
+    targetId: deployment.id,
+    targetLabel: result.deploymentRef ?? undefined,
+    summary: result.ok
+      ? `Deployment succeeded (ref: ${result.deploymentRef ?? "?"}, port: ${config.port})`
+      : `Deployment failed: ${result.error?.slice(0, 200)}`,
+    metadata: {
+      deploymentId: deployment.id,
+      deploymentRef: result.deploymentRef ?? null,
+      pm2Name: config.pm2Name,
+      port: config.port,
+      durationMs: result.durationMs,
+      routeMode: config.routeMode ?? "fullstack_node",
+    },
+    ...auditCtx,
+  });
+
   return {
     ok:           result.ok,
     output:       result.output,
@@ -467,6 +521,23 @@ export async function restartProjectRuntimeAction(
   });
 
   revalidatePath(`/projects/${projectId}/publishing`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "publishing.restart",
+    category: "publishing",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Runtime restarted: ${config.pm2Name}`
+      : `Runtime restart failed: ${config.pm2Name}`,
+    metadata: { pm2Name: config.pm2Name, port: config.port },
+    ...ctx,
+  });
+
   return {
     ok:     result.ok,
     output: result.output,
@@ -500,6 +571,23 @@ export async function stopProjectRuntimeAction(
   });
 
   revalidatePath(`/projects/${projectId}/publishing`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "publishing.stop",
+    category: "publishing",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Runtime stopped: ${config.pm2Name}`
+      : `Runtime stop failed: ${config.pm2Name}`,
+    metadata: { pm2Name: config.pm2Name, port: config.port },
+    ...ctx,
+  });
+
   return {
     ok:     result.ok,
     output: result.output,

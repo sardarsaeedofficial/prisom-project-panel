@@ -49,7 +49,10 @@ export type ProjectPermission =
   // AI assistant
   | "ai.use"
   // GitHub
-  | "github.view";
+  | "github.view"
+  // Sprint 18: Audit log
+  | "audit.view"
+  | "audit.export";
 
 // ── Permission sets per role ───────────────────────────────────────────────────
 
@@ -63,6 +66,7 @@ const VIEWER_PERMISSIONS = new Set<ProjectPermission>([
   "domains.view",
   "packages.view",
   "github.view",
+  // Viewers do NOT get audit.view — audit is sensitive operational metadata
 ]);
 
 const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
@@ -70,6 +74,7 @@ const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
   "deploy.trigger",
   "deploy.rollback",
   "monitoring.manage",
+  "audit.view",    // Operators can view audit log (read-only)
 ]);
 
 const DEVELOPER_PERMISSIONS = new Set<ProjectPermission>([
@@ -80,6 +85,7 @@ const DEVELOPER_PERMISSIONS = new Set<ProjectPermission>([
   "deploy.trigger",
   "packages.manage",
   "ai.use",
+  "audit.view",    // Developers can view audit log
 ]);
 
 const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
@@ -105,6 +111,8 @@ const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
   "packages.manage",
   "ai.use",
   "github.view",
+  "audit.view",
+  "audit.export",
 ]);
 
 const OWNER_PERMISSIONS = new Set<ProjectPermission>([...ADMIN_PERMISSIONS]);

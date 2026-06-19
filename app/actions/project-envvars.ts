@@ -17,6 +17,8 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
 import {
   encryptEnvValue,
   decryptEnvValue,
@@ -40,7 +42,9 @@ async function verifyOwnership(projectId: string) {
     where: { id: projectId },
     select: { id: true, slug: true, workspaceId: true },
   });
-  return project;
+  if (!project) return null;
+  // Sprint 18: attach auth fields for audit
+  return { ...project, _userId: auth.userId, _role: auth.role };
 }
 
 // ── Return types ───────────────────────────────────────────────────────────
@@ -139,8 +143,14 @@ export async function upsertEnvVarAction(
 
   const secret = isSecret ?? isLikelySecret(cleanName);
 
+  let isCreate = false;
   try {
     const encrypted = encryptEnvValue(value.trim());
+    const existing = await db.projectEnvVar.findUnique({
+      where: { projectId_name_environment: { projectId, name: cleanName, environment: env } },
+      select: { id: true },
+    });
+    isCreate = !existing;
     await db.projectEnvVar.upsert({
       where:  { projectId_name_environment: { projectId, name: cleanName, environment: env } },
       update: { value: encrypted, isSecret: secret },
@@ -154,6 +164,25 @@ export async function upsertEnvVarAction(
   console.info(`[project-envvars] upsert ${cleanName} (env=${env}) for project ${projectId}`);
 
   revalidatePath(`/projects/${projectId}/env`);
+
+  // Sprint 18: audit — key name only, never value
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: isCreate ? "env.created" : "env.updated",
+    category: "env",
+    result: "success",
+    targetType: "env_var",
+    targetLabel: cleanName,
+    summary: isCreate
+      ? `Env var created: ${cleanName} (${env})`
+      : `Env var updated: ${cleanName} (${env})`,
+    metadata: { name: cleanName, environment: env, isSecret: secret },
+    ...ctx,
+  });
+
   return { ok: true, error: "" };
 }
 
@@ -189,11 +218,36 @@ export async function deleteEnvVarAction(
   const project = await verifyOwnership(projectId);
   if (!project) return { ok: false, error: "Not found or access denied." };
 
+  // Fetch name before deleting for audit
+  const row = await db.projectEnvVar.findFirst({
+    where: { id: envVarId, projectId },
+    select: { name: true, environment: true },
+  });
+
   await db.projectEnvVar.deleteMany({
     where: { id: envVarId, projectId },
   });
 
   revalidatePath(`/projects/${projectId}/env`);
+
+  // Sprint 18: audit — key name only, never value
+  if (row) {
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: project._userId,
+      actorRole: project._role,
+      action: "env.deleted",
+      category: "env",
+      result: "success",
+      targetType: "env_var",
+      targetLabel: row.name,
+      summary: `Env var deleted: ${row.name} (${row.environment})`,
+      metadata: { name: row.name, environment: row.environment },
+      ...ctx,
+    });
+  }
+
   return { ok: true, error: "" };
 }
 
@@ -253,6 +307,29 @@ export async function bulkImportEnvVarsAction(
   }
 
   revalidatePath(`/projects/${projectId}/env`);
+
+  // Sprint 18: audit — key names only, never values
+  if (imported > 0) {
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: project._userId,
+      actorRole: project._role,
+      action: "env.bulk_updated",
+      category: "env",
+      result: "success",
+      summary: `Bulk import: ${imported} env vars imported, ${skipped} skipped (${env})`,
+      metadata: {
+        environment: env,
+        imported,
+        skipped,
+        // Key names only — safe to log
+        names: importedNames.slice(0, 50),
+      },
+      ...ctx,
+    });
+  }
+
   return { ok: true, error: "", imported, skipped };
 }
 

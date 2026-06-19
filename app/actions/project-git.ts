@@ -16,6 +16,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { LogLevel, LogSource } from "@prisma/client";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
 import {
   getLocalGitStatus,
   initLocalRepo,
@@ -473,10 +475,13 @@ async function verifyOwnershipWithSlug(projectId: string) {
   // Sprint 17: git operations require github.view permission
   const auth = await requireProjectPermission(projectId, "github.view");
   if (!auth.ok) return null;
-  return db.project.findUnique({
+  const project = await db.project.findUnique({
     where:  { id: projectId },
     select: { id: true, slug: true, workspaceId: true },
   });
+  if (!project) return null;
+  // Sprint 18: include auth data for audit
+  return { ...project, _userId: auth.userId, _role: auth.role };
 }
 
 // ── Action: getProjectGitStatusAction ────────────────────────────────────────
@@ -594,6 +599,25 @@ export async function commitProjectChangesAction(input: {
     revalidatePath(`/projects/${projectId}/github`);
   }
 
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "git.commit.created",
+    category: "git",
+    result: result.ok ? "success" : "failed",
+    targetId: result.ok ? result.data.hash : undefined,
+    summary: result.ok
+      ? `Git commit: ${result.data.hash.slice(0, 8)} — ${message.trim().slice(0, 100)}`
+      : `Git commit failed: ${result.error?.slice(0, 200)}`,
+    metadata: result.ok
+      ? { hash: result.data.hash, messagePreview: message.trim().slice(0, 200) }
+      : { error: result.error?.slice(0, 200) },
+    ...ctx,
+  });
+
   return result;
 }
 
@@ -656,6 +680,20 @@ export async function pullProjectRepoAction(
     },
   }).catch(() => null);
 
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "git.pull",
+    category: "git",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok ? "Pulled from origin (--ff-only)" : `Pull failed: ${result.error?.slice(0, 200)}`,
+    metadata: { clean },
+    ...ctx,
+  });
+
   return result;
 }
 
@@ -704,6 +742,22 @@ export async function pushProjectRepoAction(input: {
   if (result.ok) {
     revalidatePath(`/projects/${projectId}/github`);
   }
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: project._userId,
+    actorRole: project._role,
+    action: "git.push",
+    category: "git",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Pushed branch "${branch}" to origin`
+      : `Push failed: ${result.error?.slice(0, 200)}`,
+    metadata: { branch, isAuthError: result.ok ? (result.data.isAuthError ?? false) : false },
+    ...ctx,
+  });
 
   return result;
 }

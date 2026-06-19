@@ -17,6 +17,9 @@
 
 import { db }                       from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent }   from "@/lib/audit/project-audit";
+import { getAuditRequestContext }   from "@/lib/audit/request-context";
+import { safeQueryPreview }         from "@/lib/audit/audit-sanitize";
 
 import {
   testProjectDbExplorerConnection,
@@ -50,11 +53,12 @@ export type { DbTableInfo, DbColumnInfo, DbIndexInfo } from "@/lib/projects/data
 
 async function verifyOwnership(
   projectId: string,
-): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; projectId: string; userId: string; role: string } | { ok: false; error: string }> {
   // Sprint 17: database explorer requires database.view permission
   const auth = await requireProjectPermission(projectId, "database.view");
   if (!auth.ok) return { ok: false, error: auth.error };
-  return { ok: true, projectId };
+  // Sprint 18: include auth data for audit
+  return { ok: true, projectId, userId: auth.userId, role: auth.role };
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -70,7 +74,25 @@ export async function getProjectDbConnectionAction(
   const auth = await verifyOwnership(projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
-  return testProjectDbExplorerConnection(projectId, environment);
+  const result = await testProjectDbExplorerConnection(projectId, environment);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "database.connection_tested",
+    category: "database",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Database connection tested OK (${environment})`
+      : `Database connection test failed (${environment})`,
+    metadata: { environment },
+    ...ctx,
+  });
+
+  return result;
 }
 
 /**
@@ -131,5 +153,29 @@ export async function runProjectReadOnlyQueryAction(input: {
   const auth = await verifyOwnership(input.projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
-  return runProjectReadOnlyQuery(input);
+  const result = await runProjectReadOnlyQuery(input);
+
+  // Sprint 18: audit — query preview only, no row data
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: result.ok ? "database.query.executed" : "database.query.blocked",
+    category: "database",
+    result: result.ok ? "success" : "failed",
+    summary: result.ok
+      ? `Read-only query executed (${input.environment ?? "production"})`
+      : `Query blocked/failed (${input.environment ?? "production"})`,
+    // queryPreview and rowCount only — no row data
+    metadata: {
+      queryPreview: safeQueryPreview(input.query),
+      environment: input.environment ?? "production",
+      rowCount: result.ok ? (result.data as { rows?: unknown[] }).rows?.length ?? null : null,
+      durationMs: result.ok ? (result.data as { durationMs?: number }).durationMs ?? null : null,
+    },
+    ...ctx,
+  });
+
+  return result;
 }

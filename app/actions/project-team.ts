@@ -29,6 +29,8 @@ import {
   PROJECT_ROLES,
   assignableRoles,
 } from "@/lib/auth/project-permissions";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
 
 // ── Shared result type ─────────────────────────────────────────────────────────
 
@@ -205,6 +207,23 @@ export async function inviteProjectMemberAction(input: {
   // Build the invite URL — the panel's own origin
   const inviteUrl = `/invites/project/${token}`;
 
+  // Sprint 18: audit — log key names only, never the token itself
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "team.invite.created",
+    category: "team",
+    result: "success",
+    targetType: "invite",
+    targetId: invite.id,
+    targetLabel: maskEmail(email),
+    summary: `Invite created for ${maskEmail(email)} as ${input.role}`,
+    metadata: { role: input.role, inviteId: invite.id },
+    ...ctx,
+  });
+
   return { ok: true, data: { inviteUrl, inviteId: invite.id } };
 }
 
@@ -285,6 +304,23 @@ export async function updateProjectMemberRoleAction(input: {
 
   revalidatePath(`/projects/${input.projectId}/settings`);
 
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "team.member.role_changed",
+    category: "team",
+    result: "success",
+    targetType: "member",
+    targetId: member.userId,
+    targetLabel: member.user.name,
+    summary: `Role changed for ${member.user.name}: ${member.role} → ${input.role}`,
+    metadata: { previousRole: member.role, newRole: input.role, memberId: input.memberId },
+    ...ctx,
+  });
+
   return {
     ok: true,
     data: {
@@ -358,6 +394,23 @@ export async function removeProjectMemberAction(input: {
   await db.projectMember.delete({ where: { id: input.memberId } });
 
   revalidatePath(`/projects/${input.projectId}/settings`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "team.member.removed",
+    category: "team",
+    result: "success",
+    targetType: "member",
+    targetId: member.userId,
+    summary: `Member removed (role: ${member.role})`,
+    metadata: { removedRole: member.role, memberId: input.memberId },
+    ...ctx,
+  });
+
   return { ok: true, data: { memberId: input.memberId } };
 }
 
@@ -376,7 +429,7 @@ export async function cancelProjectInviteAction(input: {
 
   const invite = await db.projectInvite.findUnique({
     where: { id: input.inviteId },
-    select: { id: true, projectId: true, status: true },
+    select: { id: true, projectId: true, status: true, email: true },
   });
   if (!invite || invite.projectId !== input.projectId) {
     return { ok: false, error: "Invite not found.", code: "NOT_FOUND" };
@@ -391,6 +444,24 @@ export async function cancelProjectInviteAction(input: {
   });
 
   revalidatePath(`/projects/${input.projectId}/settings`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "team.invite.cancelled",
+    category: "team",
+    result: "success",
+    targetType: "invite",
+    targetId: input.inviteId,
+    targetLabel: maskEmail(invite.email),
+    summary: `Invite cancelled for ${maskEmail(invite.email)}`,
+    metadata: { inviteId: input.inviteId },
+    ...ctx,
+  });
+
   return { ok: true, data: { inviteId: input.inviteId } };
 }
 
@@ -508,6 +579,22 @@ export async function acceptProjectInviteAction(
   ]);
 
   revalidatePath(`/projects/${invite.projectId}/settings`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: invite.projectId,
+    actorUserId: userId,
+    action: "team.invite.accepted",
+    category: "team",
+    result: "success",
+    targetType: "invite",
+    targetId: invite.id,
+    targetLabel: maskEmail(invite.email),
+    summary: `Invite accepted — joined as ${invite.role}`,
+    metadata: { role: invite.role, inviteId: invite.id },
+    ...ctx,
+  });
 
   return {
     ok: true,

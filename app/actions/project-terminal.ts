@@ -11,6 +11,9 @@
 
 import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
+import { getAuditRequestContext } from "@/lib/audit/request-context";
+import { safeCommandPreview } from "@/lib/audit/audit-sanitize";
 import {
   runProjectCommand,
   readPackageScripts,
@@ -35,7 +38,7 @@ export type ActionResult<T = unknown> =
 
 async function verifyOwnership(
   projectId: string,
-): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; workspaceId: string; userId: string; role: string } | { ok: false; error: string }> {
   // Sprint 17: require terminal.use permission
   const auth = await requireProjectPermission(projectId, "terminal.use");
   if (!auth.ok) return { ok: false, error: auth.error };
@@ -45,7 +48,8 @@ async function verifyOwnership(
     select: { workspaceId: true },
   });
   if (!project) return { ok: false, error: "Project not found." };
-  return { ok: true, workspaceId: project.workspaceId };
+  // Sprint 18: include auth data for audit
+  return { ok: true, workspaceId: project.workspaceId, userId: auth.userId, role: auth.role };
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
@@ -173,7 +177,52 @@ export async function runProjectCommandAction(
     return { ok: false, error: "No command provided." };
   }
 
+  // Sprint 18: classify for audit metadata (best-effort, never blocks execution)
+  let commandRisk: string = "unknown";
+  let commandCategory: string = "unknown";
+  try {
+    const deployConfig = await db.projectDeploymentConfig.findUnique({
+      where: { projectId },
+      select: { pm2Name: true },
+    });
+    const classification = classifyProjectCommand({
+      rawCommand: command,
+      projectPm2Name: deployConfig?.pm2Name ?? undefined,
+    });
+    if (classification.ok) {
+      commandRisk = classification.risk;
+      commandCategory = "allowed";
+    } else {
+      commandRisk = "blocked";
+      commandCategory = "blocked";
+    }
+  } catch {
+    // Non-fatal — classification failure doesn't block execution
+  }
+
   const result = await runProjectCommand({ projectId, rawCommand: command, confirmed });
+
+  // Sprint 18: audit terminal command
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: result.ok ? "terminal.command.executed" : (result.code === "BLOCKED" ? "terminal.command.blocked" : "terminal.command.executed"),
+    category: "terminal",
+    result: result.ok ? "success" : (result.code === "BLOCKED" ? "denied" : "failed"),
+    summary: result.ok
+      ? `Command executed: ${safeCommandPreview(command)}`
+      : `Command ${result.code === "BLOCKED" ? "blocked" : "failed"}: ${safeCommandPreview(command)}`,
+    metadata: {
+      commandPreview: safeCommandPreview(command),
+      commandCategory,
+      risk: commandRisk,
+      exitCode: result.ok ? (result.data as { exitCode?: number })?.exitCode ?? null : null,
+      durationMs: result.ok ? (result.data as { durationMs?: number })?.durationMs ?? null : null,
+    },
+    ...ctx,
+  });
 
   if (!result.ok) {
     return { ok: false, error: result.error, code: result.code };

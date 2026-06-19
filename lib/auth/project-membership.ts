@@ -20,6 +20,7 @@ import {
   type ProjectPermission,
   type ProjectRole,
 } from "@/lib/auth/project-permissions";
+import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
 
 // ── Result types ──────────────────────────────────────────────────────────────
 
@@ -180,6 +181,19 @@ export async function requireProjectPermission(
 
   // ── Permission check ───────────────────────────────────────────────────────
   if (!hasPermission(role, permission)) {
+    // Sprint 18: log permission denials so owners/admins can see them in the audit log.
+    // Fire-and-forget — never blocks or throws.
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: userId,
+      actorRole: role,
+      action: "permission.denied",
+      category: "permissions",
+      result: "denied",
+      summary: `Permission denied: ${permission} (role: ${role})`,
+      metadata: { permission, role },
+    });
+
     return {
       ok: false,
       error: `You do not have permission to perform this action (${permission}).`,

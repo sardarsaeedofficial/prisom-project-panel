@@ -257,6 +257,9 @@ model User {
   projectMemberships  ProjectMember[]
   sentProjectInvites  ProjectInvite[]  @relation("InviteSentBy")
   acceptedInvites     ProjectInvite[]  @relation("InviteAcceptedBy")
+
+  // Sprint 18: audit log
+  auditedActions      ProjectAuditEvent[] @relation("AuditActor")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,6 +380,9 @@ model Project {
   // Sprint 17: team members + invites
   members             ProjectMember[]
   invites             ProjectInvite[]
+
+  // Sprint 18: audit log
+  auditEvents         ProjectAuditEvent[]
 
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
@@ -1169,4 +1175,58 @@ model ProjectInvite {
   @@index([projectId])
   @@index([token])
   @@index([email])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT AUDIT EVENT  (Sprint 18 — append-only audit log)
+//
+// Records who did what, when, from where, and whether it succeeded.
+// Append-only for Sprint 18 — no delete or update operations allowed.
+// Values (env var values, tokens, DB rows, terminal output) are NEVER stored.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectAuditEvent {
+  id String @id @default(cuid())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The user who performed the action (null for anonymous/system events)
+  actorUserId String?
+  actorUser   User?   @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  /// Denormalised actor fields so events remain readable if the user is deleted
+  actorEmail String?
+  actorName  String?
+  actorRole  String?
+
+  /// Dot-namespaced action label, e.g. "team.invite.created", "env.created"
+  action   String
+  /// Broad category, e.g. "team", "env", "terminal", "deploy"
+  category String
+  /// "success" | "failed" | "denied" | "skipped"
+  result   String @default("success")
+
+  /// What the action targeted (optional)
+  targetType  String?
+  targetId    String?
+  targetLabel String?
+
+  /// One-line human-readable description of the event
+  summary  String
+  /// Sanitised key/value metadata — never contains secret values
+  metadata Json?
+
+  /// Best-effort network metadata (from x-forwarded-for / x-real-ip / user-agent)
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([projectId, category])
+  @@index([projectId, action])
+  @@index([projectId, result])
+  @@index([actorUserId])
 }

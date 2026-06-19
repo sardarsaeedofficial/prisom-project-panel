@@ -16,6 +16,8 @@
 import { revalidatePath }           from "next/cache";
 import { db }                       from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent }   from "@/lib/audit/project-audit";
+import { getAuditRequestContext }   from "@/lib/audit/request-context";
 import {
   evaluateProjectAlertRules,
   type EvaluationBatchResult,
@@ -43,11 +45,12 @@ export type ActionResult<T = unknown> =
 
 async function verifyOwnership(
   projectId: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; userId: string; role: string } | { ok: false; error: string }> {
   // Sprint 17: alert rule management requires monitoring.manage permission
   const auth = await requireProjectPermission(projectId, "monitoring.manage");
   if (!auth.ok) return { ok: false, error: auth.error };
-  return { ok: true };
+  // Sprint 18: include auth data for audit
+  return { ok: true, userId: auth.userId, role: auth.role };
 }
 
 // ── Map DB row → AlertRule ────────────────────────────────────────────────────
@@ -139,6 +142,24 @@ export async function createProjectAlertRuleAction(input: {
   });
 
   revalidatePath(`/projects/${input.projectId}/monitoring`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.rule.created",
+    category: "alerts",
+    result: "success",
+    targetType: "alert_rule",
+    targetId: row.id,
+    targetLabel: name,
+    summary: `Alert rule created: "${name}" (${input.type}, ${input.severity})`,
+    metadata: { type: input.type, severity: input.severity, enabled: input.enabled ?? true },
+    ...ctx,
+  });
+
   return { ok: true, data: mapRule(row) };
 }
 
@@ -189,6 +210,28 @@ export async function updateProjectAlertRuleAction(input: {
   });
 
   revalidatePath(`/projects/${input.projectId}/monitoring`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.rule.updated",
+    category: "alerts",
+    result: "success",
+    targetType: "alert_rule",
+    targetId: input.ruleId,
+    targetLabel: updated.name,
+    summary: `Alert rule updated: "${updated.name}"`,
+    metadata: {
+      name: input.name?.trim(),
+      severity: input.severity,
+      enabled: input.enabled,
+    },
+    ...ctx,
+  });
+
   return { ok: true, data: mapRule(updated) };
 }
 
@@ -212,6 +255,23 @@ export async function deleteProjectAlertRuleAction(input: {
   await db.projectAlertRule.delete({ where: { id: input.ruleId } });
 
   revalidatePath(`/projects/${input.projectId}/monitoring`);
+
+  // Sprint 18: audit
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId: input.projectId,
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action: "alerts.rule.deleted",
+    category: "alerts",
+    result: "success",
+    targetType: "alert_rule",
+    targetId: input.ruleId,
+    summary: `Alert rule deleted`,
+    metadata: { ruleId: input.ruleId },
+    ...ctx,
+  });
+
   return { ok: true, data: { deleted: true } };
 }
 
