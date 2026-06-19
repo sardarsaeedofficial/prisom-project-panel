@@ -191,45 +191,85 @@ export async function deliverAlertNotification(input: {
 
   // ── email ─────────────────────────────────────────────────────────────────
   if (deliveryMode === "email") {
-    // Check for configured email provider
-    const smtpHost = process.env.SMTP_HOST;
     const resendKey = process.env.RESEND_API_KEY;
+    const smtpHost  = process.env.SMTP_HOST;
 
-    if (!smtpHost && !resendKey) {
+    if (!resendKey && !smtpHost) {
       return {
         status:  "unavailable",
         message:
-          "Email delivery unavailable: provider configuration missing. " +
-          "Set SMTP_HOST or RESEND_API_KEY to enable email.",
+          "Email provider not configured. " +
+          "Set RESEND_API_KEY or SMTP_HOST to enable real email delivery.",
       };
     }
 
     if (!notificationEmail) {
-      return {
-        status:  "failed",
-        message: "Email send failed: no recipient configured.",
-      };
+      return { status: "failed", message: "Email send failed: no recipient configured." };
     }
     if (!isValidEmail(notificationEmail)) {
-      return {
-        status:  "failed",
-        message: "Email send failed: invalid recipient email address.",
-      };
+      return { status: "failed", message: "Email send failed: invalid recipient email address." };
     }
 
-    // Provider env vars are set but email integration not yet implemented.
-    // Return unavailable rather than crash — this is safe and non-destructive.
-    // TODO: Wire up SMTP (nodemailer) or Resend SDK once a provider package is added.
+    // ── Resend (REST API — no extra package needed) ──────────────────────
+    if (resendKey) {
+      const from =
+        process.env.ALERT_EMAIL_FROM?.trim() ||
+        "Prisom Alerts <onboarding@resend.dev>";
+
+      try {
+        const response = await fetch("https://api.resend.com/emails", {
+          method:  "POST",
+          headers: {
+            Authorization:  `Bearer ${resendKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to:      [notificationEmail],
+            subject: rendered.subject,
+            text:    rendered.text,
+          }),
+        });
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          const preview = body.slice(0, 200);
+          console.error(
+            "[alert-notification] Resend error",
+            response.status,
+            preview,
+          );
+          return {
+            status:  "failed",
+            message: `Resend API error ${response.status}: ${preview || response.statusText}`,
+          };
+        }
+
+        console.log(
+          "[alert-notification] sent via Resend | to:",
+          maskEmail(notificationEmail),
+          "| subject:", rendered.subject,
+        );
+        return { status: "sent", message: "Email sent via Resend." };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[alert-notification] Resend fetch error:", msg);
+        return { status: "failed", message: `Resend request failed: ${msg}` };
+      }
+    }
+
+    // ── SMTP (nodemailer required — not bundled) ──────────────────────────
+    // SMTP_HOST is set but nodemailer is not installed.
+    // Run `pnpm add nodemailer @types/nodemailer` to enable SMTP delivery.
     console.log(
-      "[alert-notification] email | provider detected but not yet wired |",
+      "[alert-notification] SMTP configured (SMTP_HOST set) but nodemailer not installed.",
       "to:", maskEmail(notificationEmail),
-      "| subject:", rendered.subject,
     );
     return {
       status:  "unavailable",
       message:
-        "Email delivery unavailable: provider detected but email integration " +
-        "not yet implemented. Add nodemailer or resend to package.json to enable.",
+        "SMTP provider detected but nodemailer is not installed. " +
+        "Run `pnpm add nodemailer @types/nodemailer` to enable SMTP delivery.",
     };
   }
 

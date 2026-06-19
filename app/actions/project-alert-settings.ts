@@ -27,6 +27,7 @@ import {
   type AlertSettings,
   type AlertNotificationRecord,
   type ScheduledCheckResult,
+  type EmailProviderStatus,
   isValidDeliveryMode,
   isValidInterval,
 } from "@/lib/projects/alert-rules";
@@ -367,5 +368,69 @@ export async function getRecentScheduledEvaluationsAction(input: {
       source:    r.source,
       createdAt: r.createdAt.toISOString(),
     })),
+  };
+}
+
+// ── getEmailProviderStatusAction ──────────────────────────────────────────────
+
+/**
+ * Return the presence/absence of each email provider env var.
+ *
+ * Safety: only boolean flags are returned — never the actual values.
+ * Still requires project ownership so unauthenticated callers cannot probe
+ * the server's env var state.
+ */
+export async function getEmailProviderStatusAction(
+  projectId: string,
+): Promise<ActionResult<EmailProviderStatus>> {
+  const auth = await verifyOwnership(projectId);
+  if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
+
+  const smtpFields = {
+    SMTP_HOST: !!process.env.SMTP_HOST,
+    SMTP_PORT: !!process.env.SMTP_PORT,
+    SMTP_USER: !!process.env.SMTP_USER,
+    SMTP_PASS: !!process.env.SMTP_PASS,
+    SMTP_FROM: !!process.env.SMTP_FROM,
+  };
+  const resendFields = {
+    RESEND_API_KEY:   !!process.env.RESEND_API_KEY,
+    ALERT_EMAIL_FROM: !!process.env.ALERT_EMAIL_FROM,
+  };
+
+  // SMTP is considered "configured" only when the mandatory fields are all present
+  const smtpConfigured =
+    smtpFields.SMTP_HOST &&
+    smtpFields.SMTP_USER &&
+    smtpFields.SMTP_PASS &&
+    smtpFields.SMTP_FROM;
+
+  const resendConfigured = resendFields.RESEND_API_KEY;
+
+  // Resend is preferred over SMTP (it works without an extra package)
+  const activeProvider: EmailProviderStatus["activeProvider"] = resendConfigured
+    ? "resend"
+    : smtpConfigured
+    ? "smtp"
+    : null;
+
+  const providerNote =
+    activeProvider === "resend"
+      ? "Resend is configured — real email delivery is available."
+      : activeProvider === "smtp"
+      ? "SMTP is configured — install nodemailer to enable real delivery."
+      : "No email provider configured — set RESEND_API_KEY or SMTP_HOST.";
+
+  return {
+    ok: true,
+    data: {
+      smtpConfigured,
+      smtpFields,
+      resendConfigured,
+      resendFields,
+      anyProviderConfigured: smtpConfigured || resendConfigured,
+      activeProvider,
+      providerNote,
+    },
   };
 }

@@ -28,6 +28,7 @@ import {
   type AlertNotificationRecord,
   type AlertDeliveryMode,
   type ScheduledCheckResult,
+  type EmailProviderStatus,
   ALERT_INTERVALS,
   ALERT_DELIVERY_MODES,
   ALERT_DELIVERY_MODE_LABELS,
@@ -40,6 +41,7 @@ import {
   sendTestAlertNotificationAction,
   getRecentAlertNotificationsAction,
   getRecentScheduledEvaluationsAction,
+  getEmailProviderStatusAction,
 } from "@/app/actions/project-alert-settings";
 import {
   Clock,
@@ -59,6 +61,7 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronUp,
+  Minus,
 } from "lucide-react";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -132,6 +135,38 @@ function EvalStatusBadge({ status }: { status: string }) {
   );
 }
 
+// ── EnvVarRow ─────────────────────────────────────────────────────────────────
+
+/** Single row in the provider status grid. Shows present/missing, never values. */
+function EnvVarRow({
+  name,
+  present,
+  required,
+}: {
+  name:     string;
+  present:  boolean;
+  required: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between text-[10px]">
+      <code className="font-mono text-muted-foreground">{name}</code>
+      {present ? (
+        <span className="flex items-center gap-0.5 text-green-600 font-medium">
+          <CheckCircle2 className="h-2.5 w-2.5" /> set
+        </span>
+      ) : required ? (
+        <span className="flex items-center gap-0.5 text-red-500 font-medium">
+          <XCircle className="h-2.5 w-2.5" /> missing
+        </span>
+      ) : (
+        <span className="flex items-center gap-0.5 text-muted-foreground/60">
+          <Minus className="h-2.5 w-2.5" /> optional
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export function ProjectAlertSettingsPanel({ projectId }: Props) {
@@ -153,6 +188,9 @@ export function ProjectAlertSettingsPanel({ projectId }: Props) {
   const [testResult,  setTestResult]   = useState<{ notificationStatus: string; message: string } | null>(null);
   const [testRunning, setTestRunning]  = useState(false);
   const [testErr,     setTestErr]      = useState<string | null>(null);
+
+  // Email provider status (server-side check, booleans only)
+  const [providerStatus, setProviderStatus] = useState<EmailProviderStatus | null>(null);
 
   // Recent data
   const [notifications,     setNotifications]     = useState<AlertNotificationRecord[]>([]);
@@ -187,10 +225,11 @@ export function ProjectAlertSettingsPanel({ projectId }: Props) {
     setLoading(true);
     setLoadErr(null);
     startTransition(async () => {
-      const [settingsRes, notifRes, evalRes] = await Promise.all([
+      const [settingsRes, notifRes, evalRes, providerRes] = await Promise.all([
         getProjectAlertSettingsAction(projectId),
         getRecentAlertNotificationsAction({ projectId, limit: 10 }),
         getRecentScheduledEvaluationsAction({ projectId, limit: 30 }),
+        getEmailProviderStatusAction(projectId),
       ]);
 
       setLoading(false);
@@ -208,8 +247,9 @@ export function ProjectAlertSettingsPanel({ projectId }: Props) {
       } else {
         setLoadErr(settingsRes.error);
       }
-      if (notifRes.ok) setNotifications(notifRes.data);
-      if (evalRes.ok)  setRecentEvaluations(evalRes.data);
+      if (notifRes.ok)   setNotifications(notifRes.data);
+      if (evalRes.ok)    setRecentEvaluations(evalRes.data);
+      if (providerRes.ok) setProviderStatus(providerRes.data);
     });
   }, [projectId]);
 
@@ -446,14 +486,82 @@ export function ProjectAlertSettingsPanel({ projectId }: Props) {
           <p className="text-[10px] text-muted-foreground">
             {ALERT_DELIVERY_MODE_DESCRIPTIONS[form.deliveryMode]}
           </p>
-          {form.deliveryMode === "email" && (
+
+          {/* ── Mode-specific contextual messages ────────────────────────── */}
+          {form.deliveryMode === "email_dry_run" && (
+            <div className="flex items-start gap-2 mt-1 p-2 rounded border border-blue-400/20 bg-blue-500/5 text-[10px] text-blue-700">
+              <Info className="h-3 w-3 shrink-0 mt-0.5" />
+              Dry-run mode does not send real email. It renders and records the notification
+              without delivering it.
+            </div>
+          )}
+          {form.deliveryMode === "email" && providerStatus && !providerStatus.anyProviderConfigured && (
+            <div className="flex items-start gap-2 mt-1 p-2 rounded border border-red-400/20 bg-red-500/5 text-[10px] text-red-700">
+              <XCircle className="h-3 w-3 shrink-0 mt-0.5" />
+              Email provider not configured. Set{" "}
+              <code className="font-mono">RESEND_API_KEY</code> or{" "}
+              <code className="font-mono">SMTP_HOST</code> to enable real email delivery.
+            </div>
+          )}
+          {form.deliveryMode === "email" && providerStatus?.activeProvider === "smtp" && (
             <div className="flex items-start gap-2 mt-1 p-2 rounded border border-amber-400/20 bg-amber-500/5 text-[10px] text-amber-700">
               <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-              Email sends only if SMTP_HOST or RESEND_API_KEY is configured. If not set, delivery
-              falls back to unavailable with a safe warning — no crash.
+              SMTP is configured but requires nodemailer. Run{" "}
+              <code className="font-mono">pnpm add nodemailer</code> to enable SMTP delivery.
+            </div>
+          )}
+          {form.deliveryMode === "email" && providerStatus?.activeProvider === "resend" && (
+            <div className="flex items-start gap-2 mt-1 p-2 rounded border border-green-400/20 bg-green-500/5 text-[10px] text-green-700">
+              <CheckCircle2 className="h-3 w-3 shrink-0 mt-0.5" />
+              Resend is configured — real email delivery is ready.
             </div>
           )}
         </div>
+
+        {/* ── Email provider status grid ────────────────────────────────── */}
+        {providerStatus && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Email provider status</p>
+            <div className="grid grid-cols-2 gap-2">
+              {/* Resend */}
+              <div className="rounded border border-border bg-background p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Resend</span>
+                  {providerStatus.resendConfigured
+                    ? <span className="text-[10px] font-semibold text-green-600 flex items-center gap-0.5"><CheckCircle2 className="h-3 w-3" /> Ready</span>
+                    : <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Minus className="h-3 w-3" /> Not set</span>}
+                </div>
+                {(["RESEND_API_KEY", "ALERT_EMAIL_FROM"] as const).map((k) => (
+                  <EnvVarRow
+                    key={k}
+                    name={k}
+                    present={providerStatus.resendFields[k]}
+                    required={k === "RESEND_API_KEY"}
+                  />
+                ))}
+              </div>
+
+              {/* SMTP */}
+              <div className="rounded border border-border bg-background p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">SMTP</span>
+                  {providerStatus.smtpConfigured
+                    ? <span className="text-[10px] font-semibold text-amber-600 flex items-center gap-0.5"><AlertTriangle className="h-3 w-3" /> Needs nodemailer</span>
+                    : <span className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Minus className="h-3 w-3" /> Not set</span>}
+                </div>
+                {(["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"] as const).map((k) => (
+                  <EnvVarRow
+                    key={k}
+                    name={k}
+                    present={providerStatus.smtpFields[k]}
+                    required={k !== "SMTP_PORT"}
+                  />
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground">{providerStatus.providerNote}</p>
+          </div>
+        )}
 
         {/* Notification email */}
         {(form.deliveryMode === "email_dry_run" || form.deliveryMode === "email") && (

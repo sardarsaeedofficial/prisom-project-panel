@@ -239,6 +239,34 @@ export function isValidDeliveryMode(m: string): m is AlertDeliveryMode {
   return m === "log_only" || m === "email_dry_run" || m === "email";
 }
 
+/**
+ * Result of a server-side email provider presence check.
+ * Only booleans are returned — never env var values.
+ */
+export type EmailProviderStatus = {
+  /** True when SMTP_HOST + SMTP_USER + SMTP_PASS + SMTP_FROM are all set. */
+  smtpConfigured: boolean;
+  smtpFields: {
+    SMTP_HOST:  boolean;
+    SMTP_PORT:  boolean;
+    SMTP_USER:  boolean;
+    SMTP_PASS:  boolean;
+    SMTP_FROM:  boolean;
+  };
+  /** True when RESEND_API_KEY is set. */
+  resendConfigured: boolean;
+  resendFields: {
+    RESEND_API_KEY:   boolean;
+    ALERT_EMAIL_FROM: boolean;
+  };
+  /** True when at least one usable provider is configured. */
+  anyProviderConfigured: boolean;
+  /** Which provider would be used — Resend takes priority over SMTP. */
+  activeProvider: "resend" | "smtp" | null;
+  /** Human-readable note about the active provider. */
+  providerNote: string;
+};
+
 export function isValidInterval(n: number): boolean {
   return ALERT_INTERVALS.includes(n);
 }
