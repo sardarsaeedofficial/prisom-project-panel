@@ -44,8 +44,16 @@ export async function evaluateProjectAlertRules(input: {
   environment?: "production" | "preview" | "development";
   ruleIds?:     string[];
   persist?:     boolean;
+  /** Sprint 16: source of this evaluation run. Defaults to "manual". */
+  source?:      "manual" | "scheduled" | "manual_scheduler_test";
 }): Promise<ActionResult<EvaluationBatchResult>> {
-  const { projectId, environment = "production", ruleIds, persist = false } = input;
+  const {
+    projectId,
+    environment = "production",
+    ruleIds,
+    persist = false,
+    source = "manual",
+  } = input;
 
   // ── Load rules ──────────────────────────────────────────────────────────────
   const rulesFromDb = await db.projectAlertRule.findMany({
@@ -65,7 +73,7 @@ export async function evaluateProjectAlertRules(input: {
         environment,
         results:              [],
         triggeredCount:       0,
-        notificationDelivery: "disabled_in_sprint_15",
+        notificationDelivery: source === "manual" ? "disabled_in_sprint_15" : source,
       },
     };
   }
@@ -140,6 +148,7 @@ export async function evaluateProjectAlertRules(input: {
             severity: r.severity,
             status:   r.status,
             message:  r.message,
+            source,   // Sprint 16: "manual" | "scheduled" | "manual_scheduler_test"
             // Only store the minimal snapshot for triggered rules to avoid large JSON blobs
             snapshot: r.triggered && snapshot
               ? {
@@ -169,7 +178,7 @@ export async function evaluateProjectAlertRules(input: {
       environment,
       results,
       triggeredCount,
-      notificationDelivery: "disabled_in_sprint_15",
+      notificationDelivery: source === "manual" ? "disabled_in_sprint_15" : source,
     },
   };
 }

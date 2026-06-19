@@ -1,10 +1,10 @@
 /**
  * lib/projects/alert-rules.ts
  *
- * Sprint 15: Alert rule type definitions and constants.
+ * Sprint 15–16: Alert rule type definitions and constants.
  *
- * Read-only types used by the evaluator, server actions, and UI.
- * No side effects — safe to import anywhere.
+ * Read-only types used by the evaluator, scheduler, server actions, and UI.
+ * No side effects — safe to import anywhere (client or server).
  */
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -80,7 +80,8 @@ export type EvaluationBatchResult = {
   environment:          string;
   results:              AlertEvaluationResult[];
   triggeredCount:       number;
-  notificationDelivery: "disabled_in_sprint_15";
+  /** Sprint 15 manual: "disabled_in_sprint_15". Sprint 16 scheduled: see notificationStatus. */
+  notificationDelivery: string;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -159,6 +160,90 @@ export function isValidRuleType(t: string): t is AlertRuleType {
 export function isValidSeverity(s: string): s is AlertSeverity {
   return s === "info" || s === "warning" || s === "critical";
 }
+
+// ── Sprint 16 types ───────────────────────────────────────────────────────────
+
+/** Delivery mode for background alert notifications. */
+export type AlertDeliveryMode = "log_only" | "email_dry_run" | "email";
+
+/** Source of an evaluation run. */
+export type AlertEvaluationSource = "manual" | "scheduled" | "manual_scheduler_test";
+
+/** Per-project scheduler + delivery settings as returned from the DB. */
+export type AlertSettings = {
+  id:                    string;
+  projectId:             string;
+  schedulerEnabled:      boolean;
+  intervalMinutes:       number;
+  deliveryMode:          AlertDeliveryMode;
+  notificationEmail:     string | null;
+  notifyOnRecovery:      boolean;
+  repeatCooldownMinutes: number;
+  lastRunAt:             string | null;   // ISO
+  nextRunAt:             string | null;   // ISO
+  lastStatus:            string | null;   // "ok" | "triggered" | "error"
+  lastTriggeredCount:    number;
+  lastNotificationStatus: string | null;
+  createdAt:             string;
+  updatedAt:             string;
+};
+
+/** A notification attempt record as returned from the DB. */
+export type AlertNotificationRecord = {
+  id:               string;
+  projectId:        string;
+  channel:          string;
+  deliveryMode:     string;
+  status:           string;
+  recipientMasked:  string | null;
+  subject:          string | null;
+  messagePreview:   string | null;
+  triggeredCount:   number;
+  source:           string;
+  error:            string | null;
+  createdAt:        string;
+};
+
+/** Result returned by a scheduled or manual-scheduler check (per-project). */
+export type ScheduledCheckResult = {
+  projectId:          string;
+  triggeredCount:     number;
+  notificationStatus: string;
+  nextRunAt:          string | null;
+  environment:        string;
+  evaluationResults:  AlertEvaluationResult[];
+};
+
+/** Allowed scheduler intervals in minutes. */
+export const ALERT_INTERVALS: number[] = [5, 10, 15, 30, 60];
+
+export const ALERT_DELIVERY_MODES: AlertDeliveryMode[] = [
+  "log_only",
+  "email_dry_run",
+  "email",
+];
+
+export const ALERT_DELIVERY_MODE_LABELS: Record<AlertDeliveryMode, string> = {
+  log_only:      "Log Only",
+  email_dry_run: "Email Dry-Run",
+  email:         "Email",
+};
+
+export const ALERT_DELIVERY_MODE_DESCRIPTIONS: Record<AlertDeliveryMode, string> = {
+  log_only:      "Records what would have been sent. No email is ever sent.",
+  email_dry_run: "Renders and records the notification without sending it.",
+  email:         "Sends email if a mail provider is configured.",
+};
+
+export function isValidDeliveryMode(m: string): m is AlertDeliveryMode {
+  return m === "log_only" || m === "email_dry_run" || m === "email";
+}
+
+export function isValidInterval(n: number): boolean {
+  return ALERT_INTERVALS.includes(n);
+}
+
+// ── Validation helpers ────────────────────────────────────────────────────────
 
 export function validateRuleConfig(
   type: AlertRuleType,

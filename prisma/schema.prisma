@@ -348,6 +348,10 @@ model Project {
   alertRules       ProjectAlertRule[]
   alertEvaluations ProjectAlertEvaluation[]
 
+  // Sprint 16: scheduler settings + notification history
+  alertSettings       ProjectAlertSettings?
+  alertNotifications  ProjectAlertNotification[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1016,6 +1020,71 @@ model ProjectAlertEvaluation {
 
   /// Full monitoring snapshot (JSON) — optional, only stored for triggered results
   snapshot Json?
+
+  /// Sprint 16: "manual" | "scheduled" | "manual_scheduler_test"
+  source             String  @default("manual")
+  notificationStatus String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, createdAt])
+  @@index([projectId, source])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT ALERT SETTINGS  (Sprint 16 — per-project scheduler + delivery config)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectAlertSettings {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  schedulerEnabled      Boolean  @default(false)
+  intervalMinutes       Int      @default(15)
+
+  /// "log_only" | "email_dry_run" | "email"
+  deliveryMode          String   @default("log_only")
+  notificationEmail     String?
+  notifyOnRecovery      Boolean  @default(true)
+  repeatCooldownMinutes Int      @default(60)
+
+  lastRunAt              DateTime?
+  nextRunAt              DateTime?
+  lastStatus             String?   // "ok" | "triggered" | "error"
+  lastTriggeredCount     Int       @default(0)
+  lastNotificationStatus String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([schedulerEnabled])
+  @@index([nextRunAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT ALERT NOTIFICATION  (Sprint 16 — notification attempt log)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectAlertNotification {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// "log" | "email"
+  channel         String  @default("log")
+  /// "log_only" | "email_dry_run" | "email"
+  deliveryMode    String
+  /// "log_only" | "dry_run_sent" | "sent" | "suppressed_cooldown" | "failed" | "unavailable" | "no_alerts"
+  status          String
+  recipientMasked String?           // e.g. "s***@example.com"
+  subject         String?
+  messagePreview  String?           // first 500 chars
+  triggeredCount  Int     @default(0)
+  /// "scheduled" | "manual_scheduler_test" | "test"
+  source          String  @default("scheduled")
+  error           String?
 
   createdAt DateTime @default(now())
 

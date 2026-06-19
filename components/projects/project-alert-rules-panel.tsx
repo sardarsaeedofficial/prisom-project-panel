@@ -541,8 +541,9 @@ function EvalResults({
         <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         <span>
           <strong>No notifications were sent.</strong>{" "}
-          This is a manual evaluation preview.
-          Background checks and real notifications come in Sprint 16.
+          This is a manual evaluation preview — it never delivers notifications.
+          Configure background checks and notification delivery in the{" "}
+          <em>Background Alert Checks</em> section below.
         </span>
       </div>
 
