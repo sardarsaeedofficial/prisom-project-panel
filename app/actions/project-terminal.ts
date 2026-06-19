@@ -9,8 +9,8 @@
  * No commands are executed without going through the safety classifier.
  */
 
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { db } from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   runProjectCommand,
   readPackageScripts,
@@ -36,16 +36,16 @@ export type ActionResult<T = unknown> =
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
+  // Sprint 17: require terminal.use permission
+  const auth = await requireProjectPermission(projectId, "terminal.use");
+  if (!auth.ok) return { ok: false, error: auth.error };
+
   const project = await db.project.findUnique({
     where:  { id: projectId },
     select: { workspaceId: true },
   });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
-  return { ok: true, workspaceId };
+  if (!project) return { ok: false, error: "Project not found." };
+  return { ok: true, workspaceId: project.workspaceId };
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────────

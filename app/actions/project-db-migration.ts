@@ -14,19 +14,19 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { runDbMigration } from "@/lib/projects/db-migrator";
 
 // ── Ownership guard ────────────────────────────────────────────────────────
 
 async function verifyOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
-  const project = await db.project.findUnique({
+  // Sprint 17: DB migrations require database.manage permission
+  const auth = await requireProjectPermission(projectId, "database.manage");
+  if (!auth.ok) return null;
+  return db.project.findUnique({
     where:  { id: projectId },
     select: { id: true, workspaceId: true },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────

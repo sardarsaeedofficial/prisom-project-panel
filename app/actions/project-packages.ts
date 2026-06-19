@@ -15,8 +15,8 @@
  */
 
 import { revalidatePath } from "next/cache";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { db } from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { getProjectFileRoot } from "@/lib/projects/file-manager";
 import {
   validatePackageSpecifier,
@@ -42,16 +42,15 @@ export type PkgActionResult<T = unknown> =
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
+  // Sprint 17: package management requires packages.manage permission
+  const auth = await requireProjectPermission(projectId, "packages.manage");
+  if (!auth.ok) return { ok: false, error: auth.error };
 
   const project = await db.project.findUnique({
     where:  { id: projectId },
-    select: { id: true, slug: true, workspaceId: true },
+    select: { id: true, slug: true },
   });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
+  if (!project) return { ok: false, error: "Project not found." };
   return { ok: true, id: project.id, slug: project.slug };
 }
 

@@ -15,8 +15,8 @@
  *  - Maximum 500 rows per query
  */
 
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
-import { db }                    from "@/lib/db";
+import { db }                       from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 
 import {
   testProjectDbExplorerConnection,
@@ -51,17 +51,10 @@ export type { DbTableInfo, DbColumnInfo, DbIndexInfo } from "@/lib/projects/data
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
-
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
-  return { ok: true, projectId: project.id };
+  // Sprint 17: database explorer requires database.view permission
+  const auth = await requireProjectPermission(projectId, "database.view");
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return { ok: true, projectId };
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────

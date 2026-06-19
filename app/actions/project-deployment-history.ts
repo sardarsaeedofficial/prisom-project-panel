@@ -13,9 +13,9 @@
  *  - Only selected project's PM2 process is restarted
  */
 
-import { revalidatePath }         from "next/cache";
-import { getCurrentWorkspaceId }  from "@/lib/current-workspace";
-import { db }                     from "@/lib/db";
+import { revalidatePath }           from "next/cache";
+import { db }                       from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   listProjectDeploymentHistory,
   getProjectDeploymentDetail,
@@ -49,17 +49,10 @@ export type {
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
-
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
-  return { ok: true, projectId: project.id };
+  // Sprint 17: viewing deployment history requires deploy.trigger permission
+  const auth = await requireProjectPermission(projectId, "deploy.trigger");
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return { ok: true, projectId };
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────

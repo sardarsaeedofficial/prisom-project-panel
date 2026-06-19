@@ -14,8 +14,8 @@
  */
 
 import { revalidatePath }           from "next/cache";
-import { getCurrentWorkspaceId }    from "@/lib/current-workspace";
 import { db }                       from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   evaluateProjectAlertRules,
   type EvaluationBatchResult,
@@ -44,16 +44,9 @@ export type ActionResult<T = unknown> =
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
-
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
+  // Sprint 17: alert rule management requires monitoring.manage permission
+  const auth = await requireProjectPermission(projectId, "monitoring.manage");
+  if (!auth.ok) return { ok: false, error: auth.error };
   return { ok: true };
 }
 

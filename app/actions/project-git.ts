@@ -14,7 +14,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { LogLevel, LogSource } from "@prisma/client";
 import {
   getLocalGitStatus,
@@ -63,8 +63,10 @@ export type GitActionResult = {
  * Returns null if not found or ownership mismatch.
  */
 async function verifyProjectOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
-  const project = await db.project.findUnique({
+  // Sprint 17: git operations require github.view permission
+  const auth = await requireProjectPermission(projectId, "github.view");
+  if (!auth.ok) return null;
+  return db.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
@@ -73,8 +75,6 @@ async function verifyProjectOwnership(projectId: string) {
       githubRepository: { select: { id: true } },
     },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
 }
 
 // ── Shared blocklist message ──────────────────────────────────────────────────
@@ -470,14 +470,13 @@ function getStorageRoot(slug: string): string {
 // ── Ownership helper (Sprint 8 version — returns slug too) ───────────────────
 
 async function verifyOwnershipWithSlug(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return null;
-  const project = await db.project.findUnique({
+  // Sprint 17: git operations require github.view permission
+  const auth = await requireProjectPermission(projectId, "github.view");
+  if (!auth.ok) return null;
+  return db.project.findUnique({
     where:  { id: projectId },
     select: { id: true, slug: true, workspaceId: true },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
 }
 
 // ── Action: getProjectGitStatusAction ────────────────────────────────────────

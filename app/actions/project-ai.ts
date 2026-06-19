@@ -14,8 +14,8 @@
  *  - All user messages and context pass through redact().
  */
 
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { db } from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { buildProjectAiContext } from "@/lib/ai/project-context";
 import { completeWithProjectAi, type AiMessage } from "@/lib/ai/provider";
 import { redact } from "@/lib/ai/redaction";
@@ -42,18 +42,15 @@ export interface AiBootstrapInfo {
 export async function getProjectAiBootstrapAction(
   projectId: string,
 ): Promise<ActionResult<AiBootstrapInfo>> {
-  // Verify ownership
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) {
-    return { ok: false, error: "Not authenticated.", code: "FORBIDDEN" };
-  }
+  // Sprint 17: AI assistant requires ai.use permission
+  const authResult = await requireProjectPermission(projectId, "ai.use");
+  if (!authResult.ok) return { ok: false, error: authResult.error, code: "FORBIDDEN" };
+
   const project = await db.project.findUnique({
     where:  { id: projectId },
-    select: { id: true, name: true, workspaceId: true },
+    select: { id: true, name: true },
   });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
-  }
+  if (!project) return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
 
   const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
 
@@ -126,18 +123,9 @@ export async function askProjectAiAction(
 ): Promise<ActionResult<AiAskOutput>> {
   const { projectId, messages, contextOptions = {} } = input;
 
-  // Verify ownership
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) {
-    return { ok: false, error: "Not authenticated.", code: "FORBIDDEN" };
-  }
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
-  }
+  // Sprint 17: AI assistant requires ai.use permission
+  const authResult = await requireProjectPermission(projectId, "ai.use");
+  if (!authResult.ok) return { ok: false, error: authResult.error, code: "FORBIDDEN" };
 
   // Validate messages
   if (!messages || messages.length === 0) {
@@ -211,18 +199,9 @@ export async function suggestProjectPatchAction(
 ): Promise<ActionResult<PatchSuggestion>> {
   const { projectId, instruction, selectedFiles } = input;
 
-  // Verify ownership
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) {
-    return { ok: false, error: "Not authenticated.", code: "FORBIDDEN" };
-  }
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
-  }
+  // Sprint 17: patch suggestion is an AI action — requires ai.use permission
+  const authResult = await requireProjectPermission(projectId, "ai.use");
+  if (!authResult.ok) return { ok: false, error: authResult.error, code: "FORBIDDEN" };
 
   // Validate instruction
   if (!instruction || instruction.trim().length < 3) {

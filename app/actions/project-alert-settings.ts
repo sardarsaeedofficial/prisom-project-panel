@@ -17,8 +17,8 @@
  */
 
 import { revalidatePath }                           from "next/cache";
-import { getCurrentWorkspaceId }                    from "@/lib/current-workspace";
 import { db }                                       from "@/lib/db";
+import { requireProjectPermission }                 from "@/lib/auth/project-membership";
 import {
   runScheduledAlertCheckForProject,
   sendTestNotificationForProject,
@@ -39,21 +39,23 @@ export type ActionResult<T = unknown> =
   | { ok: true;  data: T }
   | { ok: false; error: string; code?: string };
 
-// ── Ownership guard ───────────────────────────────────────────────────────────
+// ── Permission guards (Sprint 17) ─────────────────────────────────────────────
 
+/** Read-only guard: monitoring.view is enough (viewer, operator, developer, admin, owner). */
+async function verifyCanView(
+  projectId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const auth = await requireProjectPermission(projectId, "monitoring.view");
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return { ok: true };
+}
+
+/** Write guard: monitoring.manage required (operator, admin, owner). */
 async function verifyOwnership(
   projectId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) return { ok: false, error: "Not authenticated." };
-
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
+  const auth = await requireProjectPermission(projectId, "monitoring.manage");
+  if (!auth.ok) return { ok: false, error: auth.error };
   return { ok: true };
 }
 
@@ -135,7 +137,7 @@ function mapNotification(row: {
 export async function getProjectAlertSettingsAction(
   projectId: string,
 ): Promise<ActionResult<AlertSettings>> {
-  const auth = await verifyOwnership(projectId);
+  const auth = await verifyCanView(projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
   let row = await db.projectAlertSettings.findUnique({ where: { projectId } });
@@ -306,7 +308,7 @@ export async function getRecentAlertNotificationsAction(input: {
   projectId: string;
   limit?:    number;
 }): Promise<ActionResult<AlertNotificationRecord[]>> {
-  const auth = await verifyOwnership(input.projectId);
+  const auth = await verifyCanView(input.projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
   const rows = await db.projectAlertNotification.findMany({
@@ -334,7 +336,7 @@ export async function getRecentScheduledEvaluationsAction(input: {
   source:    string;
   createdAt: string;
 }[]>> {
-  const auth = await verifyOwnership(input.projectId);
+  const auth = await verifyCanView(input.projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
   const rows = await db.projectAlertEvaluation.findMany({
@@ -383,7 +385,7 @@ export async function getRecentScheduledEvaluationsAction(input: {
 export async function getEmailProviderStatusAction(
   projectId: string,
 ): Promise<ActionResult<EmailProviderStatus>> {
-  const auth = await verifyOwnership(projectId);
+  const auth = await verifyCanView(projectId);
   if (!auth.ok) return { ok: false, error: auth.error, code: "FORBIDDEN" };
 
   const smtpFields = {

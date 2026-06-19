@@ -16,8 +16,8 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { revalidatePath } from "next/cache";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { db } from "@/lib/db";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   getProjectFileRoot,
   assertSafeProjectPath,
@@ -40,18 +40,12 @@ export type ActionResult<T = unknown> =
 async function verifyProjectOwnership(
   projectId: string,
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: string }> {
-  const workspaceId = await getCurrentWorkspaceId().catch(() => null);
-  if (!workspaceId) {
-    return { ok: false, error: "Not authenticated." };
-  }
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return { ok: false, error: "Project not found." };
-  }
-  return { ok: true, projectId: project.id };
+  // Sprint 17: file operations require files.read (read-only ops also allowed by files.write roles)
+  // Using files.read so all roles with file access can use this guard; write ops
+  // are further validated by the individual actions that need files.write.
+  const auth = await requireProjectPermission(projectId, "files.read");
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return { ok: true, projectId };
 }
 
 // ── getProjectFileTreeAction ──────────────────────────────────────────────────

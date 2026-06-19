@@ -17,6 +17,7 @@ import {
   PackageOpen,
   Terminal,
   Package2,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     { label: "Import", href: `${base}/import`, icon: PackageOpen },
     { label: "Database", href: `${base}/database`, icon: Database },
     { label: "Logs", href: `${base}/logs`, icon: ScrollText },
+    { label: "Team", href: `${base}/team`, icon: Users },
     { label: "Settings", href: `${base}/settings`, icon: Settings },
   ];
 

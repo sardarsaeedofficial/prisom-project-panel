@@ -16,7 +16,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { isReservedHostname } from "@/lib/projects/nginx-manager";
 import { validateAndParseCommand } from "@/lib/projects/project-deploy-runner";
 
@@ -29,13 +29,13 @@ export type ActionResult<T = unknown> =
 // ── Ownership guard ────────────────────────────────────────────────────────
 
 async function verifyOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
-  const project = await db.project.findUnique({
+  // Sprint 17: deployment config requires project.edit permission
+  const auth = await requireProjectPermission(projectId, "project.edit");
+  if (!auth.ok) return null;
+  return db.project.findUnique({
     where: { id: projectId },
     select: { id: true, slug: true, workspaceId: true },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
 }
 
 // ── Return type for config ─────────────────────────────────────────────────

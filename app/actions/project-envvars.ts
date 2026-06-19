@@ -16,7 +16,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   encryptEnvValue,
   decryptEnvValue,
@@ -32,12 +32,14 @@ import {
 // ── Ownership guard ────────────────────────────────────────────────────────
 
 async function verifyOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
+  // Sprint 17: require env.manage permission (read + write env var values)
+  const auth = await requireProjectPermission(projectId, "env.manage");
+  if (!auth.ok) return null;
+
   const project = await db.project.findUnique({
     where: { id: projectId },
     select: { id: true, slug: true, workspaceId: true },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
   return project;
 }
 

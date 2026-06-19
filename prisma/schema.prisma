@@ -178,6 +178,23 @@ enum AiSessionStatus {
   DELETED
 }
 
+// ── Sprint 17: Project-level roles ────────────────────────────────────────────
+
+enum ProjectRole {
+  owner
+  admin
+  developer
+  operator
+  viewer
+}
+
+enum ProjectInviteStatus {
+  pending
+  accepted
+  cancelled
+  expired
+}
+
 enum AiRole {
   USER
   ASSISTANT
@@ -235,6 +252,11 @@ model User {
   aiSessions           AiSession[]
   triggeredDeployments Deployment[]
   portfolioItems       PortfolioItem[]  @relation("PortfolioItemCreator")
+
+  // Sprint 17: project team
+  projectMemberships  ProjectMember[]
+  sentProjectInvites  ProjectInvite[]  @relation("InviteSentBy")
+  acceptedInvites     ProjectInvite[]  @relation("InviteAcceptedBy")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -351,6 +373,10 @@ model Project {
   // Sprint 16: scheduler settings + notification history
   alertSettings       ProjectAlertSettings?
   alertNotifications  ProjectAlertNotification[]
+
+  // Sprint 17: team members + invites
+  members             ProjectMember[]
+  invites             ProjectInvite[]
 
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
@@ -1090,4 +1116,57 @@ model ProjectAlertNotification {
 
   @@index([projectId])
   @@index([projectId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT MEMBER  (Sprint 17 — project-level RBAC)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  role      ProjectRole @default(viewer)
+  joinedAt  DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT INVITE  (Sprint 17 — invite-link flow)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectInvite {
+  id        String              @id @default(cuid())
+  /// Secure random token included in the invite link
+  token     String              @unique
+  /// Email address the invite was sent to — masked in all API responses
+  email     String
+  role      ProjectRole         @default(viewer)
+  status    ProjectInviteStatus @default(pending)
+  expiresAt DateTime
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  invitedById String
+  invitedBy   User   @relation("InviteSentBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  acceptedById String?
+  acceptedBy   User?  @relation("InviteAcceptedBy", fields: [acceptedById], references: [id])
+
+  @@index([projectId])
+  @@index([token])
+  @@index([email])
 }

@@ -12,7 +12,7 @@
  */
 
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   resolveProjectLiveEndpoints,
   buildPreviewTarget,
@@ -42,13 +42,10 @@ export interface ProjectPreviewStatus {
 // ── Ownership guard ────────────────────────────────────────────────────────
 
 async function verifyOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
+  // Sprint 17: preview requires project.view permission
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return null;
+  return db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────

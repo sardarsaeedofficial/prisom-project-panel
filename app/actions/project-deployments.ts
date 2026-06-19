@@ -15,7 +15,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { DeploymentStatus, DeploymentSource, DomainStatus, SslStatus, LogLevel, LogSource } from "@prisma/client";
 import {
   assignNextPort,
@@ -96,8 +96,10 @@ export type SaveConfigInput = {
 // ── Ownership guard ────────────────────────────────────────────────────────
 
 async function verifyOwnership(projectId: string) {
-  const workspaceId = await getCurrentWorkspaceId();
-  const project = await db.project.findUnique({
+  // Sprint 17: deployment actions require deploy.trigger permission
+  const auth = await requireProjectPermission(projectId, "deploy.trigger");
+  if (!auth.ok) return null;
+  return db.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
@@ -106,8 +108,6 @@ async function verifyOwnership(projectId: string) {
       deploymentConfig: true,
     },
   });
-  if (!project || project.workspaceId !== workspaceId) return null;
-  return project;
 }
 
 // ── Action: saveDeploymentConfigAction ────────────────────────────────────
