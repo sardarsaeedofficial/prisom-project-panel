@@ -82,13 +82,76 @@ const DANGEROUS: RegExp[] = [
   /\$\(/,
 ];
 
-// Allowed sub-commands per package manager
-const ALLOWED_NPM  = /^(install|ci|start|run\s+[a-zA-Z0-9:_-]+)$/;
-const ALLOWED_PNPM = /^(install|ci|build|start|run\s+[a-zA-Z0-9:_-]+)$/;
-const ALLOWED_YARN = /^(install|build|start|run\s+[a-zA-Z0-9:_-]+)$/;
+// ── Safe-flag sets for install-type subcommands ────────────────────────────
+//
+// Flags not in these sets cause a validation error.
+// Shell injection is already caught above (INJECT_CHARS_RE / DANGEROUS).
 
-// Regex for the full-path pnpm binary's allowed sub-commands
-const ALLOWED_FULL_PATH_PNPM = /^(install|start|run\s+(build|start|preview))$/;
+/** Flags allowed after `npm install` or `npm ci`. */
+const SAFE_NPM_INSTALL_FLAGS = new Set([
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund",
+  "--omit=dev",
+  "--include=dev",
+  "--prefer-offline",
+  "--legacy-peer-deps", // intentionally allowed — common in older projects
+]);
+
+/** Flags allowed after `pnpm install`. */
+const SAFE_PNPM_INSTALL_FLAGS = new Set([
+  "--ignore-scripts",
+  "--frozen-lockfile",
+  "--no-frozen-lockfile",
+  "--prod",
+  "--prefer-offline",
+]);
+
+/** Flags allowed after `yarn install`. */
+const SAFE_YARN_INSTALL_FLAGS = new Set([
+  "--ignore-scripts",
+  "--frozen-lockfile",
+  "--production",
+  "--prefer-offline",
+]);
+
+/** Flags allowed after the full-path pnpm `install`. */
+const SAFE_FULL_PNPM_INSTALL_FLAGS = new Set([
+  "--ignore-scripts",
+  "--frozen-lockfile",
+  "--prod",
+  "--prefer-offline",
+]);
+
+// Script name pattern — alphanumeric, colons, hyphens, underscores, dots
+const SCRIPT_NAME_RE = /^[a-zA-Z0-9:_.-]+$/;
+
+// ── Per-PM allowed subcommands ──────────────────────────────────────────────
+const ALLOWED_NPM_SUBCMDS  = new Set(["install", "ci", "start", "build", "run"]);
+const ALLOWED_PNPM_SUBCMDS = new Set(["install", "ci", "build", "start", "run"]);
+const ALLOWED_YARN_SUBCMDS = new Set(["install", "build", "start", "run"]);
+const ALLOWED_FULL_PNPM_SUBCMDS = new Set(["install", "start", "run"]);
+const FULL_PNPM_RUN_SCRIPTS = new Set(["build", "start", "preview"]);
+
+// ── Structured flag validator ────────────────────────────────────────────────
+
+type FlagCheckResult = { ok: true } | { ok: false; error: string };
+
+function checkInstallFlags(
+  flags: string[],
+  allowed: Set<string>,
+  pmLabel: string,
+): FlagCheckResult {
+  for (const flag of flags) {
+    if (!allowed.has(flag)) {
+      return {
+        ok: false,
+        error: `${pmLabel}: flag "${flag}" is not allowed. Allowed: ${[...allowed].join(", ")}`,
+      };
+    }
+  }
+  return { ok: true };
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -168,57 +231,148 @@ export function validateAndParseCommand(
   }
 
   const parts = cmd.split(/\s+/);
-  const [binary, ...rest] = parts;
-  const restStr = rest.join(" ");
+  const [binary, subcmd, ...flags] = parts;
 
   switch (binary) {
-    case "npm":
-      if (!ALLOWED_NPM.test(restStr))
+    // ── npm ────────────────────────────────────────────────────────────────
+    case "npm": {
+      if (!subcmd || !ALLOWED_NPM_SUBCMDS.has(subcmd)) {
         return {
           ok: false,
-          error: `npm sub-command "${restStr}" is not allowed. Allowed: install, ci, start, run <script>`,
+          error: `npm sub-command "${subcmd ?? ""}" is not allowed. Allowed: ${[...ALLOWED_NPM_SUBCMDS].join(", ")}`,
         };
-      return { ok: true, cmd: { binary: "npm", args: rest } };
+      }
+      if (subcmd === "run") {
+        // npm run <script-name>  (no extra flags)
+        const script = flags[0];
+        if (!script || !SCRIPT_NAME_RE.test(script)) {
+          return { ok: false, error: `npm run: a valid script name is required (e.g. npm run build)` };
+        }
+        if (flags.length > 1) {
+          return { ok: false, error: `npm run: only one argument (script name) is allowed` };
+        }
+        return { ok: true, cmd: { binary: "npm", args: [subcmd, script] } };
+      }
+      if (subcmd === "install" || subcmd === "ci") {
+        const check = checkInstallFlags(flags, SAFE_NPM_INSTALL_FLAGS, "npm install");
+        if (!check.ok) return check;
+        return { ok: true, cmd: { binary: "npm", args: [subcmd, ...flags] } };
+      }
+      // start / build — no extra args
+      if (flags.length > 0) {
+        return { ok: false, error: `npm ${subcmd}: extra arguments are not allowed` };
+      }
+      return { ok: true, cmd: { binary: "npm", args: [subcmd] } };
+    }
 
-    case "pnpm":
-      if (!ALLOWED_PNPM.test(restStr))
+    // ── pnpm ───────────────────────────────────────────────────────────────
+    case "pnpm": {
+      if (!subcmd || !ALLOWED_PNPM_SUBCMDS.has(subcmd)) {
         return {
           ok: false,
-          error: `pnpm sub-command "${restStr}" is not allowed. Allowed: install, ci, build, start, run <script>`,
+          error: `pnpm sub-command "${subcmd ?? ""}" is not allowed. Allowed: ${[...ALLOWED_PNPM_SUBCMDS].join(", ")}`,
         };
-      return { ok: true, cmd: { binary: "pnpm", args: rest } };
+      }
+      if (subcmd === "run") {
+        const script = flags[0];
+        if (!script || !SCRIPT_NAME_RE.test(script)) {
+          return { ok: false, error: `pnpm run: a valid script name is required (e.g. pnpm run build)` };
+        }
+        if (flags.length > 1) {
+          return { ok: false, error: `pnpm run: only one argument (script name) is allowed` };
+        }
+        return { ok: true, cmd: { binary: "pnpm", args: [subcmd, script] } };
+      }
+      if (subcmd === "install" || subcmd === "ci") {
+        const check = checkInstallFlags(flags, SAFE_PNPM_INSTALL_FLAGS, "pnpm install");
+        if (!check.ok) return check;
+        return { ok: true, cmd: { binary: "pnpm", args: [subcmd, ...flags] } };
+      }
+      // build / start — no extra args
+      if (flags.length > 0) {
+        return { ok: false, error: `pnpm ${subcmd}: extra arguments are not allowed` };
+      }
+      return { ok: true, cmd: { binary: "pnpm", args: [subcmd] } };
+    }
 
-    case "yarn":
-      if (!ALLOWED_YARN.test(restStr))
+    // ── yarn ───────────────────────────────────────────────────────────────
+    case "yarn": {
+      if (!subcmd || !ALLOWED_YARN_SUBCMDS.has(subcmd)) {
         return {
           ok: false,
-          error: `yarn sub-command "${restStr}" is not allowed. Allowed: install, build, start, run <script>`,
+          error: `yarn sub-command "${subcmd ?? ""}" is not allowed. Allowed: ${[...ALLOWED_YARN_SUBCMDS].join(", ")}`,
         };
-      return { ok: true, cmd: { binary: "yarn", args: rest } };
+      }
+      if (subcmd === "run") {
+        const script = flags[0];
+        if (!script || !SCRIPT_NAME_RE.test(script)) {
+          return { ok: false, error: `yarn run: a valid script name is required (e.g. yarn run build)` };
+        }
+        if (flags.length > 1) {
+          return { ok: false, error: `yarn run: only one argument (script name) is allowed` };
+        }
+        return { ok: true, cmd: { binary: "yarn", args: [subcmd, script] } };
+      }
+      if (subcmd === "install") {
+        const check = checkInstallFlags(flags, SAFE_YARN_INSTALL_FLAGS, "yarn install");
+        if (!check.ok) return check;
+        return { ok: true, cmd: { binary: "yarn", args: [subcmd, ...flags] } };
+      }
+      // build / start — no extra args
+      if (flags.length > 0) {
+        return { ok: false, error: `yarn ${subcmd}: extra arguments are not allowed` };
+      }
+      return { ok: true, cmd: { binary: "yarn", args: [subcmd] } };
+    }
 
+    // ── node ───────────────────────────────────────────────────────────────
     case "node": {
-      const file = rest[0];
+      const file = subcmd;
       if (!file) return { ok: false, error: "node: a file argument is required (e.g. node server.js)" };
       if (file.startsWith("/") || file.includes(".."))
         return { ok: false, error: "node: path must be relative and must not contain .." };
       if (!/\.(js|mjs|cjs)$/.test(file))
         return { ok: false, error: "node: only .js / .mjs / .cjs files are allowed" };
-      if (rest.length > 1)
+      if (flags.length > 0)
         return { ok: false, error: "node: extra arguments are not allowed for safety" };
       return { ok: true, cmd: { binary: "node", args: [file] } };
     }
 
-    case FULL_PATH_PNPM:
-      // Full absolute path to pnpm on the production VPS only.
+    // ── full-path pnpm (VPS absolute path) ─────────────────────────────────
+    case FULL_PATH_PNPM: {
       // Allowed sub-commands are deliberately narrower than the relative "pnpm" case.
-      if (!ALLOWED_FULL_PATH_PNPM.test(restStr))
+      if (!subcmd || !ALLOWED_FULL_PNPM_SUBCMDS.has(subcmd)) {
         return {
           ok: false,
           error:
-            `Full-path pnpm: sub-command "${restStr}" is not allowed. ` +
-            `Allowed: install, start, run build, run start, run preview`,
+            `Full-path pnpm: sub-command "${subcmd ?? ""}" is not allowed. ` +
+            `Allowed: install, start, run`,
         };
-      return { ok: true, cmd: { binary: FULL_PATH_PNPM, args: rest } };
+      }
+      if (subcmd === "run") {
+        const script = flags[0];
+        if (!script || !FULL_PNPM_RUN_SCRIPTS.has(script)) {
+          return {
+            ok: false,
+            error: `Full-path pnpm run: script "${script ?? ""}" is not allowed. Allowed: ${[...FULL_PNPM_RUN_SCRIPTS].join(", ")}`,
+          };
+        }
+        if (flags.length > 1) {
+          return { ok: false, error: `Full-path pnpm run: only one script name is allowed` };
+        }
+        return { ok: true, cmd: { binary: FULL_PATH_PNPM, args: [subcmd, script] } };
+      }
+      if (subcmd === "install") {
+        const check = checkInstallFlags(flags, SAFE_FULL_PNPM_INSTALL_FLAGS, "full-path pnpm install");
+        if (!check.ok) return check;
+        return { ok: true, cmd: { binary: FULL_PATH_PNPM, args: [subcmd, ...flags] } };
+      }
+      // start — no extra args
+      if (flags.length > 0) {
+        return { ok: false, error: `Full-path pnpm ${subcmd}: extra arguments are not allowed` };
+      }
+      return { ok: true, cmd: { binary: FULL_PATH_PNPM, args: [subcmd] } };
+    }
 
     default:
       return {
