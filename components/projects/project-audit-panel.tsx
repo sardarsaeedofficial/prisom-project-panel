@@ -4,14 +4,8 @@
  * components/projects/project-audit-panel.tsx
  *
  * Sprint 18: Project audit log center UI.
- *
- * Features:
- *  - Header with title + refresh button
- *  - Filters: search, category, result, actor, date range, page size
- *  - Table: timestamp, result badge, category, action, actor, target, summary, detail button
- *  - Detail modal: full event info + sanitised metadata JSON
- *  - Pagination: 25 / 50 / 100 per page
- *  - Empty state
+ * Sprint 20: Added quick-filter tabs, copy buttons in detail modal,
+ *             redaction badge, better formatted metadata, Denied shortcut.
  *
  * Security:
  *  - All data comes from getProjectAuditEventsAction which enforces audit.view
@@ -20,12 +14,10 @@
  */
 
 import { useState, useCallback, useEffect, useTransition } from "react";
-// Runtime functions — imported from the server action file (callable from client via RPC)
 import {
   getProjectAuditEventsAction,
   getProjectAuditEventDetailAction,
 } from "@/app/actions/project-audit";
-// DTO types — imported from the client-safe types file (never from "use server")
 import type {
   ProjectAuditEventDTO,
   AuditActor,
@@ -42,6 +34,9 @@ import {
   Loader2,
   ShieldCheck,
   X,
+  Copy,
+  Check,
+  BadgeAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -61,14 +56,33 @@ type Filters = {
   pageSize: number;
 };
 
-const CATEGORIES = [
+// ── Quick-filter tab definitions ──────────────────────────────────────────────
+
+type QuickFilter = {
+  label: string;
+  category?: string;
+  result?: string;
+};
+
+const QUICK_FILTERS: QuickFilter[] = [
+  { label: "All" },
+  { label: "Security",  category: "auth" },
+  { label: "Deploys",   category: "publishing" },
+  { label: "Team",      category: "team" },
+  { label: "Env",       category: "env" },
+  { label: "Terminal",  category: "terminal" },
+  { label: "Database",  category: "database" },
+  { label: "Alerts",    category: "alerts" },
+  { label: "Denied",    result:   "denied" },
+];
+
+const ALL_CATEGORIES = [
   "auth", "team", "permissions", "files", "terminal", "git",
   "packages", "ai", "preview", "publishing", "rollback", "domains",
   "env", "database", "logs", "monitoring", "alerts", "settings", "system",
 ];
 
 const RESULTS = ["success", "failed", "denied", "skipped"];
-
 const PAGE_SIZES = [25, 50, 100];
 
 // ── Result badge ──────────────────────────────────────────────────────────────
@@ -81,9 +95,41 @@ function ResultBadge({ result }: { result: string }) {
     skipped: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400",
   };
   return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", variants[result] ?? variants.skipped)}>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+        variants[result] ?? variants.skipped,
+      )}
+    >
       {result}
     </span>
+  );
+}
+
+// ── Copy button ───────────────────────────────────────────────────────────────
+
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={label}
+      className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors"
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-green-500" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+    </button>
   );
 }
 
@@ -115,27 +161,41 @@ function AuditDetailModal({
     });
   }, [projectId, eventId]);
 
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const summary = event
+    ? `[${event.category}] ${event.action} — ${event.result} (${new Date(event.createdAt).toLocaleString()})`
+    : "";
+
   return (
-    // Backdrop
     <div
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      {/* Modal */}
-      <div className="bg-background rounded-xl border shadow-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+      <div className="bg-background rounded-xl border shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-background z-10">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-muted-foreground" />
             <span className="font-semibold text-sm">Audit Event Detail</span>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 hover:bg-muted transition-colors"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {event && (
+              <CopyButton text={summary} label="Copy summary" />
+            )}
+            <button
+              onClick={onClose}
+              className="rounded-md p-1 hover:bg-muted transition-colors"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -155,16 +215,22 @@ function AuditDetailModal({
               {/* Header info */}
               <div className="grid grid-cols-2 gap-3 rounded-lg border p-4">
                 <div>
-                  <p className="text-xs text-muted-foreground mb-0.5">ID</p>
-                  <p className="font-mono text-xs break-all">{event.id}</p>
+                  <p className="text-xs text-muted-foreground mb-0.5">Event ID</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-mono text-xs break-all">{event.id}</p>
+                    <CopyButton text={event.id} label="Copy event ID" />
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">Timestamp</p>
-                  <p>{new Date(event.createdAt).toLocaleString()}</p>
+                  <p className="text-xs">{new Date(event.createdAt).toLocaleString()}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">Action</p>
-                  <p className="font-mono">{event.action}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-mono text-xs">{event.action}</p>
+                    <CopyButton text={event.action} label="Copy action" />
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">Result</p>
@@ -176,31 +242,39 @@ function AuditDetailModal({
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-0.5">Actor Role</p>
-                  <p>{event.actorRole ?? "—"}</p>
+                  <p className="text-xs">{event.actorRole ?? "—"}</p>
                 </div>
               </div>
 
               {/* Summary */}
               <div className="rounded-lg border p-4">
-                <p className="text-xs text-muted-foreground mb-1">Summary</p>
-                <p>{event.summary}</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-muted-foreground">Summary</p>
+                  <CopyButton text={event.summary} label="Copy summary" />
+                </div>
+                <p className="text-sm">{event.summary}</p>
               </div>
 
               {/* Actor */}
               <div className="rounded-lg border p-4">
                 <p className="text-xs font-medium text-muted-foreground mb-2">Actor</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <p className="text-xs text-muted-foreground">Name</p>
-                    <p>{event.actorName ?? "—"}</p>
+                    <p className="text-muted-foreground">Name</p>
+                    <p className="font-medium">{event.actorName ?? "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Email (masked)</p>
-                    <p>{event.actorEmail ?? "—"}</p>
+                    <p className="text-muted-foreground">Email (masked)</p>
+                    <p className="font-mono">{event.actorEmail ?? "—"}</p>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">User ID</p>
-                    <p className="font-mono text-xs">{event.actorUserId ?? "—"}</p>
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">User ID</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-mono">{event.actorUserId ?? "—"}</p>
+                      {event.actorUserId && (
+                        <CopyButton text={event.actorUserId} label="Copy user ID" />
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -209,23 +283,26 @@ function AuditDetailModal({
               {(event.targetType || event.targetId || event.targetLabel) && (
                 <div className="rounded-lg border p-4">
                   <p className="text-xs font-medium text-muted-foreground mb-2">Target</p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
                     {event.targetType && (
                       <div>
-                        <p className="text-xs text-muted-foreground">Type</p>
+                        <p className="text-muted-foreground">Type</p>
                         <p>{event.targetType}</p>
                       </div>
                     )}
                     {event.targetLabel && (
                       <div>
-                        <p className="text-xs text-muted-foreground">Label</p>
+                        <p className="text-muted-foreground">Label</p>
                         <p>{event.targetLabel}</p>
                       </div>
                     )}
                     {event.targetId && (
                       <div className="col-span-2">
-                        <p className="text-xs text-muted-foreground">ID</p>
-                        <p className="font-mono text-xs break-all">{event.targetId}</p>
+                        <p className="text-muted-foreground">ID</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-mono break-all">{event.targetId}</p>
+                          <CopyButton text={event.targetId} label="Copy target ID" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -235,14 +312,14 @@ function AuditDetailModal({
               {/* Request context */}
               <div className="rounded-lg border p-4">
                 <p className="text-xs font-medium text-muted-foreground mb-2">Request Context</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <p className="text-xs text-muted-foreground">IP Address</p>
-                    <p className="font-mono text-xs">{event.ipAddress ?? "—"}</p>
+                    <p className="text-muted-foreground">IP Address</p>
+                    <p className="font-mono">{event.ipAddress ?? "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">User Agent</p>
-                    <p className="text-xs break-all">{event.userAgent ?? "—"}</p>
+                    <p className="text-muted-foreground">User Agent</p>
+                    <p className="break-all line-clamp-2 text-muted-foreground">{event.userAgent ?? "—"}</p>
                   </div>
                 </div>
               </div>
@@ -250,9 +327,19 @@ function AuditDetailModal({
               {/* Metadata */}
               {event.metadata && Object.keys(event.metadata).length > 0 && (
                 <div className="rounded-lg border p-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">
-                    Metadata <span className="font-normal">(sanitised at write time)</span>
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-medium text-muted-foreground">Metadata</p>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-0.5 rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400">
+                        <BadgeAlert className="h-2.5 w-2.5" />
+                        sanitized at write time
+                      </span>
+                      <CopyButton
+                        text={JSON.stringify(event.metadata, null, 2)}
+                        label="Copy metadata JSON"
+                      />
+                    </div>
+                  </div>
                   <pre className="text-xs bg-muted rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">
                     {JSON.stringify(event.metadata, null, 2)}
                   </pre>
@@ -306,6 +393,7 @@ export function ProjectAuditPanel({ projectId }: Props) {
     to: "",
     pageSize: 25,
   });
+  const [activeQuick, setActiveQuick] = useState<string>("All");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<GetAuditEventsOutput | null>(null);
   const [actors, setActors] = useState<AuditActor[]>([]);
@@ -341,20 +429,37 @@ export function ProjectAuditPanel({ projectId }: Props) {
     [projectId, page, filters],
   );
 
-  // Initial load
   useEffect(() => {
     load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Quick filter handler ──────────────────────────────────────────────────
+
+  function applyQuickFilter(qf: QuickFilter) {
+    setActiveQuick(qf.label);
+    const next: Filters = {
+      ...filters,
+      category: qf.category ?? "",
+      result: qf.result ?? "",
+    };
+    setFilters(next);
+    setPage(1);
+    load(1, next);
+  }
+
   const applyFilters = () => {
+    setActiveQuick("All");
     setPage(1);
     load(1);
   };
 
   const resetFilters = () => {
-    const defaultFilters: Filters = { query: "", category: "", result: "", actorUserId: "", from: "", to: "", pageSize: 25 };
+    const defaultFilters: Filters = {
+      query: "", category: "", result: "", actorUserId: "", from: "", to: "", pageSize: 25,
+    };
     setFilters(defaultFilters);
+    setActiveQuick("All");
     setPage(1);
     load(1, defaultFilters);
   };
@@ -393,8 +498,27 @@ export function ProjectAuditPanel({ projectId }: Props) {
         </Button>
       </div>
 
-      {/* ── Filters ── */}
+      {/* ── Quick-filter tabs ── */}
+      <div className="flex flex-wrap gap-1">
+        {QUICK_FILTERS.map((qf) => (
+          <button
+            key={qf.label}
+            onClick={() => applyQuickFilter(qf)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              activeQuick === qf.label
+                ? "bg-primary text-primary-foreground border-primary"
+                : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30",
+            )}
+          >
+            {qf.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Advanced Filters ── */}
       <div className="rounded-lg border p-4 space-y-3">
+        <p className="text-xs font-medium text-muted-foreground">Advanced filters</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {/* Search */}
           <div className="space-y-1">
@@ -416,7 +540,7 @@ export function ProjectAuditPanel({ projectId }: Props) {
               className="w-full"
             >
               <option value="">All categories</option>
-              {CATEGORIES.map((c) => (
+              {ALL_CATEGORIES.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </NativeSelect>
@@ -516,10 +640,24 @@ export function ProjectAuditPanel({ projectId }: Props) {
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <ShieldCheck className="h-10 w-10 text-muted-foreground/30 mb-3" />
-            <p className="text-sm font-medium text-muted-foreground">No audit events found</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Events will appear here as your team performs actions.
+            <p className="text-sm font-medium text-muted-foreground">
+              {activeQuick !== "All"
+                ? `No "${activeQuick}" events found`
+                : "No audit events found"}
             </p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+              {activeQuick !== "All"
+                ? "Try a different filter or clear the selection."
+                : "Sensitive project actions will appear here as your team performs them."}
+            </p>
+            {activeQuick !== "All" && (
+              <button
+                onClick={() => applyQuickFilter(QUICK_FILTERS[0])}
+                className="mt-3 text-xs text-primary hover:underline"
+              >
+                Clear filter
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -566,9 +704,7 @@ export function ProjectAuditPanel({ projectId }: Props) {
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="px-2 text-xs">
-              {page} / {totalPages}
-            </span>
+            <span className="px-2 text-xs">{page} / {totalPages}</span>
             <Button
               variant="outline"
               size="icon"

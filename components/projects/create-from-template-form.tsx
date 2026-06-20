@@ -28,6 +28,8 @@ import {
   Info,
   FolderOpen,
   ExternalLink,
+  Rocket,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -159,6 +161,7 @@ function TemplateCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const isDeployable = !!template.packageManager;
   return (
     <button
       type="button"
@@ -186,6 +189,17 @@ function TemplateCard({
         {template.packageManager && (
           <Badge variant="outline" className="text-[10px]">{template.packageManager}</Badge>
         )}
+        <Badge
+          variant="outline"
+          className={[
+            "text-[10px]",
+            isDeployable
+              ? "border-green-300 text-green-700 bg-green-50 dark:border-green-800 dark:text-green-400 dark:bg-green-950/20"
+              : "border-border text-muted-foreground",
+          ].join(" ")}
+        >
+          {isDeployable ? "⚡ deployable" : "static"}
+        </Badge>
       </div>
     </button>
   );
@@ -560,6 +574,17 @@ export function CreateFromTemplateForm({ templates }: Props) {
                 )}
               </div>
 
+              {/* Framework-specific notes */}
+              {(selectedTemplate.framework === "Next.js" || selectedTemplate.id.includes("next")) && (
+                <InfoNote>
+                  Next.js templates generate <span className="font-mono">next.config.mjs</span>{" "}
+                  (not <span className="font-mono">.ts</span>) for compatibility. Install uses{" "}
+                  <span className="font-mono">npm install --ignore-scripts</span>. Build uses{" "}
+                  <span className="font-mono">npm run build</span>.{" "}
+                  <span className="font-mono">DATABASE_URL</span> is not required unless your app
+                  needs a database.
+                </InfoNote>
+              )}
               <InfoNote>
                 Templates are local curated starters. No code is deployed automatically. Dependency
                 install uses <span className="font-mono">--ignore-scripts</span>. You can review
@@ -750,28 +775,49 @@ export function CreateFromTemplateForm({ templates }: Props) {
               )}
 
               <InfoNote>
-                Your project is ready to edit. Open it in the workspace to view files, add
-                environment variables, or configure deployment settings. Nothing has been deployed
-                yet.
+                Your project is ready to edit. No deployment has happened. To go live, open
+                Publishing, configure your deployment settings, and trigger your first deploy.
               </InfoNote>
 
-              {/* Actions */}
-              <div className="flex flex-col gap-2 pt-1">
-                <Button
-                  className="w-full gap-2"
-                  onClick={() => router.push(`/projects/${doneData.projectId}/files`)}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  Open project files
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full gap-2"
-                  onClick={() => router.push(`/projects/${doneData.projectId}`)}
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Go to project dashboard
-                </Button>
+              {/* Next steps */}
+              <div className="space-y-1.5 pt-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Next steps
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    className="w-full gap-2 justify-start"
+                    onClick={() => router.push(`/projects/${doneData.projectId}/files`)}
+                  >
+                    <FolderOpen className="h-4 w-4 shrink-0" />
+                    Open Files — review and edit generated files
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 justify-start"
+                    onClick={() => router.push(`/projects/${doneData.projectId}/publishing`)}
+                  >
+                    <Rocket className="h-4 w-4 shrink-0" />
+                    Open Publishing — configure and deploy
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 justify-start"
+                    onClick={() => router.push(`/projects/${doneData.projectId}`)}
+                  >
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    Go to project overview
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full gap-2 justify-start text-muted-foreground"
+                    onClick={() => router.push(`/projects/${doneData.projectId}/audit`)}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    View creation audit event
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

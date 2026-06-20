@@ -12,14 +12,14 @@ import {
   Loader2,
   Archive,
   Globe,
-  Box,
   Eye,
-  EyeOff,
   Terminal,
   GitCommit,
   ListChecks,
   Layers,
   Database,
+  Circle,
+  ListTodo,
 } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
@@ -36,13 +36,70 @@ import { FeatureTasksSection } from "@/components/workspace/features-tasks-secti
 import { formatRelativeTime, formatDate } from "@/lib/utils";
 import {
   DeploymentStatus,
-  DomainStatus,
   Visibility,
   ProjectStatus,
   EnvironmentName,
 } from "@prisma/client";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+
+// ── Health checklist ───────────────────────────────────────────────────────────
+
+type CheckItem = {
+  label: string;
+  ok: boolean;
+  href?: string;
+  hintIfMissing?: string;
+};
+
+function HealthChecklist({ items }: { items: CheckItem[] }) {
+  const okCount = items.filter((i) => i.ok).length;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+            <ListTodo className="h-4 w-4" />
+            Project Checklist
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">
+            {okCount}/{items.length} ready
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <ul className="space-y-1.5">
+          {items.map((item) => (
+            <li key={item.label} className="flex items-start gap-2 text-xs">
+              {item.ok ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+              ) : (
+                <Circle className="h-3.5 w-3.5 text-muted-foreground/40 mt-0.5 shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <span className={item.ok ? "text-foreground" : "text-muted-foreground"}>
+                  {item.label}
+                </span>
+                {!item.ok && item.hintIfMissing && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{item.hintIfMissing}</p>
+                )}
+              </div>
+              {!item.ok && item.href && (
+                <Link
+                  href={item.href}
+                  className="shrink-0 text-primary text-[10px] hover:underline"
+                >
+                  Set up →
+                </Link>
+              )}
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
 
 type Props = { params: Promise<{ projectId: string }> };
 
@@ -320,13 +377,56 @@ function StatsRow({ project }: { project: ProjectDetail }) {
 export default async function ProjectPage({ params }: Props) {
   const { projectId } = await params;
 
-  const [project, features, tasks] = await Promise.all([
-    getProjectById(projectId),
-    getProjectFeatures(projectId),
-    getProjectTasks(projectId),
-  ]);
+  const [project, features, tasks, deployConfig, teamMemberCount, alertSettings] =
+    await Promise.all([
+      getProjectById(projectId),
+      getProjectFeatures(projectId),
+      getProjectTasks(projectId),
+      db.projectDeploymentConfig.findUnique({ where: { projectId } }).catch(() => null),
+      db.projectMember.count({ where: { projectId } }).catch(() => 0),
+      db.projectAlertSettings.findUnique({ where: { projectId } }).catch(() => null),
+    ]);
 
   if (!project) notFound();
+
+  const healthItems: CheckItem[] = [
+    {
+      label: "Deployment config set",
+      ok: !!deployConfig,
+      href: `/projects/${projectId}/publishing`,
+      hintIfMissing: "Configure your start command, port, and runtime in Publishing.",
+    },
+    {
+      label: "Preview / domain available",
+      ok: !!(project.liveUrl || project.domains.length > 0),
+      href: `/projects/${projectId}/domains`,
+      hintIfMissing: "Add a domain or check the live URL in Domains.",
+    },
+    {
+      label: "Successfully deployed",
+      ok: project.deployments.some((d) => d.status === DeploymentStatus.SUCCESS),
+      href: `/projects/${projectId}/publishing`,
+      hintIfMissing: "Trigger your first deployment in Publishing.",
+    },
+    {
+      label: "Monitoring enabled",
+      ok: !!(alertSettings?.schedulerEnabled),
+      href: `/projects/${projectId}/monitoring`,
+      hintIfMissing: "Enable background alert checks in Monitoring → Alert Settings.",
+    },
+    {
+      label: "Team set up",
+      ok: teamMemberCount > 0,
+      href: `/projects/${projectId}/team`,
+      hintIfMissing: "Invite team members in the Team tab.",
+    },
+    {
+      label: "Environment variables configured",
+      ok: (project.environments?.some((e) => e.secrets.length > 0)) ?? false,
+      href: `/projects/${projectId}/env`,
+      hintIfMissing: "Add env vars like DATABASE_URL or API keys.",
+    },
+  ];
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -375,8 +475,13 @@ export default async function ProjectPage({ params }: Props) {
 
       {/* Content */}
       <DashboardShell>
-        <OverviewGrid project={project} />
-        <StatsRow project={project} />
+        <div className="grid gap-4 md:grid-cols-[1fr_280px]">
+          <div className="space-y-4">
+            <OverviewGrid project={project} />
+            <StatsRow project={project} />
+          </div>
+          <HealthChecklist items={healthItems} />
+        </div>
         <EnvironmentsSection project={project} />
         <DeploymentsSection project={project} />
         <FeatureTasksSection

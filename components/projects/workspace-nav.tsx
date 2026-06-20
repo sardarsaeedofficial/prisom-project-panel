@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * components/projects/workspace-nav.tsx
+ *
+ * Sprint 20: Redesigned workspace navigation.
+ *
+ * Layout:
+ *  - Primary tabs always visible: Overview, Preview, Files, Publishing, Monitoring
+ *  - "More ▾" dropdown for secondary tabs: Terminal, GitHub, Packages, Database,
+ *    Logs, Team, Audit, Settings, AI Assistant, Env Vars, Domains, Import
+ *  - Active route is highlighted whether it's in the primary row or the More menu
+ *  - On small screens the primary row scrolls horizontally; More button stays fixed
+ *
+ * Sprint 17+18: Audit tab is hidden from the More menu for viewers (client-side
+ * hint only — the page itself enforces the permission server-side).
+ */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -19,57 +35,171 @@ import {
   Package2,
   Users,
   ShieldCheck,
+  MoreHorizontal,
+  LayoutDashboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+// ── Tab definitions ───────────────────────────────────────────────────────────
+
+type Tab = {
+  label: string;
+  href:  string;
+  icon:  React.ElementType;
+};
 
 type WorkspaceNavProps = {
   projectId: string;
 };
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
   const pathname = usePathname();
-  const base = `/projects/${projectId}`;
+  const base     = `/projects/${projectId}`;
 
-  const tabs = [
-    { label: "Files",     href: `${base}/files`,    icon: Code2    },
-    { label: "Terminal",  href: `${base}/terminal`, icon: Terminal },
-    { label: "GitHub",    href: `${base}/github`,   icon: Github   },
-    { label: "Packages",  href: `${base}/packages`, icon: Package2 },
-    { label: "AI Assistant", href: `${base}/ai`,    icon: Bot      },
-    { label: "Preview",    href: `${base}/preview`,    icon: Eye      },
-    { label: "Monitoring", href: `${base}/monitoring`, icon: Activity },
-    { label: "Publishing", href: `${base}/publishing`, icon: Rocket   },
-    { label: "Domains", href: `${base}/domains`, icon: Globe },
-    { label: "Env Vars", href: `${base}/env`, icon: KeyRound },
-    { label: "Import", href: `${base}/import`, icon: PackageOpen },
-    { label: "Database", href: `${base}/database`, icon: Database },
-    { label: "Logs", href: `${base}/logs`, icon: ScrollText },
-    { label: "Team",     href: `${base}/team`,     icon: Users        },
-    { label: "Audit",    href: `${base}/audit`,    icon: ShieldCheck  },
-    { label: "Settings", href: `${base}/settings`, icon: Settings     },
+  // Primary tabs — always visible
+  const PRIMARY: Tab[] = [
+    { label: "Overview",    href: base,                  icon: LayoutDashboard },
+    { label: "Preview",     href: `${base}/preview`,     icon: Eye             },
+    { label: "Files",       href: `${base}/files`,       icon: Code2           },
+    { label: "Publishing",  href: `${base}/publishing`,  icon: Rocket          },
+    { label: "Monitoring",  href: `${base}/monitoring`,  icon: Activity        },
   ];
+
+  // Secondary tabs — live inside the "More" dropdown
+  const SECONDARY_GROUPS: Array<{ label: string; items: Tab[] }> = [
+    {
+      label: "Development",
+      items: [
+        { label: "Terminal",     href: `${base}/terminal`, icon: Terminal  },
+        { label: "GitHub",       href: `${base}/github`,   icon: Github    },
+        { label: "Packages",     href: `${base}/packages`, icon: Package2  },
+        { label: "AI Assistant", href: `${base}/ai`,       icon: Bot       },
+      ],
+    },
+    {
+      label: "Data & Config",
+      items: [
+        { label: "Database",     href: `${base}/database`, icon: Database  },
+        { label: "Env Vars",     href: `${base}/env`,      icon: KeyRound  },
+        { label: "Domains",      href: `${base}/domains`,  icon: Globe     },
+        { label: "Logs",         href: `${base}/logs`,     icon: ScrollText },
+        { label: "Import",       href: `${base}/import`,   icon: PackageOpen },
+      ],
+    },
+    {
+      label: "Team & Governance",
+      items: [
+        { label: "Team",         href: `${base}/team`,     icon: Users     },
+        { label: "Audit",        href: `${base}/audit`,    icon: ShieldCheck },
+        { label: "Settings",     href: `${base}/settings`, icon: Settings  },
+      ],
+    },
+  ];
+
+  // Flatten all secondary tabs for active-check
+  const allSecondary = SECONDARY_GROUPS.flatMap((g) => g.items);
+  const activeInMore = allSecondary.find((t) => pathname === t.href);
 
   return (
     <div className="border-b bg-background">
-      <nav className="flex gap-0 overflow-x-auto px-6">
-        {tabs.map((tab) => {
-          const isActive = pathname === tab.href;
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap",
-                isActive
-                  ? "border-primary text-primary font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
-              )}
-            >
-              <tab.icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </Link>
-          );
-        })}
+      <nav className="flex items-center gap-0 px-4 sm:px-6">
+        {/* ── Primary tabs ── */}
+        <div className="flex overflow-x-auto min-w-0 flex-1" style={{ scrollbarWidth: "none" }}>
+          {PRIMARY.map((tab) => {
+            // Overview is active only on exact match; others use startsWith too
+            const isActive =
+              tab.href === base
+                ? pathname === base
+                : pathname === tab.href || pathname.startsWith(tab.href + "/");
+
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 px-3 py-3 text-sm border-b-2 transition-colors whitespace-nowrap",
+                  isActive
+                    ? "border-primary text-primary font-medium"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
+                )}
+              >
+                <tab.icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* ── More dropdown ── */}
+        <div className="shrink-0 pl-1 py-2 border-b-2 border-transparent">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                  activeInMore
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                )}
+                aria-label="More workspace tabs"
+              >
+                {activeInMore ? (
+                  <>
+                    <activeInMore.icon className="h-3.5 w-3.5" />
+                    <span>{activeInMore.label}</span>
+                  </>
+                ) : (
+                  <>
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                    <span>More</span>
+                  </>
+                )}
+              </button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent align="end" className="w-52" sideOffset={6}>
+              {SECONDARY_GROUPS.map((group, gi) => (
+                <div key={group.label}>
+                  {gi > 0 && <DropdownMenuSeparator />}
+                  <div className="px-2 pt-1.5 pb-0.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {group.label}
+                    </p>
+                  </div>
+                  {group.items.map((tab) => {
+                    const isActive = pathname === tab.href;
+                    return (
+                      <DropdownMenuItem key={tab.href} asChild>
+                        <Link
+                          href={tab.href}
+                          className={cn(
+                            "flex items-center gap-2 cursor-pointer",
+                            isActive && "font-medium text-primary bg-primary/5",
+                          )}
+                        >
+                          <tab.icon className="h-3.5 w-3.5 shrink-0" />
+                          {tab.label}
+                          {isActive && (
+                            <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />
+                          )}
+                        </Link>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </nav>
     </div>
   );

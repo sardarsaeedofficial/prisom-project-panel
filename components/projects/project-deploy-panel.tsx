@@ -219,6 +219,62 @@ function shouldShowPnpmHint(
   return !!usesNpm;
 }
 
+// ── Failure suggestion engine ───────────────────────────────────────────────
+
+type FailureSuggestion = { title: string; detail: string };
+
+function getFailureSuggestions(
+  buildOutput: string,
+  config: DeployConfig,
+): FailureSuggestion[] {
+  const suggestions: FailureSuggestion[] = [];
+  const out = buildOutput.toLowerCase();
+
+  if (out.includes("next.config.ts") || out.includes("configuring next.js via") || out.includes("not supported")) {
+    suggestions.push({
+      title: "next.config.ts is not supported",
+      detail: "Next.js projects should use next.config.mjs (ESM format). Rename next.config.ts → next.config.mjs and update its contents to use export default.",
+    });
+  }
+  if (out.includes("turbopack") || out.includes("turbo") && out.includes("build doesn't support")) {
+    suggestions.push({
+      title: "Turbopack is not supported in production builds",
+      detail: "next build --turbo / --turbopack cannot be used for production. Remove Turbopack flags from your build command and next.config.mjs.",
+    });
+  }
+  if (out.includes("database_url") || out.includes("env: database_url")) {
+    suggestions.push({
+      title: "DATABASE_URL is missing",
+      detail: "Your app references DATABASE_URL but it is not set in the deployment environment. Add it in Env Vars → Publishing, or set db_required: false in deployment config if the database is not needed.",
+    });
+  }
+  if (out.includes("package.json not found") || out.includes("no such file or directory") && out.includes("package.json")) {
+    suggestions.push({
+      title: "package.json not found",
+      detail: "No package.json was found in the project root. For static sites, remove the install command and use a static deploy config.",
+    });
+  }
+  if (out.includes("command not found") && (out.includes("next") || out.includes("node") || out.includes("npm"))) {
+    suggestions.push({
+      title: "Runtime command not found",
+      detail: "A required command (node, npm, next) was not found. Ensure the correct Node.js version is installed on the server.",
+    });
+  }
+  if (out.includes("eaddrinuse") || out.includes("address already in use")) {
+    suggestions.push({
+      title: `Port ${config.port} is already in use`,
+      detail: "Another process is listening on the same port. Stop the existing process or change the port in deployment config.",
+    });
+  }
+  if (!config.startCommand && suggestions.length === 0) {
+    suggestions.push({
+      title: "No start command configured",
+      detail: "Add a start command in deployment config (e.g. npm start or node server.js).",
+    });
+  }
+  return suggestions;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function ProjectDeployPanel({
@@ -391,8 +447,12 @@ export function ProjectDeployPanel({
       : ""
   );
 
-  const showPnpmHint = shouldShowPnpmHint(latest, config);
-  const deployMeta   = parseDeployMeta(latest?.metadata);
+  const showPnpmHint  = shouldShowPnpmHint(latest, config);
+  const deployMeta    = parseDeployMeta(latest?.metadata);
+  const failureSuggestions =
+    latest?.status === "FAILED"
+      ? getFailureSuggestions(buildOutput, config)
+      : [];
 
   // Existing config shape for the edit form
   const existingForEdit: ExistingDeployConfig = {
@@ -625,6 +685,25 @@ export function ProjectDeployPanel({
                   <pre className="text-xs font-mono text-red-600 dark:text-red-400 whitespace-pre-wrap">
                     {latest.errorMessage.slice(0, 300)}
                   </pre>
+                </div>
+              )}
+
+              {/* ── Failure suggestions ── */}
+              {failureSuggestions.length > 0 && !actionError && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                    <WrenchIcon className="h-3.5 w-3.5" />
+                    Possible causes and fixes:
+                  </p>
+                  {failureSuggestions.map((s, i) => (
+                    <div
+                      key={i}
+                      className="rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-3 py-2"
+                    >
+                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">{s.title}</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">{s.detail}</p>
+                    </div>
+                  ))}
                 </div>
               )}
 

@@ -4,6 +4,8 @@
  * components/projects/project-team-panel.tsx
  *
  * Sprint 17: Project team management panel.
+ * Sprint 20: Added email delivery note, clearer pending invite status,
+ *             sole-owner protection message, role description accordion.
  *
  * Security:
  *  - Raw email addresses are never shown; server returns masked versions.
@@ -13,7 +15,7 @@
  */
 
 import { useState, useEffect, useTransition, useCallback } from "react";
-import { Users, UserPlus, Mail, Trash2, Loader2, CheckCircle, Copy, RefreshCw } from "lucide-react";
+import { Users, UserPlus, Mail, Trash2, Loader2, CheckCircle, Copy, RefreshCw, Info, ChevronDown, ChevronUp, Clock, AlertCircle } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -280,7 +282,10 @@ export function ProjectTeamPanel({ projectId }: Props) {
               <Mail className="h-4 w-4" />
               Pending Invites
             </CardTitle>
-            <CardDescription>Awaiting acceptance</CardDescription>
+            <CardDescription className="flex items-center gap-1.5">
+              <Clock className="h-3 w-3" />
+              Awaiting acceptance — share the invite link directly with the recipient
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y">
@@ -308,6 +313,15 @@ export function ProjectTeamPanel({ projectId }: Props) {
                 </div>
               ))}
             </div>
+            {/* Email delivery note */}
+            <div className="mx-6 mb-4 mt-2 flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <span>
+                Invite links are not sent by email automatically. Copy the link above and share it
+                directly with the recipient. If your workspace has email configured,
+                an optional notification may have been sent.
+              </span>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -321,7 +335,8 @@ export function ProjectTeamPanel({ projectId }: Props) {
               Invite Member
             </CardTitle>
             <CardDescription>
-              Send an invite link to add someone to this project.
+              Create an invite link and share it directly with the recipient.
+              Email delivery requires a verified sender domain — the link works regardless.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -426,13 +441,52 @@ export function ProjectTeamPanel({ projectId }: Props) {
         </Card>
       )}
 
-      {/* ── Role reference ───────────────────────────────────────────────── */}
-      <Card>
+      {/* ── Sole-owner protection note ───────────────────────────────────── */}
+      {teamData!.members.filter((m) => m.role === "owner").length <= 1 && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>
+            This project has only one Owner. Owners cannot be removed or demoted until a
+            second member is promoted to Owner, ensuring the project always has an owner.
+          </span>
+        </div>
+      )}
+
+      {/* ── Role reference (collapsible) ─────────────────────────────────── */}
+      <RoleReferenceAccordion />
+    </div>
+  );
+}
+
+// ── Collapsible role reference ────────────────────────────────────────────────
+
+function RoleReferenceAccordion() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left"
+      >
         <CardHeader>
-          <CardTitle className="text-base">Role Reference</CardTitle>
-          <CardDescription>What each role can do in this project</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Role Permissions</CardTitle>
+              <CardDescription>What each role can do in this project</CardDescription>
+            </div>
+            {open ? (
+              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </div>
         </CardHeader>
-        <CardContent className="p-0">
+      </button>
+
+      {open && (
+        <CardContent className="p-0 pt-0">
           <div className="divide-y">
             {PROJECT_ROLES.map((role) => (
               <div key={role} className="flex items-start gap-3 px-6 py-3">
@@ -446,7 +500,7 @@ export function ProjectTeamPanel({ projectId }: Props) {
             ))}
           </div>
         </CardContent>
-      </Card>
-    </div>
+      )}
+    </Card>
   );
 }

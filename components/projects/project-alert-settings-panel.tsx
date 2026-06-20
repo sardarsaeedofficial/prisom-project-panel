@@ -511,9 +511,20 @@ export function ProjectAlertSettingsPanel({ projectId }: Props) {
             </div>
           )}
           {form.deliveryMode === "email" && providerStatus?.activeProvider === "resend" && (
-            <div className="flex items-start gap-2 mt-1 p-2 rounded border border-green-400/20 bg-green-500/5 text-[10px] text-green-700">
-              <CheckCircle2 className="h-3 w-3 shrink-0 mt-0.5" />
-              Resend is configured — real email delivery is ready.
+            <div className="space-y-1.5 mt-1">
+              <div className="flex items-start gap-2 p-2 rounded border border-green-400/20 bg-green-500/5 text-[10px] text-green-700">
+                <CheckCircle2 className="h-3 w-3 shrink-0 mt-0.5" />
+                Resend is configured — real email delivery is ready.
+              </div>
+              <div className="flex items-start gap-2 p-2 rounded border border-amber-400/20 bg-amber-500/5 text-[10px] text-amber-700">
+                <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>
+                  Email delivery requires a <strong>verified sender domain</strong> in your
+                  Resend account. If emails aren't arriving, verify the domain at{" "}
+                  <span className="font-mono">resend.com/domains</span>. Dry-run mode works
+                  without a verified domain and doesn't actually send email.
+                </span>
+              </div>
             </div>
           )}
         </div>
