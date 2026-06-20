@@ -26,7 +26,6 @@ import { validateTemplateFileSet } from "@/lib/templates/template-safety";
 import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
 import { getAuditRequestContext } from "@/lib/audit/request-context";
 import { runCommand } from "@/lib/server/command-runner";
-import { FULL_PATH_PNPM } from "@/lib/projects/deploy-constants";
 import { ProjectType, Visibility, EnvironmentName, EnvironmentStatus, LogLevel, LogSource } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
@@ -379,51 +378,57 @@ export async function createProjectFromTemplateAction(
 
   // ── 18. Optionally install dependencies ───────────────────────────────────
   let installed = false;
+  const pm = template.packageManager; // "npm" | "yarn" | undefined
 
-  if (input.installDependencies && template.packageManager === "pnpm") {
-    try {
-      const installResult = await runCommand(
-        FULL_PATH_PNPM,
-        ["install", "--ignore-scripts"],
-        { cwd: storageRoot, timeoutMs: 120_000 },
-      );
-
-      if (installResult.exitCode === 0) {
-        installed = true;
-        await db.projectLog.create({
-          data: {
-            projectId,
-            level: LogLevel.INFO,
-            source: LogSource.SYSTEM,
-            message: `pnpm install --ignore-scripts completed (${installResult.durationMs}ms)`,
-          },
-        }).catch(() => null);
-      } else {
-        warnings.push(
-          "Dependency install failed (pnpm exited with a non-zero code). Project was created — you can run install manually.",
+  if (input.installDependencies && pm) {
+    // Use npm (system binary) for npm templates; skip yarn/pnpm templates
+    // until their absolute paths are defined in deploy-constants.
+    const binary = pm === "npm" ? "npm" : null;
+    if (binary) {
+      try {
+        const installResult = await runCommand(
+          binary,
+          ["install", "--ignore-scripts"],
+          { cwd: storageRoot, timeoutMs: 120_000 },
         );
 
-        void writeProjectAuditEvent({
-          projectId,
-          actorUserId: user.id,
-          actorEmail: user.email,
-          actorName: user.name ?? null,
-          actorRole: "owner",
-          action: "project.template.install_failed",
-          category: "packages",
-          result: "failed",
-          summary: `Dependency install failed for template "${template.name}"`,
-          metadata: {
-            templateId: template.id,
-            templateName: template.name,
-            exitCode: installResult.exitCode,
-          },
-        }).catch(() => null);
+        if (installResult.exitCode === 0) {
+          installed = true;
+          await db.projectLog.create({
+            data: {
+              projectId,
+              level: LogLevel.INFO,
+              source: LogSource.SYSTEM,
+              message: `${pm} install --ignore-scripts completed (${installResult.durationMs}ms)`,
+            },
+          }).catch(() => null);
+        } else {
+          warnings.push(
+            `Dependency install failed (${pm} exited with a non-zero code). Project was created — you can run install manually.`,
+          );
+
+          void writeProjectAuditEvent({
+            projectId,
+            actorUserId: user.id,
+            actorEmail: user.email,
+            actorName: user.name ?? null,
+            actorRole: "owner",
+            action: "project.template.install_failed",
+            category: "packages",
+            result: "failed",
+            summary: `Dependency install failed for template "${template.name}"`,
+            metadata: {
+              templateId: template.id,
+              templateName: template.name,
+              exitCode: installResult.exitCode,
+            },
+          }).catch(() => null);
+        }
+      } catch (installErr) {
+        const msg = installErr instanceof Error ? installErr.message : String(installErr);
+        warnings.push(`Dependency install error: ${msg}. Project was still created.`);
       }
-    } catch (installErr) {
-      const msg = installErr instanceof Error ? installErr.message : String(installErr);
-      warnings.push(`Dependency install error: ${msg}. Project was still created.`);
-    }
+    } // end if binary
   }
 
   // ── 19. Write audit event ─────────────────────────────────────────────────
@@ -528,6 +533,120 @@ export async function previewTemplateFilesAction(
       buildCommand: template.buildCommand,
       startCommand: template.startCommand,
       healthPath: template.healthPath,
+    },
+  };
+}
+
+// ── Repair action: fix broken Next.js template scaffolds ─────────────────────
+//
+// Renames next.config.ts → next.config.mjs for projects that were scaffolded
+// before the Sprint 19 Hotfix. Safe to run on any Next.js project — it checks
+// that next.config.ts exists AND that package.json lists "next" as a dependency
+// before touching anything.
+
+export type RepairNextConfigInput = {
+  /** Project slug (directory name under storage/projects/) */
+  projectSlug: string;
+};
+
+export type RepairNextConfigOutput = {
+  repaired: boolean;
+  message: string;
+};
+
+const NEXT_CONFIG_MJS_CONTENT = `/** @type {import('next').NextConfig} */
+const nextConfig = {};
+
+export default nextConfig;
+`;
+
+export async function repairNextConfigAction(
+  input: RepairNextConfigInput,
+): Promise<ActionResult<RepairNextConfigOutput>> {
+  // Auth required
+  try {
+    await getCurrentUser();
+  } catch {
+    return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
+  }
+
+  const slug = input.projectSlug?.trim();
+  if (!slug || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    return { ok: false, error: "Invalid project slug.", code: "VALIDATION" };
+  }
+
+  const projectRoot = path.join(process.cwd(), "storage", "projects", slug);
+
+  // Check the project directory exists
+  try {
+    await fs.access(projectRoot);
+  } catch {
+    return { ok: false, error: `Project directory not found: storage/projects/${slug}`, code: "NOT_FOUND" };
+  }
+
+  const tsConfigPath  = path.join(projectRoot, "next.config.ts");
+  const mjsConfigPath = path.join(projectRoot, "next.config.mjs");
+  const pkgJsonPath   = path.join(projectRoot, "package.json");
+
+  // Check next.config.ts exists
+  let hasTsConfig = false;
+  try {
+    await fs.access(tsConfigPath);
+    hasTsConfig = true;
+  } catch {
+    // Not present
+  }
+
+  if (!hasTsConfig) {
+    return {
+      ok: true,
+      data: { repaired: false, message: "next.config.ts not found — no repair needed." },
+    };
+  }
+
+  // Check package.json lists "next" as a dependency
+  let isNextProject = false;
+  try {
+    const pkgRaw = await fs.readFile(pkgJsonPath, "utf-8");
+    const pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+    const deps = { ...(pkg.dependencies as Record<string, unknown> ?? {}), ...(pkg.devDependencies as Record<string, unknown> ?? {}) };
+    isNextProject = "next" in deps;
+  } catch {
+    // If we can't read package.json, skip the dep check but still repair
+    isNextProject = true;
+  }
+
+  if (!isNextProject) {
+    return {
+      ok: true,
+      data: { repaired: false, message: "next.config.ts found but package.json does not list 'next' — skipping repair." },
+    };
+  }
+
+  // Check next.config.mjs doesn't already exist
+  try {
+    await fs.access(mjsConfigPath);
+    // If we get here, mjs already exists — remove the ts file and we're done
+    await fs.rm(tsConfigPath, { force: true });
+    return {
+      ok: true,
+      data: { repaired: true, message: "next.config.mjs already existed; removed stale next.config.ts." },
+    };
+  } catch {
+    // mjs does not exist — proceed
+  }
+
+  // Write next.config.mjs
+  await fs.writeFile(mjsConfigPath, NEXT_CONFIG_MJS_CONTENT, "utf-8");
+
+  // Remove next.config.ts
+  await fs.rm(tsConfigPath, { force: true });
+
+  return {
+    ok: true,
+    data: {
+      repaired: true,
+      message: `Repaired: renamed next.config.ts → next.config.mjs in storage/projects/${slug}.`,
     },
   };
 }

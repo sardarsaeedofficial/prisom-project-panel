@@ -487,9 +487,9 @@ const EXPRESS_API: ProjectTemplate = {
   category: "backend",
   language: "JavaScript",
   framework: "Express",
-  packageManager: "pnpm",
+  packageManager: "npm",
   healthPath: "/api/healthz",
-  installCommand: "pnpm install --ignore-scripts",
+  installCommand: "npm install --ignore-scripts",
   startCommand: "node server.js",
   files: [
     {
@@ -578,7 +578,7 @@ const EXPRESS_API: ProjectTemplate = {
         ## Getting started
 
         \`\`\`bash
-        pnpm install --ignore-scripts
+        npm install --ignore-scripts
         node server.js
         \`\`\`
 
@@ -611,11 +611,11 @@ const NEXTJS_APP: ProjectTemplate = {
   category: "frontend",
   language: "TypeScript",
   framework: "Next.js",
-  packageManager: "pnpm",
+  packageManager: "npm",
   healthPath: "/",
-  installCommand: "pnpm install --ignore-scripts",
-  buildCommand: "pnpm run build",
-  startCommand: "pnpm start",
+  installCommand: "npm install --ignore-scripts",
+  buildCommand: "npm run build",
+  startCommand: "npm start",
   files: [
     {
       path: "package.json",
@@ -645,13 +645,10 @@ const NEXTJS_APP: ProjectTemplate = {
       `),
     },
     {
-      path: "next.config.ts",
+      path: "next.config.mjs",
       content: dedent(`
-        import type { NextConfig } from "next";
-
-        const nextConfig: NextConfig = {
-          /* config options here */
-        };
+        /** @type {import('next').NextConfig} */
+        const nextConfig = {};
 
         export default nextConfig;
       `),
@@ -767,8 +764,8 @@ const NEXTJS_APP: ProjectTemplate = {
         ## Getting started
 
         \`\`\`bash
-        pnpm install --ignore-scripts
-        pnpm run dev
+        npm install --ignore-scripts
+        npm run dev
         \`\`\`
 
         Open [http://localhost:3000](http://localhost:3000) in your browser.
@@ -776,8 +773,8 @@ const NEXTJS_APP: ProjectTemplate = {
         ## Build
 
         \`\`\`bash
-        pnpm run build
-        pnpm start
+        npm run build
+        npm start
         \`\`\`
 
         ## Learn more
@@ -798,11 +795,11 @@ const FULLSTACK_NEXT_API: ProjectTemplate = {
   category: "fullstack",
   language: "TypeScript",
   framework: "Next.js",
-  packageManager: "pnpm",
+  packageManager: "npm",
   healthPath: "/api/healthz",
-  installCommand: "pnpm install --ignore-scripts",
-  buildCommand: "pnpm run build",
-  startCommand: "pnpm start",
+  installCommand: "npm install --ignore-scripts",
+  buildCommand: "npm run build",
+  startCommand: "npm start",
   files: [
     {
       path: "package.json",
@@ -832,13 +829,10 @@ const FULLSTACK_NEXT_API: ProjectTemplate = {
       `),
     },
     {
-      path: "next.config.ts",
+      path: "next.config.mjs",
       content: dedent(`
-        import type { NextConfig } from "next";
-
-        const nextConfig: NextConfig = {
-          /* config options here */
-        };
+        /** @type {import('next').NextConfig} */
+        const nextConfig = {};
 
         export default nextConfig;
       `),
@@ -963,8 +957,8 @@ const FULLSTACK_NEXT_API: ProjectTemplate = {
         ## Getting started
 
         \`\`\`bash
-        pnpm install --ignore-scripts
-        pnpm run dev
+        npm install --ignore-scripts
+        npm run dev
         \`\`\`
 
         ## API endpoints
@@ -976,8 +970,8 @@ const FULLSTACK_NEXT_API: ProjectTemplate = {
         ## Build
 
         \`\`\`bash
-        pnpm run build
-        pnpm start
+        npm run build
+        npm start
         \`\`\`
       `),
     },

@@ -105,6 +105,12 @@ function isUnsafePath(filePath: string): string | null {
     return `Path "${filePath}" has a blocked extension (${ext}).`;
   }
 
+  // next.config.ts is not supported by Next.js 14 at runtime — block it so
+  // generated templates are always deployable. Use next.config.mjs instead.
+  if (basename === "next.config.ts") {
+    return `Path "${filePath}" is not supported. Use "next.config.mjs" for Next.js configuration.`;
+  }
+
   return null; // safe
 }
 
