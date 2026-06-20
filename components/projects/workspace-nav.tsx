@@ -37,6 +37,7 @@ import {
   ShieldCheck,
   MoreHorizontal,
   LayoutDashboard,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -100,6 +101,7 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
       items: [
         { label: "Team",         href: `${base}/team`,     icon: Users     },
         { label: "Audit",        href: `${base}/audit`,    icon: ShieldCheck },
+        { label: "Backups",      href: `${base}/backups`,  icon: Archive   },
         { label: "Settings",     href: `${base}/settings`, icon: Settings  },
       ],
     },

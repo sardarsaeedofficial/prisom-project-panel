@@ -67,6 +67,11 @@ const ROLE_REQUIRED: Record<ProjectPermission, string> = {
   "github.view":        "Viewer",
   "audit.view":         "Developer, Operator, Admin, or Owner",
   "audit.export":       "Admin or Owner",
+  "backup.view":        "Viewer",
+  "backup.create":      "Developer, Operator, Admin, or Owner",
+  "backup.download":    "Developer, Operator, Admin, or Owner",
+  "backup.restore":     "Admin or Owner",
+  "backup.delete":      "Admin or Owner",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────

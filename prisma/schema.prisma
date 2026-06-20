@@ -260,6 +260,7 @@ model User {
 
   // Sprint 18: audit log
   auditedActions      ProjectAuditEvent[] @relation("AuditActor")
+  createdBackups      ProjectBackup[]     @relation("BackupCreatedBy")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -383,6 +384,9 @@ model Project {
 
   // Sprint 18: audit log
   auditEvents         ProjectAuditEvent[]
+
+  // Sprint 21: backups
+  backups             ProjectBackup[]
 
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
@@ -1229,4 +1233,74 @@ model ProjectAuditEvent {
   @@index([projectId, action])
   @@index([projectId, result])
   @@index([actorUserId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT BACKUP  (Sprint 21 — project-scoped snapshots + restore)
+//
+// Archives are stored at:
+//   storage/backups/<slug>/<backupRef>/backup.zip
+//   storage/backups/<slug>/<backupRef>/manifest.json
+//
+// includesSecrets is always false in Sprint 21 — no plaintext secret values
+// are written to archives.  includesEnvKeys stores key names only (redacted).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectBackup {
+  id        String @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Stable unique ref used in file paths and audit events, e.g. bkp_20260621_153000_abcd1234
+  backupRef String @unique
+
+  /// Human-readable label supplied by the user (optional)
+  label String?
+
+  /// creating | ready | failed | restoring | restored | deleted
+  status String @default("creating")
+
+  /// manual | pre_restore | system
+  backupType String @default("manual")
+
+  /// Relative path from project storage root, e.g. backups/<slug>/<backupRef>
+  storagePath String
+
+  /// Archive filename inside storagePath, e.g. backup.zip
+  archiveName String @default("backup.zip")
+
+  /// Compressed archive size in bytes (null while creating)
+  sizeBytes Int?
+
+  /// Number of files included in the archive
+  fileCount Int?
+
+  /// SHA-256 hex of the archive file
+  checksumSha256 String?
+
+  includesSource  Boolean @default(true)
+  includesConfig  Boolean @default(true)
+  includesEnvKeys Boolean @default(true)
+  includesSecrets Boolean @default(false)
+
+  /// Id of the user who triggered the backup (null for system/automatic backups)
+  createdByUserId String?
+  createdBy       User?   @relation("BackupCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  deletedAt   DateTime?
+
+  restoreCount   Int       @default(0)
+  lastRestoredAt DateTime?
+
+  /// Safe error message (no stack trace) set on failure
+  lastError String?
+
+  /// Arbitrary key/value metadata stored at backup creation time
+  metadataJson Json?
+
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([projectId, createdAt])
 }

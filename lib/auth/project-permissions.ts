@@ -52,7 +52,13 @@ export type ProjectPermission =
   | "github.view"
   // Sprint 18: Audit log
   | "audit.view"
-  | "audit.export";
+  | "audit.export"
+  // Sprint 21: Backups
+  | "backup.view"      // View backup list and metadata
+  | "backup.create"    // Trigger a new backup
+  | "backup.download"  // Download a backup archive
+  | "backup.restore"   // Restore from a backup
+  | "backup.delete";   // Delete a backup
 
 // ── Permission sets per role ───────────────────────────────────────────────────
 
@@ -67,6 +73,7 @@ const VIEWER_PERMISSIONS = new Set<ProjectPermission>([
   "packages.view",
   "github.view",
   // Viewers do NOT get audit.view — audit is sensitive operational metadata
+  "backup.view",  // Viewers can see backup list (no secret values in metadata)
 ]);
 
 const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
@@ -74,7 +81,9 @@ const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
   "deploy.trigger",
   "deploy.rollback",
   "monitoring.manage",
-  "audit.view",    // Operators can view audit log (read-only)
+  "audit.view",       // Operators can view audit log (read-only)
+  "backup.create",    // Operators can create backups
+  "backup.download",  // Operators can download backups
 ]);
 
 const DEVELOPER_PERMISSIONS = new Set<ProjectPermission>([
@@ -85,7 +94,9 @@ const DEVELOPER_PERMISSIONS = new Set<ProjectPermission>([
   "deploy.trigger",
   "packages.manage",
   "ai.use",
-  "audit.view",    // Developers can view audit log
+  "audit.view",       // Developers can view audit log
+  "backup.create",    // Developers can create backups
+  "backup.download",  // Developers can download backups
 ]);
 
 const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
@@ -113,6 +124,11 @@ const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
   "github.view",
   "audit.view",
   "audit.export",
+  "backup.view",
+  "backup.create",
+  "backup.download",
+  "backup.restore",
+  "backup.delete",
 ]);
 
 const OWNER_PERMISSIONS = new Set<ProjectPermission>([...ADMIN_PERMISSIONS]);

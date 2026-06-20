@@ -41,6 +41,7 @@ import {
   EnvironmentName,
 } from "@prisma/client";
 import { db } from "@/lib/db";
+import { RECENT_BACKUP_DAYS } from "@/lib/backups/project-backup-types";
 
 export const dynamic = "force-dynamic";
 
@@ -377,7 +378,9 @@ function StatsRow({ project }: { project: ProjectDetail }) {
 export default async function ProjectPage({ params }: Props) {
   const { projectId } = await params;
 
-  const [project, features, tasks, deployConfig, teamMemberCount, alertSettings] =
+  const recentBackupCutoff = new Date(Date.now() - RECENT_BACKUP_DAYS * 24 * 60 * 60 * 1000);
+
+  const [project, features, tasks, deployConfig, teamMemberCount, alertSettings, recentBackup] =
     await Promise.all([
       getProjectById(projectId),
       getProjectFeatures(projectId),
@@ -385,6 +388,15 @@ export default async function ProjectPage({ params }: Props) {
       db.projectDeploymentConfig.findUnique({ where: { projectId } }).catch(() => null),
       db.projectMember.count({ where: { projectId } }).catch(() => 0),
       db.projectAlertSettings.findUnique({ where: { projectId } }).catch(() => null),
+      db.projectBackup.findFirst({
+        where: {
+          projectId,
+          status: "ready",
+          deletedAt: null,
+          completedAt: { gte: recentBackupCutoff },
+        },
+        select: { id: true },
+      }).catch(() => null),
     ]);
 
   if (!project) notFound();
@@ -425,6 +437,12 @@ export default async function ProjectPage({ params }: Props) {
       ok: (project.environments?.some((e) => e.secrets.length > 0)) ?? false,
       href: `/projects/${projectId}/env`,
       hintIfMissing: "Add env vars like DATABASE_URL or API keys.",
+    },
+    {
+      label: `Recent backup (within ${RECENT_BACKUP_DAYS} days)`,
+      ok: !!recentBackup,
+      href: `/projects/${projectId}/backups`,
+      hintIfMissing: "Create a backup snapshot to protect your project's source files.",
     },
   ];
 
