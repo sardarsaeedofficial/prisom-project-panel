@@ -114,6 +114,28 @@ function isUnsafePath(filePath: string): string | null {
   return null; // safe
 }
 
+// ── Turbopack content guard ────────────────────────────────────────────────────
+//
+// Block template file content that would cause `next build` to run in Turbopack
+// mode, which Next.js 14 does not support for production builds.
+
+const TURBOPACK_CONTENT_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /next\s+build\s+--turbo\b/,        label: "next build --turbo" },
+  { pattern: /next\s+build\s+--turbopack\b/,    label: "next build --turbopack" },
+  { pattern: /NEXT_PRIVATE_TURBOPACK/,           label: "NEXT_PRIVATE_TURBOPACK" },
+  { pattern: /TURBOPACK\s*=\s*["']?1["']?/,     label: "TURBOPACK=1" },
+  { pattern: /experimental\s*[:{]\s*[^}]*turbo/, label: "experimental.turbo config" },
+];
+
+function isUnsafeContent(content: string, filePath: string): string | null {
+  for (const { pattern, label } of TURBOPACK_CONTENT_PATTERNS) {
+    if (pattern.test(content)) {
+      return `File "${filePath}" contains "${label}" which enables Turbopack. Production builds must not use Turbopack.`;
+    }
+  }
+  return null;
+}
+
 // ── File-set validation ────────────────────────────────────────────────────────
 
 export function validateTemplateFileSet(
@@ -141,6 +163,10 @@ export function validateTemplateFileSet(
       return { ok: false, error: `Duplicate file path: "${file.path}".` };
     }
     seenPaths.add(normPath);
+
+    // Turbopack content guard
+    const contentError = isUnsafeContent(file.content, file.path);
+    if (contentError) return { ok: false, error: contentError };
 
     // Per-file size
     const bytes = Buffer.byteLength(file.content, "utf-8");

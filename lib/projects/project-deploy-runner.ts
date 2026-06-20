@@ -68,6 +68,49 @@ const ENV_FILE_RE = /^\.env(\.|$)/i;
 // Keeping these causes TS6305 ("Output file has not been built from source file").
 const TSBUILDINFO_RE = /\.tsbuildinfo$/i;
 
+// ── Turbopack env stripping ────────────────────────────────────────────────
+//
+// The Prisom Panel itself may run under Turbopack (Next.js dev/build mode),
+// which sets these env vars in process.env. Deployed child projects must never
+// inherit them — otherwise `next build` inside the release runs in Turbopack
+// mode and fails with "next build doesn't support turbopack yet".
+//
+// runCommand() spreads `{ ...process.env, ...options.env }`. Passing these
+// keys as empty strings in options.env makes them win over process.env.
+// Empty string is falsy, so Next.js and other tools treat them as "not set".
+
+const TURBOPACK_STRIP_ENV: Record<string, string> = {
+  TURBOPACK:                       "",
+  NEXT_PRIVATE_TURBOPACK:          "",
+  NEXT_PRIVATE_LOCAL_WEBPACK:      "",
+  __NEXT_PRIVATE_PREBUNDLED_REACT: "",
+  NEXT_TELEMETRY_DEBUG:            "",
+};
+
+/**
+ * Builds a sanitised environment object for deployed child processes.
+ *
+ * Pass `extra` as the project-specific vars (decrypted env vars, NODE_ENV,
+ * PORT, etc.). The returned object:
+ *  - Includes all entries from `extra` (undefined values skipped).
+ *  - Sets NEXT_TELEMETRY_DISABLED=1 unconditionally.
+ *  - Sets all Turbopack-related vars to "" so they shadow process.env when
+ *    runCommand() does its { ...process.env, ...options.env } merge.
+ */
+function createProjectRuntimeEnv(
+  extra: Record<string, string | undefined> = {},
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined) out[k] = v;
+  }
+  // Always disable Next.js telemetry for child processes
+  out.NEXT_TELEMETRY_DISABLED = "1";
+  // Strip Turbopack — must come last so they override anything in extra
+  Object.assign(out, TURBOPACK_STRIP_ENV);
+  return out;
+}
+
 // Shell-injection character reject set
 const INJECT_CHARS_RE = /[;&|><`$\\]/;
 
@@ -597,10 +640,14 @@ async function pm2StartFresh(
 
   // Merge env: project env vars (decrypted by caller) + runtime overrides.
   // PORT and NODE_ENV always win — they must match the deployment config.
+  // TURBOPACK_STRIP_ENV is applied so the started PM2 process never
+  // inherits Turbopack flags from the PM2 daemon's environment.
   const fullEnv: Record<string, string> = {
     ...extraEnv,
-    PORT:     String(port),
-    NODE_ENV: nodeEnv,
+    PORT:                    String(port),
+    NODE_ENV:                nodeEnv,
+    NEXT_TELEMETRY_DISABLED: "1",
+    ...TURBOPACK_STRIP_ENV,
   };
 
   // Log only the names being injected — never the values
@@ -902,11 +949,13 @@ export async function runProjectDeployment(
     // Project vars (e.g. DATABASE_URL) are included so that Prisma generate
     // and other build-time tools that read env can find their config.
     // PORT and NODE_ENV always override whatever the project may have set.
-    const buildEnv: Record<string, string> = {
+    // createProjectRuntimeEnv() strips Turbopack vars so the panel's own
+    // Turbopack flags are never inherited by the child build process.
+    const buildEnv = createProjectRuntimeEnv({
       ...config.envVars,   // project vars (decrypted) — never logged
       NODE_ENV: config.nodeEnv,
       PORT:     String(config.port),
-    };
+    });
 
     // ── 3. Install ────────────────────────────────────────────────────────
     if (config.installCommand) {
