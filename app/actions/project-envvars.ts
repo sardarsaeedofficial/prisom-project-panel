@@ -30,6 +30,7 @@ import {
   isValidEnvironment,
   VALID_ENVIRONMENTS,
 } from "@/lib/projects/env-manager";
+import { fingerprintSecret } from "@/lib/secrets/secret-fingerprint";
 
 // ── Ownership guard ────────────────────────────────────────────────────────
 
@@ -50,13 +51,19 @@ async function verifyOwnership(projectId: string) {
 // ── Return types ───────────────────────────────────────────────────────────
 
 export type EnvVarRow = {
-  id:          string;
-  name:        string;
-  maskedValue: string; // never the real value
-  isSecret:    boolean;
-  isEnabled:   boolean;
-  environment: string;
-  updatedAt:   Date;
+  id:           string;
+  name:         string;
+  maskedValue:  string;       // never the real value
+  isSecret:     boolean;
+  isEnabled:    boolean;
+  environment:  string;
+  updatedAt:    Date;
+  // Sprint 22: Secrets Vault fields
+  fingerprint:  string | null;
+  description:  string | null;
+  required:     boolean;
+  source:       string;
+  lastRotatedAt: Date | null;
 };
 
 export type EnvVarsResult = {
@@ -103,13 +110,19 @@ export async function getProjectEnvVarsAction(
         display = "••••••••";
       }
       return {
-        id:          r.id,
-        name:        r.name,
-        maskedValue: display,
-        isSecret:    r.isSecret,
-        isEnabled:   r.isEnabled,
-        environment: r.environment,
-        updatedAt:   r.updatedAt,
+        id:           r.id,
+        name:         r.name,
+        maskedValue:  display,
+        isSecret:     r.isSecret,
+        isEnabled:    r.isEnabled,
+        environment:  r.environment,
+        updatedAt:    r.updatedAt,
+        // Sprint 22
+        fingerprint:  r.fingerprint ?? null,
+        description:  r.description ?? null,
+        required:     r.required ?? false,
+        source:       r.source ?? "manual",
+        lastRotatedAt: r.lastRotatedAt ?? null,
       };
     }),
   };
@@ -122,7 +135,8 @@ export async function upsertEnvVarAction(
   name:        string,
   value:       string,
   environment: string = "production",
-  isSecret?:   boolean
+  isSecret?:   boolean,
+  opts?: { description?: string; required?: boolean; source?: string }
 ): Promise<{ ok: boolean; error: string }> {
   const project = await verifyOwnership(projectId);
   if (!project) return { ok: false, error: "Not found or access denied." };
@@ -145,16 +159,35 @@ export async function upsertEnvVarAction(
 
   let isCreate = false;
   try {
-    const encrypted = encryptEnvValue(value.trim());
-    const existing = await db.projectEnvVar.findUnique({
-      where: { projectId_name_environment: { projectId, name: cleanName, environment: env } },
+    const trimmed   = value.trim();
+    const encrypted = encryptEnvValue(trimmed);
+    const fp        = fingerprintSecret(trimmed);
+    const existing  = await db.projectEnvVar.findUnique({
+      where:  { projectId_name_environment: { projectId, name: cleanName, environment: env } },
       select: { id: true },
     });
     isCreate = !existing;
     await db.projectEnvVar.upsert({
       where:  { projectId_name_environment: { projectId, name: cleanName, environment: env } },
-      update: { value: encrypted, isSecret: secret },
-      create: { projectId, name: cleanName, value: encrypted, isSecret: secret, environment: env },
+      update: {
+        value:       encrypted,
+        isSecret:    secret,
+        fingerprint: fp,
+        ...(opts?.description !== undefined ? { description: opts.description } : {}),
+        ...(opts?.required    !== undefined ? { required:    opts.required }    : {}),
+        ...(opts?.source      !== undefined ? { source:      opts.source }      : {}),
+      },
+      create: {
+        projectId,
+        name:        cleanName,
+        value:       encrypted,
+        isSecret:    secret,
+        environment: env,
+        fingerprint: fp,
+        description: opts?.description ?? null,
+        required:    opts?.required    ?? false,
+        source:      opts?.source      ?? "manual",
+      },
     });
   } catch (e) {
     return { ok: false, error: `Failed to save: ${(e as Error).message}` };
@@ -284,12 +317,14 @@ export async function bulkImportEnvVarsAction(
     if (!rawValue.trim()) { skipped++; continue; }
 
     try {
-      const encrypted = encryptEnvValue(rawValue.trim());
+      const trimmed   = rawValue.trim();
+      const encrypted = encryptEnvValue(trimmed);
       const secret    = isLikelySecret(cleanName);
+      const fp        = fingerprintSecret(trimmed);
       await db.projectEnvVar.upsert({
         where:  { projectId_name_environment: { projectId, name: cleanName, environment: env } },
-        update: { value: encrypted, isSecret: secret },
-        create: { projectId, name: cleanName, value: encrypted, isSecret: secret, environment: env },
+        update: { value: encrypted, isSecret: secret, fingerprint: fp, source: "import" },
+        create: { projectId, name: cleanName, value: encrypted, isSecret: secret, environment: env, fingerprint: fp, source: "import" },
       });
       importedNames.push(cleanName);
       imported++;

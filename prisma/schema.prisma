@@ -986,6 +986,13 @@ model ProjectEnvVar {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Sprint 22: Secrets Vault fields
+  description   String?                    // human-readable note (never a value)
+  required      Boolean  @default(false)   // marks as deployment-critical
+  lastRotatedAt DateTime?                  // set whenever value is changed via rotate action
+  fingerprint   String?                    // sha256(plaintext).slice(0,12) — safe to display
+  source        String   @default("manual") // "manual" | "import" | "template" | "deployment" | "system"
+
   projectId String
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 

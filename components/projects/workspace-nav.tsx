@@ -8,7 +8,7 @@
  * Layout:
  *  - Primary tabs always visible: Overview, Preview, Files, Publishing, Monitoring
  *  - "More ▾" dropdown for secondary tabs: Terminal, GitHub, Packages, Database,
- *    Logs, Team, Audit, Settings, AI Assistant, Env Vars, Domains, Import
+ *    Logs, Team, Audit, Settings, AI Assistant, Secrets Vault, Domains, Import
  *  - Active route is highlighted whether it's in the primary row or the More menu
  *  - On small screens the primary row scrolls horizontally; More button stays fixed
  *
@@ -90,7 +90,7 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
       label: "Data & Config",
       items: [
         { label: "Database",     href: `${base}/database`, icon: Database  },
-        { label: "Env Vars",     href: `${base}/env`,      icon: KeyRound  },
+        { label: "Secrets Vault", href: `${base}/env`,      icon: KeyRound  },
         { label: "Domains",      href: `${base}/domains`,  icon: Globe     },
         { label: "Logs",         href: `${base}/logs`,     icon: ScrollText },
         { label: "Import",       href: `${base}/import`,   icon: PackageOpen },

@@ -58,7 +58,13 @@ export type ProjectPermission =
   | "backup.create"    // Trigger a new backup
   | "backup.download"  // Download a backup archive
   | "backup.restore"   // Restore from a backup
-  | "backup.delete";   // Delete a backup
+  | "backup.delete"    // Delete a backup
+  // Sprint 22: Secrets Vault
+  | "secrets.view"     // See key names, fingerprints, metadata (never values)
+  | "secrets.manage"   // Create / update / delete secrets
+  | "secrets.rotate"   // Rotate a secret value
+  | "secrets.import"   // Bulk-import secrets from .env
+  | "secrets.export";  // Export safe metadata (key names + status, never values)
 
 // ── Permission sets per role ───────────────────────────────────────────────────
 
@@ -73,7 +79,9 @@ const VIEWER_PERMISSIONS = new Set<ProjectPermission>([
   "packages.view",
   "github.view",
   // Viewers do NOT get audit.view — audit is sensitive operational metadata
-  "backup.view",  // Viewers can see backup list (no secret values in metadata)
+  "backup.view",    // Viewers can see backup list (no secret values in metadata)
+  "secrets.view",   // Viewers see key names + configured/missing status only (no values)
+  "secrets.export", // Viewers can export safe metadata (key names + status, never values)
 ]);
 
 const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
@@ -129,6 +137,11 @@ const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
   "backup.download",
   "backup.restore",
   "backup.delete",
+  "secrets.view",
+  "secrets.manage",
+  "secrets.rotate",
+  "secrets.import",
+  "secrets.export",
 ]);
 
 const OWNER_PERMISSIONS = new Set<ProjectPermission>([...ADMIN_PERMISSIONS]);

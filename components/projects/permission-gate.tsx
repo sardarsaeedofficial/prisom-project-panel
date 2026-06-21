@@ -72,6 +72,11 @@ const ROLE_REQUIRED: Record<ProjectPermission, string> = {
   "backup.download":    "Developer, Operator, Admin, or Owner",
   "backup.restore":     "Admin or Owner",
   "backup.delete":      "Admin or Owner",
+  "secrets.view":       "Viewer",
+  "secrets.manage":     "Admin or Owner",
+  "secrets.rotate":     "Admin or Owner",
+  "secrets.import":     "Admin or Owner",
+  "secrets.export":     "Viewer",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────
