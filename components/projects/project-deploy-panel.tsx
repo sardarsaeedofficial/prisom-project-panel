@@ -15,7 +15,7 @@
  *   - Inline edit form (via DeploymentSetupForm with existingConfig)
  */
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Rocket,
@@ -56,6 +56,8 @@ import {
   getProjectRuntimeLogsAction,
   type DeployActionResult,
 } from "@/app/actions/project-deployments";
+import { listActiveOperationsAction } from "@/app/actions/project-operations";
+import type { ProjectOperationDTO, OperationType } from "@/lib/operations/project-operation-types";
 import { DeploymentStatus } from "@prisma/client";
 import type { Pm2AppStatus } from "@/lib/projects/project-deploy-runner";
 import {
@@ -311,7 +313,32 @@ export function ProjectDeployPanel({
   const [actionError,   setActionError]   = useState("");
   const [actionOk,      setActionOk]      = useState("");
 
+  // Sprint 27: active operation awareness (cross-tab / cross-session lock visibility)
+  // These operation types block a new deploy from starting.
+  const DEPLOY_BLOCKING_TYPES = new Set<OperationType>([
+    "deploy", "multi_service_deploy", "backup_restore", "patch_apply",
+  ]);
+  const [blockingOp, setBlockingOp] = useState<ProjectOperationDTO | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkActiveOps() {
+      try {
+        const r = await listActiveOperationsAction(projectId);
+        if (!cancelled && r.ok) {
+          const blocker = r.data.find((op) => DEPLOY_BLOCKING_TYPES.has(op.operationType)) ?? null;
+          setBlockingOp(blocker);
+        }
+      } catch { /* non-critical */ }
+    }
+    checkActiveOps();
+    const interval = setInterval(checkActiveOps, 5_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const anyBusy    = isDeploying || isRestarting || isStopping;
+  const deployLocked = !isDeploying && blockingOp !== null;
   const [copiedRef, setCopiedRef] = useState(false);
 
   // ── onSaved callback for the inline edit form ──────────────────────────
@@ -357,6 +384,7 @@ export function ProjectDeployPanel({
 
       if (res.ok) {
         setActionOk("Deployment successful! App is live.");
+        setBlockingOp(null); // deploy finished — clear any lock state
         startTransition(async () => {
           const s = await refreshDeploymentStatusAction(projectId);
           if (s.ok) {
@@ -365,9 +393,11 @@ export function ProjectDeployPanel({
           }
         });
       } else {
+        setBlockingOp(null); // even on failure the lock is released server-side
         setActionError(res.error || "Deployment failed — see build log below.");
       }
     } catch (e) {
+      setBlockingOp(null);
       setActionError(e instanceof Error ? e.message : "Unexpected error during deploy.");
     } finally {
       setIsDeploying(false);
@@ -583,7 +613,7 @@ export function ProjectDeployPanel({
           {!isEditing && (
             <>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={handleDeploy} disabled={anyBusy} className="gap-2">
+                <Button onClick={handleDeploy} disabled={anyBusy || deployLocked} className="gap-2">
                   {isDeploying ? (
                     <><Loader2 className="h-4 w-4 animate-spin" /> Deploying…</>
                   ) : (
@@ -630,6 +660,22 @@ export function ProjectDeployPanel({
                   )}
                 </Button>
               </div>
+
+              {/* Operation lock warning (cross-session) */}
+              {deployLocked && blockingOp && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5">
+                  <Loader2 className="h-4 w-4 text-amber-600 mt-0.5 shrink-0 animate-spin" />
+                  <div className="text-sm text-amber-700 dark:text-amber-400">
+                    <span className="font-medium">Deploy is blocked:</span>{" "}
+                    {blockingOp.title} is already running.{" "}
+                    Wait for it to finish or{" "}
+                    <a href={`/projects/${projectId}/operations`} className="underline font-medium">
+                      view operations
+                    </a>
+                    {" "}to force-clear a stuck lock.
+                  </div>
+                </div>
+              )}
 
               {/* Deploying warning */}
               {isDeploying && (

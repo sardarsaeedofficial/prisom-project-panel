@@ -87,13 +87,128 @@ function toDTO(
   };
 }
 
-// ── Assert allowed (throws on conflict) ──────────────────────────────────────
+// ── Internal: conflict marker thrown inside a Prisma transaction ─────────────
+// Prisma transactions roll back on any thrown Error. We need to communicate
+// conflict details back out, so we use a typed sentinel class.
+
+class _ConflictInsideTx extends Error {
+  constructor(
+    public readonly blockingType: string,
+    public readonly blockingId:   string,
+    public readonly reason:       string,
+  ) {
+    super("__op_conflict__");
+    this.name = "_ConflictInsideTx";
+  }
+}
+
+// ── Start (atomic) ────────────────────────────────────────────────────────────
 
 /**
- * Checks whether a new operation of `proposed` type can start.
- * Assumes `markStaleOperations` has already been called.
- * Throws `OperationConflictError` if a blocking op is running.
+ * Acquires an operation lock atomically:
+ *
+ * 1. Mark stale ops for this project.
+ * 2. Inside a Prisma transaction: check for blocking ops → insert running row.
+ *    If a conflicting operation is found, the transaction is rolled back and
+ *    `OperationConflictError` is thrown.
+ * 3. Post-create re-check: if two transactions raced and both inserted, the
+ *    loser cancels its own row and throws.
+ *
+ * Returns the created operation's ID.
+ * Throws `OperationConflictError` if blocked.
  */
+export async function startProjectOperation(
+  input: StartOperationInput,
+): Promise<string> {
+  const { projectId, operationType, title, initiatedByUserId, serviceId, meta } = input;
+
+  await markStaleOperations(projectId);
+
+  const blockSet = BLOCKS_IF_RUNNING[operationType];
+
+  // ── Phase 1: atomic check + insert ───────────────────────────────────────
+  let opId: string;
+  try {
+    opId = await db.$transaction(async (tx) => {
+      // Conflict check inside the transaction
+      if (blockSet.size > 0) {
+        const blocking = await tx.projectOperation.findFirst({
+          where: {
+            projectId,
+            status:        "running",
+            operationType: { in: [...blockSet] },
+          },
+          select: { id: true, operationType: true, title: true },
+        });
+        if (blocking) {
+          const reason = getBlockingReason(
+            operationType,
+            blocking.operationType as OperationType,
+            blocking.title,
+          );
+          throw new _ConflictInsideTx(blocking.operationType, blocking.id, reason);
+        }
+      }
+
+      // Insert the operation row
+      const op = await tx.projectOperation.create({
+        data: {
+          projectId,
+          operationType,
+          title,
+          status:            "running",
+          initiatedByUserId: initiatedByUserId ?? null,
+          serviceId:         serviceId ?? null,
+          meta:              (meta as object) ?? null,
+          startedAt:         new Date(),
+        },
+        select: { id: true },
+      });
+      return op.id;
+    });
+  } catch (err) {
+    if (err instanceof _ConflictInsideTx) {
+      throw new OperationConflictError(err.reason, err.blockingType as OperationType, err.blockingId);
+    }
+    throw err;
+  }
+
+  // ── Phase 2: post-create re-check (handles simultaneous double-click) ────
+  // Two concurrent transactions could both pass the conflict check before
+  // either inserts. The one that "lost" cancels its own row here.
+  if (blockSet.size > 0) {
+    const raceConflict = await db.projectOperation.findFirst({
+      where: {
+        projectId,
+        status:        "running",
+        operationType: { in: [...blockSet] },
+        id:            { not: opId },
+      },
+      select: { id: true, operationType: true, title: true },
+    });
+    if (raceConflict) {
+      await db.projectOperation.update({
+        where: { id: opId },
+        data: {
+          status:      "cancelled",
+          completedAt: new Date(),
+          lastError:   "Cancelled: conflicting operation detected post-insert (race).",
+        },
+      }).catch(() => null);
+      const reason = getBlockingReason(
+        operationType,
+        raceConflict.operationType as OperationType,
+        raceConflict.title,
+      );
+      throw new OperationConflictError(reason, raceConflict.operationType as OperationType, raceConflict.id);
+    }
+  }
+
+  return opId;
+}
+
+// ── assertOperationAllowed (kept for external use in tests / admin tools) ────
+
 export async function assertOperationAllowed(
   projectId: string,
   proposed:  OperationType,
@@ -109,51 +224,10 @@ export async function assertOperationAllowed(
     },
     select: { id: true, operationType: true, title: true },
   });
-
   if (!blocking) return;
 
-  const reason = getBlockingReason(
-    proposed,
-    blocking.operationType as OperationType,
-    blocking.title,
-  );
+  const reason = getBlockingReason(proposed, blocking.operationType as OperationType, blocking.title);
   throw new OperationConflictError(reason, blocking.operationType as OperationType, blocking.id);
-}
-
-// ── Start ─────────────────────────────────────────────────────────────────────
-
-/**
- * Acquires an operation lock:
- * 1. Mark stale ops
- * 2. Assert no conflict
- * 3. Create "running" row
- *
- * Returns the created operation's ID.
- * Throws `OperationConflictError` if blocked.
- */
-export async function startProjectOperation(
-  input: StartOperationInput,
-): Promise<string> {
-  const { projectId, operationType, title, initiatedByUserId, serviceId, meta } = input;
-
-  await markStaleOperations(projectId);
-  await assertOperationAllowed(projectId, operationType);
-
-  const op = await db.projectOperation.create({
-    data: {
-      projectId,
-      operationType,
-      title,
-      status:             "running",
-      initiatedByUserId:  initiatedByUserId ?? null,
-      serviceId:          serviceId ?? null,
-      meta:               (meta as object) ?? null,
-      startedAt:          new Date(),
-    },
-    select: { id: true },
-  });
-
-  return op.id;
 }
 
 // ── Complete ──────────────────────────────────────────────────────────────────

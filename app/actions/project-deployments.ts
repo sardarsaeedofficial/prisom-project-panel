@@ -315,6 +315,11 @@ export async function deployProjectAction(
     return { ok: false, output: "", error: "Could not verify operation state. Please try again." };
   }
 
+  // Sprint 27: everything after lock acquisition is wrapped in try/catch so
+  // the operation lock is ALWAYS released, even on unexpected errors.
+  let deploymentId: string | undefined;
+  try {
+
   // Create a BUILDING record so the UI reflects in-progress state
   const deployment = await db.deployment.create({
     data: {
@@ -324,6 +329,7 @@ export async function deployProjectAction(
       startedAt: new Date(),
     },
   });
+  deploymentId = deployment.id;
 
   // Fetch decrypted env vars — NEVER log or return these to the client
   const envVars = await getDecryptedEnvVarsForDeploy(projectId, "production");
@@ -506,13 +512,10 @@ export async function deployProjectAction(
     ...auditCtx,
   });
 
-  // Sprint 27: release operation lock
+  // Sprint 27: release operation lock (inside try — deploy finished normally)
   if (operationId) {
-    if (result.ok) {
-      await completeProjectOperation(operationId);
-    } else {
-      await failProjectOperation(operationId, result.error ?? "Deploy failed");
-    }
+    if (result.ok) await completeProjectOperation(operationId);
+    else           await failProjectOperation(operationId, result.error ?? "Deploy failed");
   }
 
   return {
@@ -521,6 +524,19 @@ export async function deployProjectAction(
     error:        result.error,
     deploymentId: deployment.id,
   };
+
+  } catch (err) {
+    // Unexpected error after lock was acquired — ensure lock is always released
+    const msg = err instanceof Error ? err.message : "Unexpected error during deploy";
+    if (deploymentId) {
+      await db.deployment.update({
+        where: { id: deploymentId },
+        data:  { status: DeploymentStatus.FAILED, finishedAt: new Date(), errorMessage: msg },
+      }).catch(() => null);
+    }
+    if (operationId) await failProjectOperation(operationId, msg).catch(() => null);
+    return { ok: false, output: "", error: msg };
+  }
 }
 
 // ── Action: restartProjectRuntimeAction ───────────────────────────────────
