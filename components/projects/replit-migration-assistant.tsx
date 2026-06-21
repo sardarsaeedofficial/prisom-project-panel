@@ -69,6 +69,7 @@ import type {
   MigrationRisk,
   DetectedSecret,
 } from "@/lib/migration/replit-detection-types";
+import { PortabilityPatchPanel } from "@/components/projects/portability-patch-panel";
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
@@ -494,6 +495,15 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
             <p className="text-sm text-muted-foreground">Your project structure looks VPS-compatible.</p>
           </div>
         )}
+
+        {/* ── Portability patches ── */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Automated portability patches
+          </p>
+          <PortabilityPatchPanel projectId={projectId} />
+        </div>
+
         <Button onClick={() => setStep("services")} className="w-full">
           Configure services <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
