@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  ScrollText,
 } from "lucide-react";
 import { Button }   from "@/components/ui/button";
 import { Badge }    from "@/components/ui/badge";
@@ -88,7 +89,13 @@ function StatusBadge({ status }: { status: OperationStatus }) {
 
 // ── Operation row ─────────────────────────────────────────────────────────────
 
-function OperationRow({ op }: { op: ProjectOperationDTO }) {
+function OperationRow({
+  op,
+  projectId,
+}: {
+  op:        ProjectOperationDTO;
+  projectId: string;
+}) {
   const typeLabel = OPERATION_TYPE_LABELS[op.operationType] ?? op.operationType;
 
   return (
@@ -111,6 +118,16 @@ function OperationRow({ op }: { op: ProjectOperationDTO }) {
           <p className="mt-1 text-xs text-red-600 line-clamp-2">{op.lastError}</p>
         )}
       </div>
+
+      {/* View logs link */}
+      <a
+        href={`/projects/${projectId}/logs?source=operation:${op.id}`}
+        className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors self-start pt-0.5"
+        title="View operation logs"
+      >
+        <ScrollText className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Logs</span>
+      </a>
     </div>
   );
 }
@@ -274,7 +291,7 @@ export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
           ) : (
             <div className="space-y-2">
               {panelState.ops.map((op) => (
-                <OperationRow key={op.id} op={op} />
+                <OperationRow key={op.id} op={op} projectId={projectId} />
               ))}
             </div>
           )}
