@@ -37,6 +37,12 @@ import type {
   ApplyPatchResult,
   PatchId,
 } from "@/lib/migration/portability-patch-types";
+import {
+  startProjectOperation,
+  completeProjectOperation,
+  failProjectOperation,
+  OperationConflictError,
+} from "@/lib/operations/project-operation-service";
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
@@ -232,6 +238,21 @@ export async function applyPatchAction(
     return { ok: false, error: guard.error };
   }
 
+  // Sprint 27: operation lock
+  let patchOpId: string | null = null;
+  try {
+    patchOpId = await startProjectOperation({
+      projectId,
+      operationType:    "patch_apply",
+      title:            `Apply patch: ${patchId}`,
+      initiatedByUserId: auth.userId,
+      meta:             { patchId },
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) return { ok: false, error: err.message };
+    return { ok: false, error: "Could not verify operation state. Please try again." };
+  }
+
   // ── Re-generate patch plan server-side (never trust client plan) ──────────
   const { fileList, allContent, allDeps } = await collectSourceFiles(sourceDir);
   const plannerInput: PlannerInput = { projectId, sourceDir, allContent, fileList, allDeps };
@@ -241,14 +262,17 @@ export async function applyPatchAction(
     plan = await planPatch(patchId, plannerInput);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
+    if (patchOpId) await failProjectOperation(patchOpId, `Plan failed: ${msg}`);
     return { ok: false, error: `Could not generate patch plan: ${msg}` };
   }
 
   if (plan.status !== "available") {
+    if (patchOpId) await failProjectOperation(patchOpId, `Patch not applicable: ${plan.status}`);
     return { ok: false, error: `Patch is not applicable (${plan.status}): ${plan.statusReason ?? ""}`.trim() };
   }
 
   if (plan.files.length === 0) {
+    if (patchOpId) await failProjectOperation(patchOpId, "No file changes produced");
     return { ok: false, error: "Patch plan produced no file changes." };
   }
 
@@ -267,6 +291,7 @@ export async function applyPatchAction(
       metadata: { patchId, patchTitle: plan.title, error: msg },
       ...ctx,
     }).catch(() => null);
+    if (patchOpId) await failProjectOperation(patchOpId, `Apply threw: ${msg}`);
     return { ok: false, error: `Patch apply failed: ${msg}` };
   }
 
@@ -295,11 +320,15 @@ export async function applyPatchAction(
   }).catch(() => null);
 
   if (!result.ok && result.errors.length > 0) {
+    if (patchOpId) await failProjectOperation(patchOpId, result.errors.join("; "));
     return {
       ok:    false,
       error: `Patch partially failed: ${result.errors.join(" | ")}`,
     };
   }
+
+  // Sprint 27: release lock on success
+  if (patchOpId) await completeProjectOperation(patchOpId);
 
   return { ok: true, data: result };
 }

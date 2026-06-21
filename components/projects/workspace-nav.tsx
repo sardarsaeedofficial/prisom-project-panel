@@ -39,6 +39,7 @@ import {
   LayoutDashboard,
   Archive,
   ArrowRightLeft,
+  ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -48,6 +49,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ProjectOperationBanner } from "@/components/projects/project-operation-banner";
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -101,10 +103,11 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     {
       label: "Team & Governance",
       items: [
-        { label: "Team",         href: `${base}/team`,     icon: Users     },
-        { label: "Audit",        href: `${base}/audit`,    icon: ShieldCheck },
-        { label: "Backups",      href: `${base}/backups`,  icon: Archive   },
-        { label: "Settings",     href: `${base}/settings`, icon: Settings  },
+        { label: "Team",       href: `${base}/team`,       icon: Users      },
+        { label: "Audit",      href: `${base}/audit`,      icon: ShieldCheck },
+        { label: "Backups",    href: `${base}/backups`,    icon: Archive    },
+        { label: "Operations", href: `${base}/operations`, icon: ListChecks },
+        { label: "Settings",   href: `${base}/settings`,   icon: Settings   },
       ],
     },
   ];
@@ -114,7 +117,8 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
   const activeInMore = allSecondary.find((t) => pathname === t.href);
 
   return (
-    <div className="border-b bg-background">
+    <div>
+      <div className="border-b bg-background">
       <nav className="flex items-center gap-0 px-4 sm:px-6">
         {/* ── Primary tabs ── */}
         <div className="flex overflow-x-auto min-w-0 flex-1" style={{ scrollbarWidth: "none" }}>
@@ -205,6 +209,8 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
           </DropdownMenu>
         </div>
       </nav>
+      </div>
+      <ProjectOperationBanner projectId={projectId} />
     </div>
   );
 }

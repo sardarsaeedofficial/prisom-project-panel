@@ -27,6 +27,12 @@ import {
   readBackupManifest,
 } from "@/lib/backups/project-backup-restore";
 import type { ProjectBackupDTO } from "@/lib/backups/project-backup-types";
+import {
+  startProjectOperation,
+  completeProjectOperation,
+  failProjectOperation,
+  OperationConflictError,
+} from "@/lib/operations/project-operation-service";
 
 // ── Shared result type ────────────────────────────────────────────────────────
 
@@ -118,6 +124,20 @@ export async function createProjectBackupAction(
   const meta = await getProjectMeta(projectId);
   if (!meta) return { ok: false, error: "Project not found." };
 
+  // Sprint 27: operation lock
+  let operationId: string | null = null;
+  try {
+    operationId = await startProjectOperation({
+      projectId,
+      operationType:    "backup_create",
+      title:            `Create backup${label ? `: ${label}` : ""}`,
+      initiatedByUserId: auth.userId,
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) return { ok: false, error: err.message };
+    return { ok: false, error: "Could not verify operation state. Please try again." };
+  }
+
   const result = await createProjectBackup({
     projectId,
     projectSlug: meta.slug,
@@ -145,6 +165,12 @@ export async function createProjectBackupAction(
       ? { backupRef: result.backupRef, fileCount: result.fileCount }
       : { error: result.error },
   }).catch(() => null);
+
+  // Sprint 27: release lock
+  if (operationId) {
+    if (result.ok) await completeProjectOperation(operationId);
+    else await failProjectOperation(operationId, result.error ?? "Backup failed");
+  }
 
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -266,6 +292,21 @@ export async function restoreProjectBackupAction(
   });
   if (!backup) return { ok: false, error: "Backup not found." };
 
+  // Sprint 27: operation lock — restore blocks everything
+  let restoreOpId: string | null = null;
+  try {
+    restoreOpId = await startProjectOperation({
+      projectId,
+      operationType:    "backup_restore",
+      title:            `Restore backup ${backup.backupRef}`,
+      initiatedByUserId: auth.userId,
+      meta:             { backupRef: backup.backupRef },
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) return { ok: false, error: err.message };
+    return { ok: false, error: "Could not verify operation state. Please try again." };
+  }
+
   const result = await restoreProjectBackup({
     backupId,
     projectId,
@@ -292,6 +333,12 @@ export async function restoreProjectBackupAction(
       ? { backupRef: backup.backupRef, preRestoreRef: result.preRestoreBackupRef }
       : { backupRef: backup.backupRef, error: result.error },
   }).catch(() => null);
+
+  // Sprint 27: release lock
+  if (restoreOpId) {
+    if (result.ok) await completeProjectOperation(restoreOpId);
+    else await failProjectOperation(restoreOpId, result.error ?? "Restore failed");
+  }
 
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -323,6 +370,21 @@ export async function deleteProjectBackupAction(
   });
   if (!backup) return { ok: false, error: "Backup not found." };
 
+  // Sprint 27: operation lock
+  let deleteOpId: string | null = null;
+  try {
+    deleteOpId = await startProjectOperation({
+      projectId,
+      operationType:    "backup_delete",
+      title:            `Delete backup ${backup.backupRef}`,
+      initiatedByUserId: auth.userId,
+      meta:             { backupRef: backup.backupRef },
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) return { ok: false, error: err.message };
+    return { ok: false, error: "Could not verify operation state. Please try again." };
+  }
+
   const result = await deleteProjectBackup(backupId, projectId, meta.slug);
 
   void writeProjectAuditEvent({
@@ -340,6 +402,12 @@ export async function deleteProjectBackupAction(
       : `Delete failed for backup ${backup.backupRef}: ${result.error}`,
     metadata: { backupRef: backup.backupRef, backupType: backup.backupType },
   }).catch(() => null);
+
+  // Sprint 27: release lock
+  if (deleteOpId) {
+    if (result.ok) await completeProjectOperation(deleteOpId);
+    else await failProjectOperation(deleteOpId, result.error ?? "Delete failed");
+  }
 
   if (!result.ok) return { ok: false, error: result.error };
 

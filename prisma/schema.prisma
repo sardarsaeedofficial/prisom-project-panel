@@ -261,6 +261,9 @@ model User {
   // Sprint 18: audit log
   auditedActions      ProjectAuditEvent[] @relation("AuditActor")
   createdBackups      ProjectBackup[]     @relation("BackupCreatedBy")
+
+  // Sprint 27: operation history
+  initiatedOperations ProjectOperation[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,6 +393,9 @@ model Project {
 
   // Sprint 23: multi-service deployments
   services            ProjectService[]
+
+  // Sprint 27: operation locking
+  operations          ProjectOperation[]
 
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
@@ -1379,4 +1385,56 @@ model ProjectService {
 
   @@unique([projectId, slug])
   @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT OPERATION  (Sprint 27: DB-backed operation locking)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Tracks long-running project operations (deploy, backup, restore, patch apply)
+// so that conflicting concurrent operations are blocked.
+//
+// Lifecycle:
+//   created → running (same insert) → success | failed | cancelled | stale
+//
+// Stale detection: a cron/cleanup call marks rows as "stale" when
+//   updatedAt < now - STALE_THRESHOLD (per operationType).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectOperation {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Machine-readable operation type — drives the compatibility matrix
+  operationType String   // "deploy" | "multi_service_deploy" | "backup_create" | "backup_restore" | "backup_delete" | "patch_apply"
+
+  /// Human-readable title shown in the banner and history list
+  title         String
+
+  /// Current status
+  status        String   @default("running")  // "running" | "success" | "failed" | "cancelled" | "stale"
+
+  /// The user who initiated the operation (null for system-initiated)
+  initiatedByUserId String?
+  initiatedBy       User?    @relation(fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+
+  /// Service ID involved (multi-service deploys, single-service ops)
+  serviceId     String?
+
+  /// Operation-specific metadata (no secret values)
+  meta          Json?
+
+  /// Last error message if status is "failed"
+  lastError     String?
+
+  /// Timestamps
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@index([projectId, status])
+  @@index([projectId, operationType, status])
+  @@index([updatedAt])
 }

@@ -34,6 +34,12 @@ import {
   checkServiceHealth,
   type ServiceDeployInput,
 } from "@/lib/projects/multi-service-runner";
+import {
+  startProjectOperation,
+  completeProjectOperation,
+  failProjectOperation,
+  OperationConflictError,
+} from "@/lib/operations/project-operation-service";
 // Re-export pure preset data from a non-"use server" lib (all server action exports must be async)
 export type { ServicePreset } from "@/lib/projects/service-presets";
 
@@ -430,6 +436,21 @@ export async function deployAllServicesAction(
   if (!project) return { ok: false, error: "Project not found." };
   if (services.length === 0) return { ok: false, error: "No enabled services to deploy." };
 
+  // Sprint 27: operation lock
+  let multiDeployOpId: string | null = null;
+  try {
+    multiDeployOpId = await startProjectOperation({
+      projectId,
+      operationType:    "multi_service_deploy",
+      title:            `Deploy ${services.length} service${services.length !== 1 ? "s" : ""} for ${project.name}`,
+      initiatedByUserId: auth.userId,
+      meta:             { serviceCount: services.length, services: services.map((s) => s.slug) },
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) return { ok: false, error: err.message };
+    return { ok: false, error: "Could not verify operation state. Please try again." };
+  }
+
   // Decrypt env vars server-side — NEVER log or return values
   const envVars: Record<string, string> = {};
   for (const row of envRows) {
@@ -506,6 +527,12 @@ export async function deployAllServicesAction(
     },
     ...ctx,
   }).catch(() => null);
+
+  // Sprint 27: release lock
+  if (multiDeployOpId) {
+    if (result.ok) await completeProjectOperation(multiDeployOpId);
+    else await failProjectOperation(multiDeployOpId, `Multi-service deploy failed after ${result.totalDurationMs}ms`);
+  }
 
   return {
     ok: true,

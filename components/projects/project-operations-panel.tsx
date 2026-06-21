@@ -1,0 +1,314 @@
+"use client";
+
+/**
+ * components/projects/project-operations-panel.tsx
+ *
+ * Sprint 27: Operation history panel with filters and pagination.
+ * Used by the /operations page.
+ */
+
+import { useState, useTransition, useCallback } from "react";
+import {
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertCircle,
+  Ban,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+} from "lucide-react";
+import { Button }   from "@/components/ui/button";
+import { Badge }    from "@/components/ui/badge";
+import { listOperationHistoryAction, clearStaleOperationsAction } from "@/app/actions/project-operations";
+import type {
+  ProjectOperationDTO,
+  OperationStatus,
+  OperationType,
+}                   from "@/lib/operations/project-operation-types";
+import {
+  OPERATION_TYPE_LABELS,
+  OPERATION_STATUS_LABELS,
+  OPERATION_TYPES,
+}                   from "@/lib/operations/project-operation-types";
+import { cn }       from "@/lib/utils";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDuration(start: string, end: string | null): string {
+  const startMs = new Date(start).getTime();
+  const endMs   = end ? new Date(end).getTime() : Date.now();
+  const ms      = endMs - startMs;
+  const s       = Math.floor(ms / 1000);
+  if (s < 60)  return `${s}s`;
+  const m       = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month:  "short",
+    day:    "numeric",
+    hour:   "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// ── Status badge ─────────────────────────────────────────────────────────────
+
+const STATUS_ICON: Record<OperationStatus, React.ElementType> = {
+  running:   Clock,
+  success:   CheckCircle2,
+  failed:    XCircle,
+  cancelled: Ban,
+  stale:     AlertCircle,
+};
+
+const STATUS_CLASS: Record<OperationStatus, string> = {
+  running:   "text-amber-600 bg-amber-50  border-amber-200",
+  success:   "text-green-600  bg-green-50   border-green-200",
+  failed:    "text-red-600    bg-red-50     border-red-200",
+  cancelled: "text-gray-500   bg-gray-50    border-gray-200",
+  stale:     "text-orange-600 bg-orange-50  border-orange-200",
+};
+
+function StatusBadge({ status }: { status: OperationStatus }) {
+  const Icon  = STATUS_ICON[status]  ?? Clock;
+  const cls   = STATUS_CLASS[status] ?? "";
+  const label = OPERATION_STATUS_LABELS[status] ?? status;
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium", cls)}>
+      <Icon className="h-3 w-3" />
+      {label}
+    </span>
+  );
+}
+
+// ── Operation row ─────────────────────────────────────────────────────────────
+
+function OperationRow({ op }: { op: ProjectOperationDTO }) {
+  const typeLabel = OPERATION_TYPE_LABELS[op.operationType] ?? op.operationType;
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
+      {/* Status */}
+      <div className="shrink-0 pt-0.5">
+        <StatusBadge status={op.status} />
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{op.title}</p>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          <span>{typeLabel}</span>
+          {op.initiatedByName && <span>by {op.initiatedByName}</span>}
+          <span>started {formatDate(op.startedAt)}</span>
+          <span>duration {formatDuration(op.startedAt, op.completedAt)}</span>
+        </div>
+        {op.lastError && (
+          <p className="mt-1 text-xs text-red-600 line-clamp-2">{op.lastError}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main panel ────────────────────────────────────────────────────────────────
+
+type PanelState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "loaded"; ops: ProjectOperationDTO[]; total: number; page: number; pageSize: number; totalPages: number }
+  | { phase: "error"; error: string };
+
+export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
+  const [statusFilter, setStatusFilter] = useState<OperationStatus | "all">("all");
+  const [typeFilter,   setTypeFilter]   = useState<OperationType   | "all">("all");
+  const [page, setPage]                 = useState(1);
+  const [panelState, setPanelState]     = useState<PanelState>({ phase: "idle" });
+  const [isPending, startTransition]    = useTransition();
+
+  const load = useCallback(
+    (p: number, sf: OperationStatus | "all", tf: OperationType | "all") => {
+      setPanelState({ phase: "loading" });
+      startTransition(async () => {
+        const r = await listOperationHistoryAction({
+          projectId,
+          page:         p,
+          pageSize:     20,
+          statusFilter: sf,
+          typeFilter:   tf,
+        });
+        if (!r.ok) {
+          setPanelState({ phase: "error", error: r.error });
+          return;
+        }
+        setPanelState({
+          phase:      "loaded",
+          ops:        r.data.operations,
+          total:      r.data.total,
+          page:       r.data.page,
+          pageSize:   r.data.pageSize,
+          totalPages: r.data.totalPages,
+        });
+      });
+    },
+    [projectId],
+  );
+
+  // Initial load on mount
+  const [loaded, setLoaded] = useState(false);
+  if (!loaded) {
+    setLoaded(true);
+    load(1, "all", "all");
+  }
+
+  function applyFilters(sf: OperationStatus | "all", tf: OperationType | "all") {
+    setPage(1);
+    load(1, sf, tf);
+  }
+
+  function goToPage(p: number) {
+    setPage(p);
+    load(p, statusFilter, typeFilter);
+  }
+
+  const [clearing, startClearTransition] = useTransition();
+  function handleClearStale() {
+    startClearTransition(async () => {
+      await clearStaleOperationsAction(projectId);
+      load(page, statusFilter, typeFilter);
+    });
+  }
+
+  const isLoading = panelState.phase === "loading" || isPending;
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Filter className="h-4 w-4 text-muted-foreground shrink-0" />
+
+        {/* Status filter */}
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            const sf = e.target.value as OperationStatus | "all";
+            setStatusFilter(sf);
+            applyFilters(sf, typeFilter);
+          }}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="running">Running</option>
+          <option value="success">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="stale">Stale</option>
+        </select>
+
+        {/* Type filter */}
+        <select
+          value={typeFilter}
+          onChange={(e) => {
+            const tf = e.target.value as OperationType | "all";
+            setTypeFilter(tf);
+            applyFilters(statusFilter, tf);
+          }}
+          className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All types</option>
+          {OPERATION_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {OPERATION_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
+
+        <div className="flex gap-2 ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleClearStale}
+            disabled={clearing || isLoading}
+            className="h-8 text-xs"
+          >
+            {clearing ? <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" /> : null}
+            Clear stale
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => load(page, statusFilter, typeFilter)}
+            disabled={isLoading}
+            className="h-8 text-xs"
+          >
+            <RefreshCw className={cn("h-3 w-3 mr-1.5", isLoading && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Content */}
+      {panelState.phase === "error" && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {panelState.error}
+        </div>
+      )}
+
+      {(panelState.phase === "loading" || panelState.phase === "idle") && (
+        <div className="py-12 text-center text-sm text-muted-foreground">
+          <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2 text-muted-foreground/50" />
+          Loading operations…
+        </div>
+      )}
+
+      {panelState.phase === "loaded" && (
+        <>
+          {panelState.ops.length === 0 ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              No operations found for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {panelState.ops.map((op) => (
+                <OperationRow key={op.id} op={op} />
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {panelState.totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-muted-foreground">
+                {panelState.total} total · page {panelState.page} of {panelState.totalPages}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={panelState.page <= 1 || isLoading}
+                  onClick={() => goToPage(panelState.page - 1)}
+                  className="h-7 w-7 p-0"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={panelState.page >= panelState.totalPages || isLoading}
+                  onClick={() => goToPage(panelState.page + 1)}
+                  className="h-7 w-7 p-0"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

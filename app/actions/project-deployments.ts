@@ -44,6 +44,12 @@ import {
   getDecryptedEnvVarsForDeploy,
   checkRequiredProjectSecretsAction,
 } from "@/app/actions/project-envvars";
+import {
+  startProjectOperation,
+  completeProjectOperation,
+  failProjectOperation,
+  OperationConflictError,
+} from "@/lib/operations/project-operation-service";
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
@@ -293,6 +299,22 @@ export async function deployProjectAction(
     };
   }
 
+  // Sprint 27: operation lock — blocks conflicting ops (restore, patch apply)
+  let operationId: string | null = null;
+  try {
+    operationId = await startProjectOperation({
+      projectId,
+      operationType:    "deploy",
+      title:            `Deploy ${project.slug}`,
+      initiatedByUserId: project._userId,
+    });
+  } catch (err) {
+    if (err instanceof OperationConflictError) {
+      return { ok: false, output: "", error: err.message };
+    }
+    return { ok: false, output: "", error: "Could not verify operation state. Please try again." };
+  }
+
   // Create a BUILDING record so the UI reflects in-progress state
   const deployment = await db.deployment.create({
     data: {
@@ -483,6 +505,15 @@ export async function deployProjectAction(
     },
     ...auditCtx,
   });
+
+  // Sprint 27: release operation lock
+  if (operationId) {
+    if (result.ok) {
+      await completeProjectOperation(operationId);
+    } else {
+      await failProjectOperation(operationId, result.error ?? "Deploy failed");
+    }
+  }
 
   return {
     ok:           result.ok,
