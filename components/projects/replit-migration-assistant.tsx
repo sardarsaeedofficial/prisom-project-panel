@@ -41,6 +41,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Rocket,
   Server,
   Shield,
   Sparkles,
@@ -251,13 +252,17 @@ function StepNav({ current, onGo, report }: {
   onGo: (step: StepId) => void;
   report: ReplitMigrationReport | null;
 }) {
-  const idx = STEPS.findIndex((s) => s.id === current);
+  const idx          = STEPS.findIndex((s) => s.id === current);
+  const wizardSteps  = STEPS.filter((s) => s.id !== "golive");
+  const goLiveActive = current === "golive";
+
   return (
     <div className="flex items-center gap-1 flex-wrap">
-      {STEPS.map((step, i) => {
-        const done    = report && i < idx;
-        const active  = step.id === current;
-        const locked  = step.requiresReport && !report;
+      {/* ── Wizard steps 1–8 ── */}
+      {wizardSteps.map((step, i) => {
+        const done   = report && i < idx;
+        const active = step.id === current;
+        const locked = step.requiresReport && !report;
         return (
           <button
             key={step.id}
@@ -276,6 +281,23 @@ function StepNav({ current, onGo, report }: {
           </button>
         );
       })}
+
+      {/* ── Divider ── */}
+      <span className="mx-1 text-muted-foreground/25 select-none">|</span>
+
+      {/* ── Go Live — always unlocked, distinct emerald style ── */}
+      <button
+        onClick={() => onGo("golive")}
+        className={[
+          "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
+          goLiveActive
+            ? "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500 dark:border-emerald-500"
+            : "border-emerald-400 text-emerald-700 dark:border-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30",
+        ].join(" ")}
+      >
+        <Rocket className="h-3 w-3" />
+        Go Live
+      </button>
     </div>
   );
 }
@@ -847,6 +869,33 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
     <div className="space-y-4">
       {/* Step nav */}
       <StepNav current={step} onGo={setStep} report={report} />
+
+      {/* ── Go-Live entry card — shown on the landing (analyze) step ── */}
+      {step === "analyze" && (
+        <Card className="border-emerald-200 dark:border-emerald-800 bg-gradient-to-r from-emerald-50/60 to-transparent dark:from-emerald-950/20 dark:to-transparent">
+          <CardContent className="flex items-center justify-between gap-4 py-4 px-5">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-full bg-emerald-100 dark:bg-emerald-950/50 flex items-center justify-center shrink-0">
+                <Rocket className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">Go-Live Readiness</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  Check whether this project is ready to publish on Prisom.
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 border-emerald-400 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-600 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+              onClick={() => setStep("golive")}
+            >
+              Open checklist →
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main card */}
       <Card>
