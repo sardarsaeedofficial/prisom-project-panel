@@ -38,6 +38,7 @@ import {
   MoreHorizontal,
   LayoutDashboard,
   Archive,
+  ArrowRightLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -80,10 +81,11 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     {
       label: "Development",
       items: [
-        { label: "Terminal",     href: `${base}/terminal`, icon: Terminal  },
-        { label: "GitHub",       href: `${base}/github`,   icon: Github    },
-        { label: "Packages",     href: `${base}/packages`, icon: Package2  },
-        { label: "AI Assistant", href: `${base}/ai`,       icon: Bot       },
+        { label: "Terminal",     href: `${base}/terminal`,  icon: Terminal       },
+        { label: "GitHub",       href: `${base}/github`,    icon: Github         },
+        { label: "Packages",     href: `${base}/packages`,  icon: Package2       },
+        { label: "AI Assistant", href: `${base}/ai`,        icon: Bot            },
+        { label: "Migration",    href: `${base}/migration`, icon: ArrowRightLeft },
       ],
     },
     {
