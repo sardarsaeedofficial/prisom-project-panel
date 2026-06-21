@@ -70,18 +70,20 @@ import type {
   DetectedSecret,
 } from "@/lib/migration/replit-detection-types";
 import { PortabilityPatchPanel } from "@/components/projects/portability-patch-panel";
+import { ReplitGoLivePanel }     from "@/components/projects/replit-go-live-panel";
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "analyze",    label: "Analyze"     },
-  { id: "detection",  label: "Detection"   },
-  { id: "fixes",      label: "Fix Issues"  },
-  { id: "services",   label: "Services"    },
-  { id: "secrets",    label: "Secrets"     },
-  { id: "database",   label: "Database"    },
-  { id: "media",      label: "Media"       },
-  { id: "checklist",  label: "Checklist"   },
+  { id: "analyze",    label: "Analyze",     requiresReport: false },
+  { id: "detection",  label: "Detection",   requiresReport: true  },
+  { id: "fixes",      label: "Fix Issues",  requiresReport: true  },
+  { id: "services",   label: "Services",    requiresReport: true  },
+  { id: "secrets",    label: "Secrets",     requiresReport: true  },
+  { id: "database",   label: "Database",    requiresReport: true  },
+  { id: "media",      label: "Media",       requiresReport: true  },
+  { id: "checklist",  label: "Checklist",   requiresReport: true  },
+  { id: "golive",     label: "Go Live",     requiresReport: false },
 ] as const;
 
 type StepId = (typeof STEPS)[number]["id"];
@@ -255,7 +257,7 @@ function StepNav({ current, onGo, report }: {
       {STEPS.map((step, i) => {
         const done    = report && i < idx;
         const active  = step.id === current;
-        const locked  = !report && i > 0;
+        const locked  = step.requiresReport && !report;
         return (
           <button
             key={step.id}
@@ -794,7 +796,7 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
           })}
         </div>
 
-        <div className="flex gap-2 pt-2">
+        <div className="flex gap-2 pt-2 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -806,6 +808,9 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
               : <><ClipboardCopy className="h-3.5 w-3.5 mr-1.5" />Copy migration report</>
             }
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setStep("golive")}>
+            <Zap className="h-3.5 w-3.5 mr-1.5" />Go-Live Readiness →
+          </Button>
           <a href={`/projects/${projectId}/publishing`} className="flex-1">
             <Button className="w-full">
               <Zap className="h-4 w-4 mr-2" />Go to Publishing
@@ -815,6 +820,10 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
         <p className="text-xs text-muted-foreground">Checklist is browser-only and resets on refresh. The copied report contains no secret values.</p>
       </div>
     );
+  }
+
+  function renderGoLive() {
+    return <ReplitGoLivePanel projectId={projectId} />;
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -829,6 +838,7 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
       case "database":  return renderDatabase();
       case "media":     return renderMedia();
       case "checklist": return renderChecklist();
+      case "golive":    return renderGoLive();
       default:          return null;
     }
   }
