@@ -388,6 +388,9 @@ model Project {
   // Sprint 21: backups
   backups             ProjectBackup[]
 
+  // Sprint 23: multi-service deployments
+  services            ProjectService[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1310,4 +1313,70 @@ model ProjectBackup {
   @@index([projectId])
   @@index([projectId, status])
   @@index([projectId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT SERVICE  (Sprint 23: multi-service / monorepo deployment config)
+//
+// One project may have zero or many ProjectService records.
+//   - Zero records  → use existing single-service ProjectDeploymentConfig path
+//   - One+ records  → use multi-service deployment runner
+//
+// Service types:
+//   node   → PM2-managed Node.js process (API, SSR, worker)
+//   static → Static files built and served by nginx (React/Vite SPA etc.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectService {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Human-readable display name (e.g. "API Server", "Web Frontend")
+  name        String
+  /// URL-safe slug used in PM2 names and paths (e.g. "api", "web")
+  slug        String
+  /// "node" | "static"
+  serviceType String
+
+  /// Working directory relative to the release root (default ".")
+  workingDir String @default(".")
+  /// "pnpm" | "npm" | "yarn"
+  packageManager String?
+  installCommand String?
+  buildCommand   String?
+  /// Node services only: command to start the process
+  startCommand String?
+
+  /// Node services: which port this process listens on (4100–4999 range)
+  internalPort Int?
+  /// Node services: health check endpoint path (e.g. "/api/healthz")
+  healthPath String?
+
+  /// Static services: relative path from release root to built output (e.g. "dist/public")
+  staticOutputDir String?
+  /// Static services: if true, 404s fall back to index.html for SPA routing
+  spaFallback Boolean @default(false)
+
+  /// Which deployment environment this service belongs to
+  envName String @default("production")
+  /// If true, this is the primary public-facing service (used for /api routing decisions)
+  isPrimary Boolean @default(false)
+  /// If false, this service is excluded from deployments
+  isEnabled Boolean @default(true)
+
+  /// Optional JSON array of required env key names (e.g. ["DATABASE_URL","SESSION_SECRET"])
+  requiredEnvKeysJson String?
+
+  /// Deployment tracking (updated after each multi-service deploy)
+  lastDeploymentRef String?
+  lastStatus        String?    // "success" | "failed" | "building" | null
+  lastError         String?
+  lastDeployedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, slug])
+  @@index([projectId])
 }

@@ -153,7 +153,7 @@ export async function createProjectBackup(
   }
 
   // ── 5. Collect project config data ────────────────────────────────────────
-  const [deployConfig, alertRules, alertSettings, envVars] = await Promise.all([
+  const [deployConfig, alertRules, alertSettings, envVars, services] = await Promise.all([
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
     db.projectAlertRule.findMany({ where: { projectId }, select: {
       id: true, name: true, type: true, severity: true, enabled: true, config: true,
@@ -166,6 +166,14 @@ export async function createProjectBackup(
     includeEnvKeys
       ? db.projectEnvVar.findMany({ where: { projectId }, select: { name: true } })
       : Promise.resolve([]),
+    // Sprint 23: include service config (no secrets, no values)
+    db.projectService.findMany({ where: { projectId }, select: {
+      id: true, name: true, slug: true, serviceType: true, workingDir: true,
+      packageManager: true, installCommand: true, buildCommand: true, startCommand: true,
+      internalPort: true, healthPath: true, staticOutputDir: true, spaFallback: true,
+      envName: true, isPrimary: true, isEnabled: true, requiredEnvKeysJson: true,
+      // lastError intentionally excluded — may contain runtime details
+    }}),
   ]);
 
   // ── 6. Build config JSON (no secrets) ────────────────────────────────────
@@ -198,6 +206,29 @@ export async function createProjectBackup(
     configData.envVarKeys = envVars.map((v) => ({
       key: v.name,
       value: "[REDACTED]",
+    }));
+  }
+
+  // Sprint 23: include service configs (no runtime secrets, no values)
+  if (services.length > 0) {
+    configData.services = services.map((s) => ({
+      id:              s.id,
+      name:            s.name,
+      slug:            s.slug,
+      serviceType:     s.serviceType,
+      workingDir:      s.workingDir,
+      packageManager:  s.packageManager,
+      installCommand:  s.installCommand,
+      buildCommand:    s.buildCommand,
+      startCommand:    s.startCommand,
+      internalPort:    s.internalPort,
+      healthPath:      s.healthPath,
+      staticOutputDir: s.staticOutputDir,
+      spaFallback:     s.spaFallback,
+      envName:         s.envName,
+      isPrimary:       s.isPrimary,
+      isEnabled:       s.isEnabled,
+      requiredEnvKeys: (() => { try { return s.requiredEnvKeysJson ? JSON.parse(s.requiredEnvKeysJson) : []; } catch { return []; } })(),
     }));
   }
 

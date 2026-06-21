@@ -33,6 +33,8 @@ import { LiveEndpointsCard }     from "@/components/projects/live-endpoints-card
 import { ReadinessPanel }        from "@/components/projects/readiness-panel";
 import { DeploymentConfigPanel } from "@/components/projects/deployment-config-panel";
 import { DeploymentHistoryPanel } from "@/components/projects/deployment-history-panel";
+import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
+import { ReplitImportChecklist } from "@/components/projects/replit-import-checklist";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -109,7 +111,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, dbDeployConfig, allDomains] = await Promise.all([
+  const [deployments, dbDeployConfig, allDomains, serviceCount] = await Promise.all([
     getProjectDeployments(projectId),
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
     db.domain.findMany({
@@ -117,7 +119,12 @@ export default async function ProjectPublishingPage({ params }: Props) {
       select:  { hostname: true, isPrimary: true, status: true, sslStatus: true },
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     }),
+    // Sprint 23: detect multi-service mode
+    db.projectService.count({ where: { projectId } }),
   ]);
+
+  // A project is in multi-service mode if it has any ProjectService rows
+  const isMultiService = serviceCount > 0;
 
   // First active domain (highest priority) — still used for the legacy deploy panel prop
   const activeDomainRow =
@@ -300,6 +307,39 @@ export default async function ProjectPublishingPage({ params }: Props) {
               </CardContent>
             </Card>
           )}
+
+          {/* ── Sprint 23: Multi-service mode ── */}
+          {isMultiService && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Services</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ProjectServicesPanel projectId={projectId} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Sprint 23: Add-services section for projects without services yet ──
+               Only shown when there is a DB deploy config (PM2 project) and
+               no services have been configured — acts as a prompt to upgrade. ── */}
+          {!hasDeployConfig && dbDeployConfig && !isMultiService && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Multi-service deployments</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <p className="text-sm text-muted-foreground mb-3">
+                  Add services to deploy multiple processes (e.g. API + frontend) from this project.
+                  Single-service deployments above continue to work as before.
+                </p>
+                <ProjectServicesPanel projectId={projectId} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Sprint 23: Replit import checklist (collapsible, dismissable) ── */}
+          <ReplitImportChecklist defaultCollapsed />
 
           {/* ── Deployment History (Sprint 13) ──
                Single history section with rollback, filters, and pagination.
