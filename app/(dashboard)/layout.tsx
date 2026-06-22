@@ -1,9 +1,13 @@
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
-import { Sidebar } from "@/components/layout/sidebar";
-import { TopBar } from "@/components/layout/topbar";
-import { db } from "@/lib/db";
-import { isAdminRole } from "@/lib/auth/require-admin";
+import { redirect }          from "next/navigation";
+import { getSession }         from "@/lib/session";
+import { Sidebar }            from "@/components/layout/sidebar";
+import { TopBar }             from "@/components/layout/topbar";
+import { getCurrentUser }     from "@/lib/current-workspace";
+import { isAdminRole }        from "@/lib/auth/require-admin";
+
+// Force dynamic so the session cookie is read — and the sidebar Admin link
+// appears — on every request rather than being frozen in a cached render.
+export const dynamic = "force-dynamic";
 
 export default async function DashboardLayout({
   children,
@@ -13,20 +17,17 @@ export default async function DashboardLayout({
   const session = await getSession();
 
   if (!session) {
-    // Middleware handles this redirect in most cases; this is a belt-and-braces check
     redirect("/login");
   }
 
-  // Resolve user role for sidebar admin visibility
+  // Use the same getCurrentUser() path as requireAdmin() so both the sidebar
+  // and /admin page agree on who is logged in.
   let isAdmin = false;
   try {
-    const user = await db.user.findFirst({
-      where: { email: { equals: session.email, mode: "insensitive" } },
-      select: { role: true },
-    });
-    isAdmin = isAdminRole(user?.role ?? null);
+    const user = await getCurrentUser();
+    isAdmin = isAdminRole(user.role);
   } catch {
-    // Non-fatal — sidebar Admin link simply won't show
+    // Non-fatal — sidebar Admin link won't show
   }
 
   return (
