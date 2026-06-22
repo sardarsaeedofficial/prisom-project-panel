@@ -411,6 +411,9 @@ model Project {
   // Sprint 30: scheduled backups
   backupSchedule      ProjectBackupSchedule?
 
+  // Sprint 34: storage policy
+  storagePolicy       ProjectStoragePolicy?
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1494,6 +1497,36 @@ model ProjectBackupSchedule {
   updatedAt DateTime @updatedAt
 
   @@index([enabled, nextRunAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT STORAGE POLICY  (Sprint 34: storage quotas + cleanup configuration)
+//
+// One optional row per project.  When absent, code falls back to safe defaults.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectStoragePolicy {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Maximum total storage allowed for this project (null = unlimited)
+  maxStorageBytes      BigInt?
+
+  /// How many successful release directories to keep; older are cleanup-eligible
+  keepSuccessfulReleases Int @default(5)
+
+  /// How many failed release directories to keep
+  keepFailedReleases Int @default(2)
+
+  /// How many scheduled backups to keep; older ones are cleanup-eligible
+  keepScheduledBackups Int @default(7)
+
+  /// If true, cleanup runs automatically based on retention policy
+  autoCleanupEnabled Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

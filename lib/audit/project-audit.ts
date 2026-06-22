@@ -48,6 +48,7 @@ export type ProjectAuditCategory =
   | "monitoring"
   | "alerts"
   | "backups"
+  | "storage"
   | "settings"
   | "system";
 
@@ -143,7 +144,8 @@ export type ListAuditEventsOutput = {
 const VALID_CATEGORIES: ProjectAuditCategory[] = [
   "auth", "team", "permissions", "files", "terminal", "git",
   "packages", "ai", "preview", "publishing", "rollback", "domains",
-  "env", "database", "logs", "monitoring", "alerts", "settings", "system",
+  "env", "database", "logs", "monitoring", "alerts", "backups",
+  "storage", "settings", "system",
 ];
 
 const VALID_RESULTS: ProjectAuditResult[] = [

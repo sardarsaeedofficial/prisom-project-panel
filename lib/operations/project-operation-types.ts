@@ -13,7 +13,8 @@ export type OperationType =
   | "backup_create"
   | "backup_restore"
   | "backup_delete"
-  | "patch_apply";
+  | "patch_apply"
+  | "storage_cleanup";
 
 export const OPERATION_TYPES: OperationType[] = [
   "deploy",
@@ -22,6 +23,7 @@ export const OPERATION_TYPES: OperationType[] = [
   "backup_restore",
   "backup_delete",
   "patch_apply",
+  "storage_cleanup",
 ];
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -61,6 +63,7 @@ export const OPERATION_TYPE_LABELS: Record<OperationType, string> = {
   backup_restore:       "Restore backup",
   backup_delete:        "Delete backup",
   patch_apply:          "Apply patch",
+  storage_cleanup:      "Storage cleanup",
 };
 
 export const OPERATION_STATUS_LABELS: Record<OperationStatus, string> = {

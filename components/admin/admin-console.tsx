@@ -27,6 +27,7 @@ import {
   getAdminPm2SectionAction,
   getAdminDiskSectionAction,
   getAdminSchedulersSectionAction,
+  getAdminStorageSectionAction,
   refreshAllAdminSectionsAction,
 }                                                from "@/app/actions/admin-health";
 import type {
@@ -34,6 +35,7 @@ import type {
   AdminPm2Section,
   AdminDiskSection,
   AdminSchedulersSection,
+  AdminStorageSection,
   AdminSystemWarning,
   AdminPm2Process,
   AdminCacheStatus,
@@ -455,9 +457,10 @@ export function AdminConsole({
   actorRole?:         string;
 }) {
   const [fastSummary, setFastSummary] = useState<AdminFastSummary | null>(initialFastSummary);
-  const [pm2,  setPm2]  = useState<SectionState<AdminPm2Section>>(initialSection);
-  const [disk, setDisk] = useState<SectionState<AdminDiskSection>>(initialSection);
-  const [sch,  setSch]  = useState<SectionState<AdminSchedulersSection>>(initialSection);
+  const [pm2,     setPm2]     = useState<SectionState<AdminPm2Section>>(initialSection);
+  const [disk,    setDisk]    = useState<SectionState<AdminDiskSection>>(initialSection);
+  const [sch,     setSch]     = useState<SectionState<AdminSchedulersSection>>(initialSection);
+  const [storage, setStorage] = useState<SectionState<AdminStorageSection>>(initialSection);
   const [refreshing, setRefreshing] = useState(false);
 
   // ── Section loaders ─────────────────────────────────────────────────────────
@@ -492,34 +495,49 @@ export function AdminConsole({
       .catch(() => setSch({ data: null, loading: false, error: "Failed to load scheduler status" }));
   }, []);
 
+  const loadStorage = useCallback((force = false) => {
+    setStorage((s) => ({ ...s, loading: true }));
+    getAdminStorageSectionAction(force)
+      .then((res) => {
+        if (res.ok) setStorage({ data: res.data, loading: false, error: null });
+        else        setStorage({ data: null,      loading: false, error: res.error });
+      })
+      .catch(() => setStorage({ data: null, loading: false, error: "Failed to load storage summary" }));
+  }, []);
+
   // Load slow sections after mount
   useEffect(() => {
     loadPm2();
     loadDisk();
     loadSchedulers();
-  }, [loadPm2, loadDisk, loadSchedulers]);
+    loadStorage();
+  }, [loadPm2, loadDisk, loadSchedulers, loadStorage]);
 
   // ── Global refresh ──────────────────────────────────────────────────────────
 
   async function handleRefreshAll() {
     setRefreshing(true);
-    setPm2((s)  => ({ ...s, loading: true }));
-    setDisk((s) => ({ ...s, loading: true }));
-    setSch((s)  => ({ ...s, loading: true }));
+    setPm2((s)     => ({ ...s, loading: true }));
+    setDisk((s)    => ({ ...s, loading: true }));
+    setSch((s)     => ({ ...s, loading: true }));
+    setStorage((s) => ({ ...s, loading: true }));
 
     try {
       const results = await refreshAllAdminSectionsAction();
       if (results.fast.ok)        setFastSummary(results.fast.summary);
-      if (results.pm2.ok)         setPm2({ data: results.pm2.data,        loading: false, error: null });
-      else                        setPm2({ data: null,                     loading: false, error: results.pm2.error });
-      if (results.disk.ok)        setDisk({ data: results.disk.data,       loading: false, error: null });
-      else                        setDisk({ data: null,                    loading: false, error: results.disk.error });
-      if (results.schedulers.ok)  setSch({ data: results.schedulers.data, loading: false, error: null });
-      else                        setSch({ data: null,                    loading: false, error: results.schedulers.error });
+      if (results.pm2.ok)         setPm2({ data: results.pm2.data,           loading: false, error: null });
+      else                        setPm2({ data: null,                        loading: false, error: results.pm2.error });
+      if (results.disk.ok)        setDisk({ data: results.disk.data,          loading: false, error: null });
+      else                        setDisk({ data: null,                       loading: false, error: results.disk.error });
+      if (results.schedulers.ok)  setSch({ data: results.schedulers.data,    loading: false, error: null });
+      else                        setSch({ data: null,                        loading: false, error: results.schedulers.error });
+      if (results.storage.ok)     setStorage({ data: results.storage.data,   loading: false, error: null });
+      else                        setStorage({ data: null,                    loading: false, error: results.storage.error });
     } catch {
-      setPm2((s)  => ({ ...s, loading: false }));
-      setDisk((s) => ({ ...s, loading: false }));
-      setSch((s)  => ({ ...s, loading: false }));
+      setPm2((s)     => ({ ...s, loading: false }));
+      setDisk((s)    => ({ ...s, loading: false }));
+      setSch((s)     => ({ ...s, loading: false }));
+      setStorage((s) => ({ ...s, loading: false }));
     } finally {
       setRefreshing(false);
     }
@@ -822,6 +840,58 @@ export function AdminConsole({
               </div>
             </section>
           </div>
+
+          {/* Storage section (async) */}
+          {storage.loading ? (
+            <SectionSkeleton />
+          ) : storage.error ? (
+            <div className="rounded-lg border bg-card p-4">
+              <SectionHeader
+                icon={HardDrive}
+                title="Backup Storage"
+                onRefresh={() => loadStorage(true)}
+                loading={false}
+              />
+              <p className="text-sm text-red-500">{storage.error}</p>
+            </div>
+          ) : storage.data ? (
+            <section className="rounded-lg border bg-card p-4 space-y-3">
+              <SectionHeader
+                icon={HardDrive}
+                title="Backup Storage"
+                generatedAt={storage.data.generatedAt}
+                cacheStatus={storage.data.cacheStatus}
+                onRefresh={() => loadStorage(true)}
+                loading={storage.loading}
+              />
+              <div className="flex items-center justify-between text-sm border-b pb-2">
+                <span className="text-muted-foreground">Total backup bytes</span>
+                <span className="font-semibold">{fmtBytes(storage.data.totalBackupBytes)}</span>
+              </div>
+              {storage.data.projectsOverRetention > 0 && (
+                <p className="text-xs text-amber-600">
+                  {storage.data.projectsOverRetention} project(s) have backups exceeding retention limits.
+                </p>
+              )}
+              {storage.data.topProjects.length > 0 && (
+                <div className="divide-y text-xs">
+                  {storage.data.topProjects.slice(0, 5).map((p) => (
+                    <div key={p.projectId} className="flex items-center justify-between py-1.5 gap-2">
+                      <Link
+                        href={`/projects/${p.projectId}/storage`}
+                        className="font-medium hover:underline truncate"
+                      >
+                        {p.projectName}
+                      </Link>
+                      <span className="shrink-0 text-muted-foreground">
+                        {p.backupCount} backup(s) · {fmtBytes(p.totalBackupBytes)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
 
           {/* Failed deployments (fast) */}
           {f.deployments.latestFailures.length > 0 && (

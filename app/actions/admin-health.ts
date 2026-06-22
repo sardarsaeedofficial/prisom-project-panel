@@ -18,12 +18,14 @@ import {
   runAdminDiskSection,
   runAdminSchedulersSection,
 }                                    from "@/lib/admin/admin-health-runner";
+import { runAdminStorageSection }    from "@/lib/admin/admin-storage-summary";
 import type {
   GetAdminHealthResult,
   GetFastSummaryResult,
   GetPm2SectionResult,
   GetDiskSectionResult,
   GetSchedulersSectionResult,
+  GetStorageSectionResult,
 }                                    from "@/lib/admin/admin-health-types";
 
 // ── Sprint 31 — full report (still used by manual Refresh when no fast split) ──
@@ -99,6 +101,21 @@ export async function getAdminSchedulersSectionAction(
   }
 }
 
+// ── Sprint 34 — admin storage section ────────────────────────────────────────
+
+export async function getAdminStorageSectionAction(
+  forceRefresh = false,
+): Promise<GetStorageSectionResult> {
+  try {
+    await requireAdmin();
+    const data = await runAdminStorageSection(forceRefresh);
+    return { ok: true, data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to load storage summary";
+    return { ok: false, error: msg };
+  }
+}
+
 // ── Sprint 33 — full async refresh (all sections, force = true) ───────────────
 
 export async function refreshAllAdminSectionsAction(): Promise<{
@@ -106,17 +123,20 @@ export async function refreshAllAdminSectionsAction(): Promise<{
   pm2:        GetPm2SectionResult;
   disk:       GetDiskSectionResult;
   schedulers: GetSchedulersSectionResult;
+  storage:    GetStorageSectionResult;
 }> {
   await requireAdmin();
-  const [fast, pm2, disk, schedulers] = await Promise.all([
-    runAdminFastSummary(true).then((s): GetFastSummaryResult        => ({ ok: true, summary: s }))
-      .catch((e): GetFastSummaryResult        => ({ ok: false, error: String(e) })),
-    runAdminPm2Section(true).then((d): GetPm2SectionResult          => ({ ok: true, data: d }))
-      .catch((e): GetPm2SectionResult          => ({ ok: false, error: String(e) })),
-    runAdminDiskSection(true).then((d): GetDiskSectionResult        => ({ ok: true, data: d }))
-      .catch((e): GetDiskSectionResult        => ({ ok: false, error: String(e) })),
+  const [fast, pm2, disk, schedulers, storage] = await Promise.all([
+    runAdminFastSummary(true).then((s): GetFastSummaryResult             => ({ ok: true, summary: s }))
+      .catch((e): GetFastSummaryResult             => ({ ok: false, error: String(e) })),
+    runAdminPm2Section(true).then((d): GetPm2SectionResult               => ({ ok: true, data: d }))
+      .catch((e): GetPm2SectionResult               => ({ ok: false, error: String(e) })),
+    runAdminDiskSection(true).then((d): GetDiskSectionResult             => ({ ok: true, data: d }))
+      .catch((e): GetDiskSectionResult             => ({ ok: false, error: String(e) })),
     runAdminSchedulersSection(true).then((d): GetSchedulersSectionResult => ({ ok: true, data: d }))
-      .catch((e): GetSchedulersSectionResult => ({ ok: false, error: String(e) })),
+      .catch((e): GetSchedulersSectionResult       => ({ ok: false, error: String(e) })),
+    runAdminStorageSection(true).then((d): GetStorageSectionResult       => ({ ok: true, data: d }))
+      .catch((e): GetStorageSectionResult          => ({ ok: false, error: String(e) })),
   ]);
-  return { fast, pm2, disk, schedulers };
+  return { fast, pm2, disk, schedulers, storage };
 }

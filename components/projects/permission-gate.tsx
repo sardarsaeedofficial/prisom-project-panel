@@ -77,6 +77,8 @@ const ROLE_REQUIRED: Record<ProjectPermission, string> = {
   "secrets.rotate":     "Admin or Owner",
   "secrets.import":     "Admin or Owner",
   "secrets.export":     "Viewer",
+  "storage.view":       "Viewer",
+  "storage.cleanup":    "Admin or Owner",
 };
 
 // ── Main component ────────────────────────────────────────────────────────────

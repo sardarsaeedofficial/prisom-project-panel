@@ -227,3 +227,27 @@ export type GetDiskSectionResult =
 export type GetSchedulersSectionResult =
   | { ok: true;  data: AdminSchedulersSection }
   | { ok: false; error: string };
+
+// ── Admin storage section (Sprint 34) ─────────────────────────────────────────
+
+export type AdminStorageProjectRow = {
+  projectId:        string;
+  projectName:      string;
+  projectSlug:      string;
+  totalBackupBytes: number;  // sum of ready backup sizeBytes
+  backupCount:      number;
+  scheduledEnabled: boolean;
+};
+
+export type AdminStorageSection = {
+  generatedAt:         string;
+  cacheStatus:         AdminCacheStatus;
+  totalBackupBytes:    number;   // platform-wide
+  topProjects:         AdminStorageProjectRow[];  // sorted by totalBackupBytes desc
+  projectsOverRetention: number; // how many have backups beyond their keep limit
+  warnings:            AdminSystemWarning[];
+};
+
+export type GetStorageSectionResult =
+  | { ok: true;  data: AdminStorageSection }
+  | { ok: false; error: string };

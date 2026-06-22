@@ -64,7 +64,10 @@ export type ProjectPermission =
   | "secrets.manage"   // Create / update / delete secrets
   | "secrets.rotate"   // Rotate a secret value
   | "secrets.import"   // Bulk-import secrets from .env
-  | "secrets.export";  // Export safe metadata (key names + status, never values)
+  | "secrets.export"   // Export safe metadata (key names + status, never values)
+  // Sprint 34: Storage Center
+  | "storage.view"     // View storage usage and reports
+  | "storage.cleanup"; // Run cleanup and manage storage policy
 
 // ── Permission sets per role ───────────────────────────────────────────────────
 
@@ -82,6 +85,7 @@ const VIEWER_PERMISSIONS = new Set<ProjectPermission>([
   "backup.view",    // Viewers can see backup list (no secret values in metadata)
   "secrets.view",   // Viewers see key names + configured/missing status only (no values)
   "secrets.export", // Viewers can export safe metadata (key names + status, never values)
+  "storage.view",   // Viewers can see storage usage reports
 ]);
 
 const OPERATOR_PERMISSIONS = new Set<ProjectPermission>([
@@ -142,6 +146,8 @@ const ADMIN_PERMISSIONS = new Set<ProjectPermission>([
   "secrets.rotate",
   "secrets.import",
   "secrets.export",
+  "storage.view",
+  "storage.cleanup",
 ]);
 
 const OWNER_PERMISSIONS = new Set<ProjectPermission>([...ADMIN_PERMISSIONS]);
