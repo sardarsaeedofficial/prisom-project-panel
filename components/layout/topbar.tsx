@@ -12,7 +12,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input }                  from "@/components/ui/input";
 import { NotificationBellBadge }  from "@/components/notifications/notifications-center";
 
 interface TopBarUser {
@@ -46,15 +45,20 @@ export function TopBar({ user }: TopBarProps) {
 
   return (
     <header className="flex h-14 items-center gap-4 border-b bg-background px-6 shrink-0">
-      {/* Search */}
+      {/* Command palette trigger — Ctrl/Cmd+K */}
       <div className="flex-1 max-w-sm">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search projects..."
-            className="pl-9 h-9 bg-muted/50 border-0 focus-visible:ring-1"
-          />
-        </div>
+        <button
+          type="button"
+          aria-label="Open command palette"
+          onClick={() => window.dispatchEvent(new CustomEvent("open-command-palette"))}
+          className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-muted/50 px-3 text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <Search className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-left">Search or jump to…</span>
+          <kbd className="hidden items-center gap-0.5 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:flex">
+            <span className="text-[9px]">⌘</span>K
+          </kbd>
+        </button>
       </div>
 
       <div className="ml-auto flex items-center gap-2">

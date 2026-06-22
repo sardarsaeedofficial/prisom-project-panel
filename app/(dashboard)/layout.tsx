@@ -2,6 +2,7 @@ import { redirect }          from "next/navigation";
 import { getSession }         from "@/lib/session";
 import { Sidebar }            from "@/components/layout/sidebar";
 import { TopBar }             from "@/components/layout/topbar";
+import { CommandPalette }     from "@/components/navigation/command-palette";
 import { getCurrentUser }     from "@/lib/current-workspace";
 import { isAdminRole }        from "@/lib/auth/require-admin";
 
@@ -37,6 +38,8 @@ export default async function DashboardLayout({
         <TopBar user={{ name: session.name, email: session.email }} />
         {children}
       </div>
+      {/* Command palette — fixed overlay, Ctrl/Cmd+K or search button */}
+      <CommandPalette isAdmin={isAdmin} />
     </div>
   );
 }
