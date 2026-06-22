@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
-import { WorkspaceNav }               from "@/components/projects/workspace-nav";
-import { ProjectOperationsPanel }     from "@/components/projects/project-operations-panel";
-import { getProjectById }             from "@/lib/data/projects";
+import { notFound }     from "next/navigation";
+import { db }           from "@/lib/db";
+import {
+  DashboardShell,
+  PageHeader,
+} from "@/components/layout/dashboard-shell";
+import { WorkspaceNav }           from "@/components/projects/workspace-nav";
+import { ProjectOperationsPanel } from "@/components/projects/project-operations-panel";
 
 export const metadata: Metadata = { title: "Operations" };
 export const dynamic = "force-dynamic";
@@ -12,7 +15,14 @@ type Props = { params: Promise<{ projectId: string }> };
 
 export default async function ProjectOperationsPage({ params }: Props) {
   const { projectId } = await params;
-  const project       = await getProjectById(projectId);
+
+  // Lightweight query — matches the pattern used by monitoring, logs, and
+  // other working project pages.  Avoids the heavy multi-join getProjectById
+  // call that can throw if any eager-loaded relation has a schema/DB mismatch.
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { id: true, name: true },
+  });
   if (!project) notFound();
 
   return (

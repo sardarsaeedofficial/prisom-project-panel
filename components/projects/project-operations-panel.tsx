@@ -4,10 +4,11 @@
  * components/projects/project-operations-panel.tsx
  *
  * Sprint 27: Operation history panel with filters and pagination.
- * Used by the /operations page.
+ * Sprint 27 Hotfix: Fixed initial-load race (moved to useEffect), hardened
+ * optional-field access, added missing-DB-table detection.
  */
 
-import { useState, useTransition, useCallback } from "react";
+import { useState, useEffect, useTransition, useCallback } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -19,6 +20,7 @@ import {
   ChevronRight,
   Filter,
   ScrollText,
+  DatabaseZap,
 } from "lucide-react";
 import { Button }   from "@/components/ui/button";
 import { Badge }    from "@/components/ui/badge";
@@ -55,6 +57,16 @@ function formatDate(iso: string): string {
     hour:   "2-digit",
     minute: "2-digit",
   });
+}
+
+/** True if the error message indicates the ProjectOperation table is missing. */
+function isMissingTableError(error: string): boolean {
+  return (
+    error.includes("does not exist") ||
+    error.includes("ProjectOperation") ||
+    error.includes("project_operation") ||
+    error.includes("P2021")
+  );
 }
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -96,7 +108,11 @@ function OperationRow({
   op:        ProjectOperationDTO;
   projectId: string;
 }) {
-  const typeLabel = OPERATION_TYPE_LABELS[op.operationType] ?? op.operationType;
+  // Safe access for all optional fields
+  const typeLabel         = OPERATION_TYPE_LABELS[op.operationType] ?? op.operationType ?? "Unknown";
+  const initiatedByName   = op.initiatedByName ?? null;
+  const lastError         = op.lastError ?? null;
+  const completedAt       = op.completedAt ?? null;
 
   return (
     <div className="flex flex-col gap-1 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
@@ -107,15 +123,15 @@ function OperationRow({
 
       {/* Main content */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{op.title}</p>
+        <p className="text-sm font-medium truncate">{op.title ?? "Unnamed operation"}</p>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{typeLabel}</span>
-          {op.initiatedByName && <span>by {op.initiatedByName}</span>}
+          {initiatedByName && <span>by {initiatedByName}</span>}
           <span>started {formatDate(op.startedAt)}</span>
-          <span>duration {formatDuration(op.startedAt, op.completedAt)}</span>
+          <span>duration {formatDuration(op.startedAt, completedAt)}</span>
         </div>
-        {op.lastError && (
-          <p className="mt-1 text-xs text-red-600 line-clamp-2">{op.lastError}</p>
+        {lastError && (
+          <p className="mt-1 text-xs text-red-600 line-clamp-2">{lastError}</p>
         )}
       </div>
 
@@ -123,7 +139,7 @@ function OperationRow({
       <a
         href={`/projects/${projectId}/logs?source=operation:${op.id}`}
         className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors self-start pt-0.5"
-        title="View operation logs"
+        title="View operation logs in the Logs Center"
       >
         <ScrollText className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Logs</span>
@@ -151,36 +167,40 @@ export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
     (p: number, sf: OperationStatus | "all", tf: OperationType | "all") => {
       setPanelState({ phase: "loading" });
       startTransition(async () => {
-        const r = await listOperationHistoryAction({
-          projectId,
-          page:         p,
-          pageSize:     20,
-          statusFilter: sf,
-          typeFilter:   tf,
-        });
-        if (!r.ok) {
-          setPanelState({ phase: "error", error: r.error });
-          return;
+        try {
+          const r = await listOperationHistoryAction({
+            projectId,
+            page:         p,
+            pageSize:     20,
+            statusFilter: sf,
+            typeFilter:   tf,
+          });
+          if (!r.ok) {
+            setPanelState({ phase: "error", error: r.error });
+            return;
+          }
+          setPanelState({
+            phase:      "loaded",
+            ops:        r.data.operations,
+            total:      r.data.total,
+            page:       r.data.page,
+            pageSize:   r.data.pageSize,
+            totalPages: r.data.totalPages,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          setPanelState({ phase: "error", error: msg });
         }
-        setPanelState({
-          phase:      "loaded",
-          ops:        r.data.operations,
-          total:      r.data.total,
-          page:       r.data.page,
-          pageSize:   r.data.pageSize,
-          totalPages: r.data.totalPages,
-        });
       });
     },
     [projectId],
   );
 
-  // Initial load on mount
-  const [loaded, setLoaded] = useState(false);
-  if (!loaded) {
-    setLoaded(true);
+  // Initial load on mount (NOT during render — avoids startTransition-in-render issues)
+  useEffect(() => {
     load(1, "all", "all");
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function applyFilters(sf: OperationStatus | "all", tf: OperationType | "all") {
     setPage(1);
@@ -195,12 +215,47 @@ export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
   const [clearing, startClearTransition] = useTransition();
   function handleClearStale() {
     startClearTransition(async () => {
-      await clearStaleOperationsAction(projectId);
-      load(page, statusFilter, typeFilter);
+      try {
+        await clearStaleOperationsAction(projectId);
+        load(page, statusFilter, typeFilter);
+      } catch {
+        // non-fatal
+      }
     });
   }
 
   const isLoading = panelState.phase === "loading" || isPending;
+
+  // ── Detected missing-table error ───────────────────────────────────────────
+  if (
+    panelState.phase === "error" &&
+    isMissingTableError(panelState.error)
+  ) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 flex gap-3">
+        <DatabaseZap className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-amber-900">
+            Operations table not ready
+          </p>
+          <p className="text-xs text-amber-700">
+            The ProjectOperation database table does not exist yet on this server.
+            Run&nbsp;
+            <code className="rounded bg-amber-100 px-1 font-mono text-[11px]">
+              pnpm prisma db push
+            </code>
+            &nbsp;on the VPS, then restart the process.
+          </p>
+          <button
+            onClick={() => load(1, statusFilter, typeFilter)}
+            className="mt-1 text-xs text-amber-700 underline underline-offset-2 hover:text-amber-900"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -268,13 +323,20 @@ export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      {/* Content */}
+      {/* General error state */}
       {panelState.phase === "error" && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {panelState.error}
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-3">
+          <span className="flex-1">{panelState.error}</span>
+          <button
+            onClick={() => load(page, statusFilter, typeFilter)}
+            className="text-xs text-red-600 underline underline-offset-2 shrink-0"
+          >
+            Retry
+          </button>
         </div>
       )}
 
+      {/* Loading state */}
       {(panelState.phase === "loading" || panelState.phase === "idle") && (
         <div className="py-12 text-center text-sm text-muted-foreground">
           <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2 text-muted-foreground/50" />
@@ -282,6 +344,7 @@ export function ProjectOperationsPanel({ projectId }: { projectId: string }) {
         </div>
       )}
 
+      {/* Loaded state */}
       {panelState.phase === "loaded" && (
         <>
           {panelState.ops.length === 0 ? (
