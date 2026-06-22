@@ -4,6 +4,8 @@ import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell"
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { db } from "@/lib/db";
 import { DomainManager, type DomainRow } from "@/components/projects/domain-manager";
+import { ProjectDomainCenter }            from "@/components/projects/project-domain-center";
+import { runDomainHealthReport }           from "@/lib/domains/domain-health-runner";
 
 export const metadata: Metadata = { title: "Domains" };
 export const dynamic = "force-dynamic";
@@ -43,12 +45,20 @@ export default async function ProjectDomainsPage({ params }: Props) {
     id:              d.id,
     hostname:        d.hostname,
     isPrimary:       d.isPrimary,
-    status:          d.status  as DomainRow["status"],
+    status:          d.status    as DomainRow["status"],
     sslStatus:       d.sslStatus as DomainRow["sslStatus"],
     nginxConfigPath: d.nginxConfigPath,
     targetPort:      d.targetPort,
     lastError:       d.lastError,
   }));
+
+  // Pre-run health checks server-side (non-blocking — page never crashes if checks fail)
+  const initialReport = rawDomains.length > 0
+    ? await runDomainHealthReport(
+        projectId,
+        rawDomains.map((d) => ({ id: d.id, hostname: d.hostname, isPrimary: d.isPrimary })),
+      ).catch(() => null)
+    : null;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -56,10 +66,16 @@ export default async function ProjectDomainsPage({ params }: Props) {
       <DashboardShell>
         <PageHeader
           title="Domains"
-          description="Publish your app to a public URL. Nginx and SSL are configured automatically."
+          description="Manage domains, check DNS and SSL health, and publish your app to a public URL."
         />
 
-        <div className="max-w-2xl">
+        <div className="space-y-8 max-w-2xl">
+          {/* Sprint 29: Domain + SSL Health Center */}
+          <ProjectDomainCenter projectId={projectId} initialReport={initialReport} />
+
+          <hr className="border-border" />
+
+          {/* Existing domain publishing manager */}
           <DomainManager
             projectId={projectId}
             projectSlug={project.slug}

@@ -529,11 +529,11 @@ export function checkDomainRouting(ctx: GoLiveContext, projectId: string): GoLiv
 
   if (active && primary) {
     return check("domain", "Domain configured", "domain", "pass",
-      `Primary domain active: ${primary.hostname}`);
+      `Primary domain active: ${primary.hostname}. Run Domain Health checks for DNS and SSL status.`);
   }
   if (active) {
     return check("domain", "Domain configured", "domain", "pass",
-      `Active domain: ${active.hostname}`);
+      `Active domain: ${active.hostname}. Run Domain Health checks for DNS and SSL status.`);
   }
 
   const pending = ctx.domains.find((d) => d.status === "PENDING");
