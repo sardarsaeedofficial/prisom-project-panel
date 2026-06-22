@@ -19,6 +19,7 @@ import {
   CalendarClock,
   ChevronRight,
   ExternalLink,
+  Users,
 } from "lucide-react";
 import { cn }                         from "@/lib/utils";
 import { refreshAdminHealthAction }   from "@/app/actions/admin-health";
@@ -323,7 +324,15 @@ function FailedDeployRow({ d }: { d: AdminHealthReport["deployments"]["latestFai
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function AdminConsole({ initialReport }: { initialReport: AdminHealthReport | null }) {
+export function AdminConsole({
+  initialReport,
+  actorEmail,
+  actorRole,
+}: {
+  initialReport: AdminHealthReport | null;
+  actorEmail?:   string;
+  actorRole?:    string;
+}) {
   const [report, setReport]       = useState<AdminHealthReport | null>(initialReport);
   const [error, setError]         = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -346,6 +355,12 @@ export function AdminConsole({ initialReport }: { initialReport: AdminHealthRepo
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Admin Console</h1>
+          {actorEmail && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Signed in as <strong>{actorEmail}</strong>
+              {actorRole && <> · <span className="font-mono">{actorRole}</span></>}
+            </p>
+          )}
           {report && (
             <p className="text-xs text-muted-foreground mt-0.5">
               Last updated: {fmtRelative(report.generatedAt)}
@@ -600,6 +615,7 @@ export function AdminConsole({ initialReport }: { initialReport: AdminHealthRepo
             </h2>
             <div className="flex flex-wrap gap-2">
               {[
+                { label: "Manage Users",    href: "/admin/users" },
                 { label: "All Projects",    href: "/projects"   },
                 { label: "Published Sites", href: "/published"  },
                 { label: "Security",        href: "/security"   },

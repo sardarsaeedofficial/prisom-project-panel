@@ -6,6 +6,8 @@ import { getSessionFromRequest } from "@/lib/session";
  */
 const PUBLIC_PREFIXES = [
   "/login",
+  "/forgot-password",
+  "/reset-password",
   "/api/auth",
   "/api/webhooks",
   "/portfolio",

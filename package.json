@@ -14,7 +14,8 @@
     "db:seed": "prisma db seed",
     "db:clean-github-demo": "tsx prisma/clean-github-demo.ts",
     "db:seed-doorsteps": "tsx prisma/seed-doorsteps.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "admin:create": "tsx scripts/create-admin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

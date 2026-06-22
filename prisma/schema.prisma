@@ -237,6 +237,14 @@ model User {
   name      String
   avatarUrl String?
   role      UserRole @default(MEMBER)
+
+  // Sprint 32: password-based authentication
+  passwordHash    String?   // scrypt hash — null means env-var fallback auth only
+  emailVerifiedAt DateTime?
+  disabledAt      DateTime?
+  disabledReason  String?
+  lastLoginAt     DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -264,6 +272,9 @@ model User {
 
   // Sprint 27: operation history
   initiatedOperations ProjectOperation[]
+
+  // Sprint 32: password reset tokens
+  passwordResetTokens PasswordResetToken[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1483,4 +1494,26 @@ model ProjectBackupSchedule {
   updatedAt DateTime @updatedAt
 
   @@index([enabled, nextRunAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PASSWORD RESET TOKEN  (Sprint 32: auth recovery)
+//
+// Token is never stored in plaintext — only the SHA-256 hash is stored.
+// Token expires after 30 minutes.  One-time use (usedAt set on consumption).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique  // SHA-256 of the raw token
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

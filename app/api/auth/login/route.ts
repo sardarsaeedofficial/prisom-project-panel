@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { UserRole } from "@prisma/client";
 import {
   createSessionToken,
   SESSION_COOKIE_NAME,
   SESSION_COOKIE_OPTIONS,
 } from "@/lib/session";
+import { verifyPassword } from "@/lib/auth/passwords";
 
-function getAdminCredentials(): { email: string | undefined; password: string | undefined } {
+// ── Env-var credentials (backward-compat for pre-Sprint 32 users) ─────────────
+
+function getEnvCredentials(): { email: string | undefined; password: string | undefined } {
   const isDev = process.env.NODE_ENV !== "production";
   return {
     email:
@@ -19,6 +21,8 @@ function getAdminCredentials(): { email: string | undefined; password: string | 
   };
 }
 
+// ── POST /api/auth/login ──────────────────────────────────────────────────────
+
 export async function POST(request: Request) {
   let body: { email?: string; password?: string };
   try {
@@ -28,42 +32,91 @@ export async function POST(request: Request) {
   }
 
   const { email: inputEmail, password: inputPassword } = body;
-  const creds = getAdminCredentials();
 
-  if (!creds.email || !creds.password) {
-    return NextResponse.json(
-      { error: "Admin credentials are not configured on this server" },
-      { status: 503 }
-    );
+  if (!inputEmail || !inputPassword) {
+    return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
   }
 
-  if (
-    !inputEmail ||
-    !inputPassword ||
-    inputEmail.trim().toLowerCase() !== creds.email.toLowerCase() ||
-    inputPassword !== creds.password
-  ) {
-    // Don't reveal whether it was the email or password that was wrong
-    return NextResponse.json(
-      { error: "Invalid email or password" },
-      { status: 401 }
-    );
-  }
+  const normalizedEmail = inputEmail.trim().toLowerCase();
+  const INVALID_MSG     = "Invalid email or password.";
 
-  // Pull the display name from the DB owner user (graceful fallback if no seed yet)
-  let name = "Admin";
+  // ── 1. Try DB-based auth (users with a passwordHash) ─────────────────────
+  let sessionEmail = normalizedEmail;
+  let sessionName  = "Admin";
+  let dbAuthOk     = false;
+
   try {
     const dbUser = await db.user.findFirst({
-      where: { role: UserRole.OWNER },
-      orderBy: { createdAt: "asc" },
-      select: { name: true },
+      where:  { email: { equals: normalizedEmail, mode: "insensitive" } },
+      select: {
+        id: true, email: true, name: true, role: true,
+        passwordHash: true, disabledAt: true,
+      },
     });
-    if (dbUser?.name) name = dbUser.name;
+
+    if (dbUser?.passwordHash) {
+      // User has a DB password — use DB auth exclusively for this user
+      const valid = await verifyPassword(inputPassword, dbUser.passwordHash);
+      if (!valid) {
+        return NextResponse.json({ error: INVALID_MSG }, { status: 401 });
+      }
+      if (dbUser.disabledAt) {
+        return NextResponse.json(
+          { error: "This account has been disabled. Contact your administrator." },
+          { status: 403 },
+        );
+      }
+      // Record last login non-fatally
+      db.user.update({
+        where: { id: dbUser.id },
+        data:  { lastLoginAt: new Date() },
+      }).catch(() => null);
+
+      sessionEmail = dbUser.email;
+      sessionName  = dbUser.name;
+      dbAuthOk     = true;
+    } else if (dbUser?.disabledAt) {
+      // User exists without a password hash but is disabled
+      return NextResponse.json(
+        { error: "This account has been disabled. Contact your administrator." },
+        { status: 403 },
+      );
+    }
   } catch {
-    // DB unavailable — still allow login, just use default name
+    // DB unavailable — fall through to env-var auth
   }
 
-  const token = await createSessionToken({ email: creds.email, name });
+  // ── 2. Env-var fallback (pre-Sprint 32 seed user or no DB password set) ───
+  if (!dbAuthOk) {
+    const creds = getEnvCredentials();
+
+    if (!creds.email || !creds.password) {
+      return NextResponse.json(
+        { error: "No credentials are configured on this server. Use the Admin UI to set a password." },
+        { status: 503 },
+      );
+    }
+
+    const emailMatch    = normalizedEmail === creds.email.toLowerCase();
+    const passwordMatch = inputPassword === creds.password;
+
+    if (!emailMatch || !passwordMatch) {
+      return NextResponse.json({ error: INVALID_MSG }, { status: 401 });
+    }
+
+    // Resolve display name from DB (optional — non-fatal)
+    try {
+      const dbUser = await db.user.findFirst({
+        where:  { email: { equals: normalizedEmail, mode: "insensitive" } },
+        select: { name: true },
+      });
+      if (dbUser?.name) sessionName = dbUser.name;
+    } catch { /* non-fatal */ }
+
+    sessionEmail = normalizedEmail;
+  }
+
+  const token = await createSessionToken({ email: sessionEmail, name: sessionName });
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set({
