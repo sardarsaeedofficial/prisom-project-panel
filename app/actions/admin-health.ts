@@ -17,6 +17,7 @@ import {
   runAdminPm2Section,
   runAdminDiskSection,
   runAdminSchedulersSection,
+  runAdminJobsSection,
 }                                    from "@/lib/admin/admin-health-runner";
 import { runAdminStorageSection }    from "@/lib/admin/admin-storage-summary";
 import type {
@@ -26,6 +27,7 @@ import type {
   GetDiskSectionResult,
   GetSchedulersSectionResult,
   GetStorageSectionResult,
+  GetJobsSectionResult,
 }                                    from "@/lib/admin/admin-health-types";
 
 // ── Sprint 31 — full report (still used by manual Refresh when no fast split) ──
@@ -116,6 +118,21 @@ export async function getAdminStorageSectionAction(
   }
 }
 
+// ── Sprint 35 — admin jobs section ───────────────────────────────────────────
+
+export async function getAdminJobsSectionAction(
+  forceRefresh = false,
+): Promise<GetJobsSectionResult> {
+  try {
+    await requireAdmin();
+    const data = await runAdminJobsSection(forceRefresh);
+    return { ok: true, data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to load jobs summary";
+    return { ok: false, error: msg };
+  }
+}
+
 // ── Sprint 33 — full async refresh (all sections, force = true) ───────────────
 
 export async function refreshAllAdminSectionsAction(): Promise<{
@@ -124,9 +141,10 @@ export async function refreshAllAdminSectionsAction(): Promise<{
   disk:       GetDiskSectionResult;
   schedulers: GetSchedulersSectionResult;
   storage:    GetStorageSectionResult;
+  jobs:       GetJobsSectionResult;
 }> {
   await requireAdmin();
-  const [fast, pm2, disk, schedulers, storage] = await Promise.all([
+  const [fast, pm2, disk, schedulers, storage, jobs] = await Promise.all([
     runAdminFastSummary(true).then((s): GetFastSummaryResult             => ({ ok: true, summary: s }))
       .catch((e): GetFastSummaryResult             => ({ ok: false, error: String(e) })),
     runAdminPm2Section(true).then((d): GetPm2SectionResult               => ({ ok: true, data: d }))
@@ -137,6 +155,8 @@ export async function refreshAllAdminSectionsAction(): Promise<{
       .catch((e): GetSchedulersSectionResult       => ({ ok: false, error: String(e) })),
     runAdminStorageSection(true).then((d): GetStorageSectionResult       => ({ ok: true, data: d }))
       .catch((e): GetStorageSectionResult          => ({ ok: false, error: String(e) })),
+    runAdminJobsSection(true).then((d): GetJobsSectionResult             => ({ ok: true, data: d }))
+      .catch((e): GetJobsSectionResult             => ({ ok: false, error: String(e) })),
   ]);
-  return { fast, pm2, disk, schedulers, storage };
+  return { fast, pm2, disk, schedulers, storage, jobs };
 }

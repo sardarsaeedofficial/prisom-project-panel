@@ -251,3 +251,20 @@ export type AdminStorageSection = {
 export type GetStorageSectionResult =
   | { ok: true;  data: AdminStorageSection }
   | { ok: false; error: string };
+
+// ── Admin jobs section (Sprint 35) ────────────────────────────────────────────
+
+export type AdminJobsSection = {
+  generatedAt:   string;
+  cacheStatus:   AdminCacheStatus;
+  active:        number;
+  failed24h:     number;
+  stale:         number;
+  queued:        number;
+  success24h:    number;
+  warnings:      AdminSystemWarning[];
+};
+
+export type GetJobsSectionResult =
+  | { ok: true;  data: AdminJobsSection }
+  | { ok: false; error: string };

@@ -29,6 +29,39 @@ import {
   OperationConflictError,
 } from "@/lib/operations/project-operation-service";
 
+// ── Sprint 35: lightweight background job record ──────────────────────────────
+
+async function recordBackupJobResult(
+  projectId: string,
+  ok:        boolean,
+  error?:    string,
+): Promise<void> {
+  try {
+    const ts   = new Date().toISOString().replace(/[-T:.Z]/g, "").slice(0, 14);
+    const rand = Math.random().toString(36).slice(2, 6);
+    const now  = new Date();
+
+    await db.backgroundJob.create({
+      data: {
+        jobRef:      `bgjob_schedbackup_${projectId.slice(-6)}_${ts}_${rand}`,
+        jobType:     "scheduled_backup",
+        scopeType:   "project",
+        projectId,
+        status:      ok ? "success" : "failed",
+        title:       ok ? "Scheduled backup completed" : "Scheduled backup failed",
+        attempts:    1,
+        maxAttempts: 3,
+        startedAt:   now,
+        completedAt: now,
+        scheduledFor: now,
+        lastError:   error ? error.slice(0, 500) : null,
+      },
+    });
+  } catch {
+    // Non-fatal — never interrupt backup flow for job recording
+  }
+}
+
 // ── In-memory guard (per-process, prevents overlap within same tick) ──────────
 
 const runningProjectIds = new Set<string>();
@@ -140,6 +173,7 @@ export async function runScheduledBackupForProject(input: {
         metadata: { trigger: isUserTriggered ? "manual_run_now" : "scheduler", durationMs },
       });
 
+      recordBackupJobResult(projectId, false, backupResult.error).catch(() => null);
       return { ok: false, projectId, error: backupResult.error };
     }
 
@@ -169,6 +203,7 @@ export async function runScheduledBackupForProject(input: {
       },
     });
 
+    recordBackupJobResult(projectId, true).catch(() => null);
     return { ok: true, projectId, backupId: backupResult.backupId };
   } catch (err) {
     const errMsg = err instanceof Error
@@ -189,6 +224,7 @@ export async function runScheduledBackupForProject(input: {
       metadata: { trigger: isUserTriggered ? "manual_run_now" : "scheduler" },
     });
 
+    recordBackupJobResult(projectId, false, errMsg).catch(() => null);
     return { ok: false, projectId, error: errMsg };
   } finally {
     runningProjectIds.delete(projectId);

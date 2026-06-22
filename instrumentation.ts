@@ -28,5 +28,11 @@ export async function register() {
       "./lib/backups/backup-scheduler"
     );
     startBackupScheduler();
+
+    // Sprint 35: background job worker (claims and executes queued BackgroundJob rows)
+    const { startBackgroundJobWorker } = await import(
+      "./lib/jobs/background-job-worker"
+    );
+    startBackgroundJobWorker();
   }
 }

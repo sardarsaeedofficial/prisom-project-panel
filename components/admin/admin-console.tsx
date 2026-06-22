@@ -28,6 +28,7 @@ import {
   getAdminDiskSectionAction,
   getAdminSchedulersSectionAction,
   getAdminStorageSectionAction,
+  getAdminJobsSectionAction,
   refreshAllAdminSectionsAction,
 }                                                from "@/app/actions/admin-health";
 import type {
@@ -36,6 +37,7 @@ import type {
   AdminDiskSection,
   AdminSchedulersSection,
   AdminStorageSection,
+  AdminJobsSection,
   AdminSystemWarning,
   AdminPm2Process,
   AdminCacheStatus,
@@ -461,6 +463,7 @@ export function AdminConsole({
   const [disk,    setDisk]    = useState<SectionState<AdminDiskSection>>(initialSection);
   const [sch,     setSch]     = useState<SectionState<AdminSchedulersSection>>(initialSection);
   const [storage, setStorage] = useState<SectionState<AdminStorageSection>>(initialSection);
+  const [jobs,    setJobs]    = useState<SectionState<AdminJobsSection>>(initialSection);
   const [refreshing, setRefreshing] = useState(false);
 
   // ── Section loaders ─────────────────────────────────────────────────────────
@@ -505,13 +508,24 @@ export function AdminConsole({
       .catch(() => setStorage({ data: null, loading: false, error: "Failed to load storage summary" }));
   }, []);
 
+  const loadJobs = useCallback((force = false) => {
+    setJobs((s) => ({ ...s, loading: true }));
+    getAdminJobsSectionAction(force)
+      .then((res) => {
+        if (res.ok) setJobs({ data: res.data, loading: false, error: null });
+        else        setJobs({ data: null,      loading: false, error: res.error });
+      })
+      .catch(() => setJobs({ data: null, loading: false, error: "Failed to load jobs summary" }));
+  }, []);
+
   // Load slow sections after mount
   useEffect(() => {
     loadPm2();
     loadDisk();
     loadSchedulers();
     loadStorage();
-  }, [loadPm2, loadDisk, loadSchedulers, loadStorage]);
+    loadJobs();
+  }, [loadPm2, loadDisk, loadSchedulers, loadStorage, loadJobs]);
 
   // ── Global refresh ──────────────────────────────────────────────────────────
 
@@ -521,6 +535,7 @@ export function AdminConsole({
     setDisk((s)    => ({ ...s, loading: true }));
     setSch((s)     => ({ ...s, loading: true }));
     setStorage((s) => ({ ...s, loading: true }));
+    setJobs((s)    => ({ ...s, loading: true }));
 
     try {
       const results = await refreshAllAdminSectionsAction();
@@ -533,11 +548,14 @@ export function AdminConsole({
       else                        setSch({ data: null,                        loading: false, error: results.schedulers.error });
       if (results.storage.ok)     setStorage({ data: results.storage.data,   loading: false, error: null });
       else                        setStorage({ data: null,                    loading: false, error: results.storage.error });
+      if (results.jobs.ok)        setJobs({ data: results.jobs.data,          loading: false, error: null });
+      else                        setJobs({ data: null,                       loading: false, error: results.jobs.error });
     } catch {
       setPm2((s)     => ({ ...s, loading: false }));
       setDisk((s)    => ({ ...s, loading: false }));
       setSch((s)     => ({ ...s, loading: false }));
       setStorage((s) => ({ ...s, loading: false }));
+      setJobs((s)    => ({ ...s, loading: false }));
     } finally {
       setRefreshing(false);
     }
@@ -893,6 +911,63 @@ export function AdminConsole({
             </section>
           ) : null}
 
+          {/* Background Jobs section (async) */}
+          {jobs.loading ? (
+            <SectionSkeleton />
+          ) : jobs.error ? (
+            <div className="rounded-lg border bg-card p-4">
+              <SectionHeader
+                icon={Activity}
+                title="Background Jobs"
+                onRefresh={() => loadJobs(true)}
+                loading={false}
+              />
+              <p className="text-sm text-red-500">{jobs.error}</p>
+            </div>
+          ) : jobs.data ? (
+            <section className="rounded-lg border bg-card p-4 space-y-3">
+              <SectionHeader
+                icon={Activity}
+                title="Background Jobs"
+                generatedAt={jobs.data.generatedAt}
+                cacheStatus={jobs.data.cacheStatus}
+                onRefresh={() => loadJobs(true)}
+                loading={jobs.loading}
+              />
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-xs">
+                {[
+                  { label: "Active",       value: jobs.data.active,   accent: jobs.data.active   > 0 ? "text-purple-600" : "text-muted-foreground" },
+                  { label: "Queued",       value: jobs.data.queued,   accent: "text-muted-foreground" },
+                  { label: "Failed (24h)", value: jobs.data.failed24h, accent: jobs.data.failed24h > 0 ? "text-red-600" : "text-muted-foreground" },
+                  { label: "Stale",        value: jobs.data.stale,    accent: jobs.data.stale    > 0 ? "text-yellow-600" : "text-muted-foreground" },
+                  { label: "Success (24h)", value: jobs.data.success24h, accent: "text-green-600" },
+                ].map((item) => (
+                  <div key={item.label} className="flex flex-col gap-0.5">
+                    <span className="text-muted-foreground">{item.label}</span>
+                    <span className={`text-base font-semibold ${item.accent}`}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+              <Link
+                href="/admin/jobs"
+                className="inline-flex items-center gap-1.5 rounded border bg-background px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+              >
+                View Background Jobs Dashboard
+                <ChevronRight className="h-3 w-3" />
+              </Link>
+              {jobs.data.warnings.length > 0 && (
+                <div className="space-y-1.5 pt-1 border-t">
+                  {jobs.data.warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0 mt-0.5" />
+                      <span className="text-muted-foreground">{w.title}: {w.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+
           {/* Failed deployments (fast) */}
           {f.deployments.latestFailures.length > 0 && (
             <section className="rounded-lg border bg-card p-4 space-y-2">
@@ -931,11 +1006,12 @@ export function AdminConsole({
             </h2>
             <div className="flex flex-wrap gap-2">
               {[
-                { label: "Manage Users",    href: "/admin/users" },
-                { label: "All Projects",    href: "/projects"    },
-                { label: "Published Sites", href: "/published"   },
-                { label: "Security",        href: "/security"    },
-                { label: "Portfolio",       href: "/portfolio"   },
+                { label: "Manage Users",       href: "/admin/users" },
+                { label: "Background Jobs",    href: "/admin/jobs"  },
+                { label: "All Projects",       href: "/projects"    },
+                { label: "Published Sites",    href: "/published"   },
+                { label: "Security",           href: "/security"    },
+                { label: "Portfolio",          href: "/portfolio"   },
               ].map((l) => (
                 <Link
                   key={l.href}

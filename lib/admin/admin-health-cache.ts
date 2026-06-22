@@ -10,7 +10,7 @@
  * No secrets are stored here — only aggregated health data.
  */
 
-export type CacheKey = "fast" | "pm2" | "disk" | "schedulers" | "storage";
+export type CacheKey = "fast" | "pm2" | "disk" | "schedulers" | "storage" | "jobs";
 
 // TTLs per section
 const CACHE_TTL_MS: Record<CacheKey, number> = {
@@ -19,6 +19,7 @@ const CACHE_TTL_MS: Record<CacheKey, number> = {
   disk:       60_000,  // 60 s — recursive fs walk + df
   schedulers: 10_000,  // 10 s — globalThis heartbeat registry
   storage:    60_000,  // 60 s — backup size aggregation
+  jobs:       15_000,  // 15 s — background job counts
 };
 
 type CacheEntry = {

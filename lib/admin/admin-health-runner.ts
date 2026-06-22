@@ -27,6 +27,7 @@ import type {
   AdminPm2Section,
   AdminDiskSection,
   AdminSchedulersSection,
+  AdminJobsSection,
 } from "./admin-health-types";
 import { STALE_THRESHOLD_MS }   from "@/lib/operations/project-operation-locks";
 
@@ -683,5 +684,47 @@ export async function runAdminSchedulersSection(forceRefresh = false): Promise<A
   };
 
   setCachedSection("schedulers", result);
+  return result;
+}
+
+// ── Sprint 35: Jobs section ───────────────────────────────────────────────────
+
+export async function runAdminJobsSection(forceRefresh = false): Promise<AdminJobsSection> {
+  if (!forceRefresh) {
+    const cached = getCachedSection<AdminJobsSection>("jobs");
+    if (cached?.isFresh) return { ...cached.value, cacheStatus: "fresh" };
+    if (cached)          return { ...cached.value, cacheStatus: "stale" };
+  }
+
+  const { getBackgroundJobsSummary } = await import("@/lib/jobs/background-job-service");
+  const summary = await getBackgroundJobsSummary();
+
+  const warnings: AdminSystemWarning[] = [];
+
+  if (summary.stale > 0) {
+    warnings.push({
+      severity:    "warning",
+      title:       `${summary.stale} stale job(s)`,
+      description: "Some background jobs have timed out. Check the Jobs dashboard for details.",
+      href:        "/admin/jobs",
+    });
+  }
+  if (summary.failed24h >= 5) {
+    warnings.push({
+      severity:    "warning",
+      title:       `${summary.failed24h} failed jobs in the last 24h`,
+      description: "Multiple job failures detected. Some scheduled operations may not be running.",
+      href:        "/admin/jobs",
+    });
+  }
+
+  const result: AdminJobsSection = {
+    generatedAt: new Date().toISOString(),
+    cacheStatus: "miss",
+    ...summary,
+    warnings,
+  };
+
+  setCachedSection("jobs", result);
   return result;
 }
