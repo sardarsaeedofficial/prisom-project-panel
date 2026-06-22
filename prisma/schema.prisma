@@ -275,6 +275,9 @@ model User {
 
   // Sprint 32: password reset tokens
   passwordResetTokens PasswordResetToken[]
+
+  // Sprint 37: unified notifications
+  notifications       UserNotification[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,6 +419,9 @@ model Project {
 
   // Sprint 35: background job tracking
   backgroundJobs      BackgroundJob[]
+
+  // Sprint 37: unified notifications
+  notifications       UserNotification[]
 
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
@@ -1611,4 +1617,50 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER NOTIFICATION  (Sprint 37: unified activity + notifications center)
+//
+// Stores in-app notifications for individual users.
+// Notifications are created by service code — never directly from the client.
+// Metadata is sanitized at write time — no secret values.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model UserNotification {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title String
+  body  String?
+
+  /// info | success | warning | error
+  severity String @default("info")
+
+  /// deployment | backup | domain | storage | job | alert | security | admin | system
+  category String
+
+  /// operation | background_job | audit | deployment | alert | system
+  sourceType String?
+  sourceId   String?
+
+  /// Internal relative URL to the source — e.g. /projects/abc/backups
+  href String?
+
+  readAt      DateTime?
+  dismissedAt DateTime?
+
+  /// Sanitized key/value metadata — no secret values
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@index([projectId, createdAt])
+  @@index([category, createdAt])
 }

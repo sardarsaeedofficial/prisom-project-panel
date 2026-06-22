@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Bell, Search, Settings, LogOut, User as UserIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useRouter }              from "next/navigation";
+import { Search, Settings, LogOut, User as UserIcon } from "lucide-react";
+import { Button }                 from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -12,7 +12,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Input }                  from "@/components/ui/input";
+import { NotificationBellBadge }  from "@/components/notifications/notifications-center";
 
 interface TopBarUser {
   name: string;
@@ -57,11 +58,8 @@ export function TopBar({ user }: TopBarProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative h-9 w-9">
-          <Bell className="h-4 w-4" />
-          <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-        </Button>
+        {/* Notifications bell — badge loads client-side after mount */}
+        <NotificationBellBadge />
 
         {/* User menu */}
         <DropdownMenu>

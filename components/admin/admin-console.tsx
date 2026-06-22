@@ -1006,12 +1006,13 @@ export function AdminConsole({
             </h2>
             <div className="flex flex-wrap gap-2">
               {[
-                { label: "Manage Users",       href: "/admin/users" },
-                { label: "Background Jobs",    href: "/admin/jobs"  },
-                { label: "All Projects",       href: "/projects"    },
-                { label: "Published Sites",    href: "/published"   },
-                { label: "Security",           href: "/security"    },
-                { label: "Portfolio",          href: "/portfolio"   },
+                { label: "Manage Users",    href: "/admin/users"    },
+                { label: "Background Jobs", href: "/admin/jobs"     },
+                { label: "Activity Feed",   href: "/admin/activity" },
+                { label: "All Projects",    href: "/projects"       },
+                { label: "Published Sites", href: "/published"      },
+                { label: "Security",        href: "/security"       },
+                { label: "Portfolio",       href: "/portfolio"      },
               ].map((l) => (
                 <Link
                   key={l.href}
