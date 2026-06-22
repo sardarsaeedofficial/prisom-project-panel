@@ -134,11 +134,13 @@ function BackupTypeBadge({ type }: { type: ProjectBackupDTO["backupType"] }) {
     manual:      "bg-slate-100 text-slate-700 border-slate-200",
     pre_restore: "bg-amber-100 text-amber-800 border-amber-200",
     system:      "bg-cyan-100 text-cyan-800 border-cyan-200",
+    scheduled:   "bg-violet-100 text-violet-800 border-violet-200",
   };
   const labels: Record<ProjectBackupDTO["backupType"], string> = {
     manual:      "Manual",
     pre_restore: "Pre-restore",
     system:      "System",
+    scheduled:   "Scheduled",
   };
   return (
     <span className={cn("inline-flex text-xs font-medium px-2 py-0.5 rounded-full border", styles[type])}>

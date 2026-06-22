@@ -53,6 +53,9 @@ export const BLOCKS_IF_RUNNING: Record<OperationType, Set<OperationType>> = {
   ]),
   backup_create: new Set<OperationType>([
     "backup_restore",
+    "deploy",
+    "multi_service_deploy",
+    "patch_apply",
   ]),
   backup_restore: new Set<OperationType>([
     "deploy",

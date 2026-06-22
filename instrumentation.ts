@@ -2,13 +2,16 @@
  * instrumentation.ts
  *
  * Next.js server instrumentation hook — runs once when the server starts.
- * This is the safe, idiomatic place to start the background alert scheduler.
+ * Starts background schedulers for alert checks and scheduled backups.
  *
- * The scheduler:
- *  - Only runs inside the panel's Node.js process (prisom-projects)
- *  - Never starts during the build phase
- *  - Is guarded by a global singleton so it never runs more than once
- *  - Can be disabled via ALERT_SCHEDULER_ENABLED=false
+ * Schedulers:
+ *  - Alert scheduler   — checks per-project alert rules on a configurable interval
+ *  - Backup scheduler  — runs due scheduled project backups every 5 minutes
+ *
+ * Both schedulers:
+ *  - Only run inside the Node.js runtime (not Edge runtime, not build phase)
+ *  - Are guarded by per-scheduler global singletons (never start twice)
+ *  - Can be disabled via ALERT_SCHEDULER_ENABLED=false / ENABLE_INTERNAL_SCHEDULERS=false
  *
  * Reference: https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
  */
@@ -20,5 +23,10 @@ export async function register() {
       "./lib/projects/alert-scheduler"
     );
     startAlertScheduler();
+
+    const { startBackupScheduler } = await import(
+      "./lib/backups/backup-scheduler"
+    );
+    startBackupScheduler();
   }
 }

@@ -17,7 +17,7 @@ export type BackupStatus =
   | "restored"
   | "deleted";
 
-export type BackupType = "manual" | "pre_restore" | "system";
+export type BackupType = "manual" | "pre_restore" | "system" | "scheduled";
 
 // ── Safety limits ─────────────────────────────────────────────────────────────
 

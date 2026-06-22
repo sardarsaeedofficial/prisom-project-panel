@@ -47,6 +47,7 @@ export type ProjectAuditCategory =
   | "logs"
   | "monitoring"
   | "alerts"
+  | "backups"
   | "settings"
   | "system";
 

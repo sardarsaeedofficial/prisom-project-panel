@@ -91,6 +91,11 @@ function check(
 
 // ── 1. Backup ─────────────────────────────────────────────────────────────────
 
+export type GoLiveBackupContext = {
+  latestBackup:           GoLiveContext["latestBackup"];
+  scheduledBackupEnabled: boolean;
+};
+
 export function checkBackup(ctx: GoLiveContext, projectId: string): GoLiveCheck {
   const action: GoLiveCheck["action"] = {
     label: "Open Backups",
@@ -113,6 +118,21 @@ export function checkBackup(ctx: GoLiveContext, projectId: string): GoLiveCheck 
   }
   return check("backup", "Project backup", "backup", "fail",
     `Last backup is ${Math.round(ageHours / 24)} days old. Create a backup first.`, action);
+}
+
+export function checkScheduledBackups(_ctx: GoLiveContext, projectId: string, scheduledBackupEnabled: boolean): GoLiveCheck {
+  const action: GoLiveCheck["action"] = {
+    label: "Configure Schedule",
+    href:  `/projects/${projectId}/backups`,
+  };
+
+  if (scheduledBackupEnabled) {
+    return check("scheduled_backup", "Scheduled backups", "backup", "pass",
+      "Scheduled backups are enabled — backups will run automatically.");
+  }
+
+  return check("scheduled_backup", "Scheduled backups", "backup", "warning",
+    "Scheduled backups are not enabled. Enable them to ensure automatic data protection.", action);
 }
 
 // ── 2. Portability patches ────────────────────────────────────────────────────

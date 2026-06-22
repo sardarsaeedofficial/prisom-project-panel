@@ -397,6 +397,9 @@ model Project {
   // Sprint 27: operation locking
   operations          ProjectOperation[]
 
+  // Sprint 30: scheduled backups
+  backupSchedule      ProjectBackupSchedule?
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1437,4 +1440,47 @@ model ProjectOperation {
   @@index([projectId, status])
   @@index([projectId, operationType, status])
   @@index([updatedAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT BACKUP SCHEDULE  (Sprint 30: scheduled backups + retention)
+//
+// One schedule per project.  The scheduler checks enabled rows where
+// nextRunAt <= now and fires createProjectBackup with backupType="scheduled".
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectBackupSchedule {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  enabled   Boolean @default(false)
+
+  /// "daily" | "weekly"
+  frequency   String @default("daily")
+
+  /// HH:mm in server local time, e.g. "02:00"
+  timeOfDay   String @default("02:00")
+
+  /// 0=Sun … 6=Sat; required when frequency="weekly"
+  dayOfWeek   Int?
+
+  /// How many successful scheduled backups to keep; older ones are deleted
+  retentionCount Int @default(7)
+
+  /// What to include in the archive
+  includeSource      Boolean @default(true)
+  includeEnvMetadata Boolean @default(true)
+
+  /// Timestamps set by the scheduler
+  lastRunAt       DateTime?
+  lastSuccessAt   DateTime?
+  lastFailureAt   DateTime?
+  lastFailureText String?
+  nextRunAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, nextRunAt])
 }

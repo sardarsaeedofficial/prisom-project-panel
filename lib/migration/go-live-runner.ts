@@ -35,6 +35,7 @@ import type { GoLiveReadinessReport, GoLiveCheck, GoLiveCheckStatus } from "./go
 import {
   type GoLiveContext,
   checkBackup,
+  checkScheduledBackups,
   checkAppUrlPatch,
   checkEmailTransportPatch,
   checkCoreSecrets,
@@ -191,16 +192,23 @@ export async function runGoLiveChecks(
     select: { id: true, hostname: true, status: true, isPrimary: true },
   });
 
-  // ── 5. Latest backup ───────────────────────────────────────────────────────
-  const latestBackupRow = await db.projectBackup.findFirst({
-    where:   { projectId, status: "ready" },
-    orderBy: { completedAt: "desc" },
-    select:  { completedAt: true },
-  });
+  // ── 5. Latest backup + schedule status ────────────────────────────────────
+  const [latestBackupRow, backupScheduleRow] = await Promise.all([
+    db.projectBackup.findFirst({
+      where:   { projectId, status: "ready" },
+      orderBy: { completedAt: "desc" },
+      select:  { completedAt: true },
+    }),
+    db.projectBackupSchedule.findUnique({
+      where:  { projectId },
+      select: { enabled: true },
+    }),
+  ]);
   // completedAt is nullable in schema; only treat as "exists" if non-null
   const latestBackup = latestBackupRow?.completedAt
     ? { completedAt: latestBackupRow.completedAt }
     : null;
+  const scheduledBackupEnabled = backupScheduleRow?.enabled ?? false;
 
   // ── 6. Source scan (optional) ──────────────────────────────────────────────
   const sourceDir = resolveCheckedSourceDir(project.slug);
@@ -290,6 +298,7 @@ export async function runGoLiveChecks(
 
   // Backup
   checks.push(checkBackup(ctx, projectId));
+  checks.push(checkScheduledBackups(ctx, projectId, scheduledBackupEnabled));
 
   // Portability patches (only if source available)
   if (patchSummaries !== null) {
