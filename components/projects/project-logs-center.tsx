@@ -4,15 +4,25 @@
  * components/projects/project-logs-center.tsx
  *
  * Sprint 28: Professional Logs Center UI.
+ * Sprint 28 Hotfix: Fixed height/overflow layout so the log viewer fills the
+ * available viewport instead of collapsing to a thin strip.
  *
- * Features:
- *  - Left sidebar: log sources grouped by kind (runtime, structured, operations, deployments)
- *  - Dark terminal-style log viewer with colour-coded levels
- *  - Search (DB logs via searchLogsAction)
- *  - Level filter for DB / structured logs
- *  - Copy all to clipboard
- *  - Download as redacted .txt file
- *  - Truncation warning when max lines hit
+ * Layout:
+ *  ┌─────────────────────────────────────────────────┐
+ *  │ [source label]   [level▾] [search] [↻] [⎘] [↓] │  ← toolbar (shrink-0)
+ *  ├──────────────────────────────────────────────────┤
+ *  │ Sources  │ [search banner (optional)]            │
+ *  │ sidebar  │ ─────────────────────────────────────│
+ *  │ (scroll) │  dark terminal log viewer  (scroll)  │
+ *  │          │ ─────────────────────────────────────│
+ *  │          │  [N lines]  [level badge]             │
+ *  └──────────┴──────────────────────────────────────┘
+ *
+ * Height strategy:
+ *  - The outer wrapper does NOT rely on flex-1 / h-full chains.
+ *  - The body (sidebar + viewer) gets an explicit calc(100vh - 220px) height.
+ *    220px ≈ TopBar (56px) + WorkspaceNav (49px) + toolbar row (48px) + buffer.
+ *  - Every flex child that must scroll carries min-h-0.
  */
 
 import {
@@ -58,10 +68,10 @@ const GROUP_META: Record<
   string,
   { label: string; icon: React.ElementType; kinds: LogSourceKind[] }
 > = {
-  runtime:    { label: "Runtime",    icon: Terminal,    kinds: ["pm2_app", "pm2_service"] },
-  structured: { label: "Structured", icon: Layers,      kinds: ["db_logs"] },
-  operations: { label: "Operations", icon: ListChecks,  kinds: ["operation"] },
-  deployments:{ label: "Deployments",icon: Rocket,      kinds: ["deployment"] },
+  runtime:     { label: "Runtime",     icon: Terminal,   kinds: ["pm2_app", "pm2_service"] },
+  structured:  { label: "Structured",  icon: Layers,     kinds: ["db_logs"] },
+  operations:  { label: "Operations",  icon: ListChecks, kinds: ["operation"] },
+  deployments: { label: "Deployments", icon: Rocket,     kinds: ["deployment"] },
 };
 
 const GROUP_ORDER = ["runtime", "structured", "operations", "deployments"] as const;
@@ -85,57 +95,101 @@ const LEVEL_TEXT_CLASS: Record<string, string> = {
 const LEVEL_OPTIONS = ["ALL", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"] as const;
 type LevelFilter = typeof LEVEL_OPTIONS[number];
 
-// ── Sidebar ───────────────────────────────────────────────────────────────────
+// ── Timestamp formatter ───────────────────────────────────────────────────────
+
+function formatTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts.slice(0, 13);
+    return (
+      d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) +
+      "." +
+      String(d.getMilliseconds()).padStart(3, "0")
+    );
+  } catch {
+    return ts.slice(0, 13);
+  }
+}
+
+// ── Source sidebar ────────────────────────────────────────────────────────────
 
 function SourceSidebar({
   sources,
   selectedId,
   onSelect,
   loading,
+  onRefresh,
+  refreshing,
 }: {
   sources:    LogSource[];
   selectedId: string | null;
   onSelect:   (id: string) => void;
   loading:    boolean;
+  onRefresh:  () => void;
+  refreshing: boolean;
 }) {
   return (
-    <aside className="w-56 shrink-0 border-r bg-muted/30 flex flex-col overflow-y-auto">
-      {GROUP_ORDER.map((groupKey) => {
-        const { label, icon: Icon, kinds } = GROUP_META[groupKey];
-        const group = sources.filter((s) => kinds.includes(s.kind));
-        if (group.length === 0) return null;
+    <aside className="w-64 shrink-0 flex flex-col border-r bg-muted/20 overflow-hidden">
+      {/* Sidebar header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30 shrink-0">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Sources
+        </span>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+          title="Refresh source list"
+        >
+          <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
+        </button>
+      </div>
 
-        return (
-          <div key={groupKey} className="mt-1">
-            <p className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <Icon className="h-3 w-3" />
-              {label}
-            </p>
-            {group.map((src) => (
-              <button
-                key={src.id}
-                disabled={!src.available || loading}
-                onClick={() => onSelect(src.id)}
-                className={cn(
-                  "w-full text-left flex flex-col px-3 py-2 text-xs transition-colors",
-                  "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  selectedId === src.id
-                    ? "bg-primary/10 text-primary font-medium border-l-2 border-primary"
-                    : "text-foreground border-l-2 border-transparent",
-                  !src.available && "opacity-40 cursor-not-allowed",
-                )}
-              >
-                <span className="truncate leading-snug">{src.label}</span>
-                {src.subLabel && (
-                  <span className="text-[10px] text-muted-foreground truncate mt-0.5">
-                    {src.subLabel}
-                  </span>
-                )}
-              </button>
-            ))}
+      {/* Source list — scrolls independently */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {GROUP_ORDER.map((groupKey) => {
+          const { label, icon: Icon, kinds } = GROUP_META[groupKey];
+          const group = sources.filter((s) => kinds.includes(s.kind));
+          if (group.length === 0) return null;
+
+          return (
+            <div key={groupKey} className="mt-1">
+              <p className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <Icon className="h-3 w-3" />
+                {label}
+              </p>
+              {group.map((src) => (
+                <button
+                  key={src.id}
+                  disabled={!src.available || loading}
+                  onClick={() => onSelect(src.id)}
+                  className={cn(
+                    "w-full text-left flex flex-col px-3 py-2 text-xs transition-colors",
+                    "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    selectedId === src.id
+                      ? "bg-primary/10 text-primary font-medium border-l-2 border-primary"
+                      : "text-foreground border-l-2 border-transparent",
+                    !src.available && "opacity-40 cursor-not-allowed",
+                  )}
+                >
+                  <span className="truncate leading-snug">{src.label}</span>
+                  {src.subLabel && (
+                    <span className="text-[10px] text-muted-foreground truncate mt-0.5">
+                      {src.subLabel}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })}
+
+        {sources.length === 0 && (
+          <div className="px-3 py-6 text-xs text-muted-foreground text-center">
+            No log sources found.
           </div>
-        );
-      })}
+        )}
+      </div>
     </aside>
   );
 }
@@ -159,7 +213,6 @@ function LogViewer({
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when lines change
   useEffect(() => {
     if (!loading && lines.length > 0) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -172,8 +225,8 @@ function LogViewer({
   });
 
   return (
-    <div className="flex-1 overflow-auto bg-[#0d1117] p-4 font-mono text-xs leading-relaxed">
-      {/* Loading state */}
+    <div className="flex-1 min-h-0 overflow-auto bg-[#0d1117] p-4 font-mono text-xs leading-relaxed">
+      {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center h-40 text-gray-600">
           <RefreshCw className="h-4 w-4 animate-spin mr-2" />
@@ -181,7 +234,7 @@ function LogViewer({
         </div>
       )}
 
-      {/* Error state */}
+      {/* Error */}
       {!loading && error && (
         <div className="flex items-center gap-2 text-red-400 py-8 px-2">
           <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -189,7 +242,7 @@ function LogViewer({
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty */}
       {!loading && !error && lines.length === 0 && (
         <div className="flex flex-col items-center justify-center h-40 gap-2 text-gray-600">
           <WifiOff className="h-6 w-6" />
@@ -211,41 +264,27 @@ function LogViewer({
       {!loading && !error && filtered.map((line, i) => (
         <div
           key={i}
-          className="flex gap-2 hover:bg-white/5 px-2 py-0.5 rounded group"
+          className="flex gap-2 hover:bg-white/5 px-2 py-0.5 rounded"
         >
-          {/* Timestamp */}
           {line.ts && (
             <span className="text-gray-600 shrink-0 tabular-nums w-[6.5rem] truncate">
               {formatTs(line.ts)}
             </span>
           )}
-
-          {/* Level badge */}
           {line.level && (
-            <span
-              className={cn(
-                "shrink-0 w-5 font-bold uppercase text-center",
-                LEVEL_CLASS[line.level] ?? "text-gray-400",
-              )}
-            >
+            <span className={cn("shrink-0 w-5 font-bold uppercase text-center", LEVEL_CLASS[line.level] ?? "text-gray-400")}>
               {line.level.slice(0, 1)}
             </span>
           )}
-
-          {/* Source tag */}
           {line.source && (
             <span className="text-purple-400/80 shrink-0 w-14 truncate">
               {line.source}
             </span>
           )}
-
-          {/* Message */}
           <span
             className={cn(
               "break-all min-w-0",
-              line.level
-                ? (LEVEL_TEXT_CLASS[line.level] ?? "text-gray-300")
-                : "text-gray-300",
+              line.level ? (LEVEL_TEXT_CLASS[line.level] ?? "text-gray-300") : "text-gray-300",
             )}
           >
             {line.text}
@@ -253,14 +292,14 @@ function LogViewer({
         </div>
       ))}
 
-      {/* Hidden filtered note */}
+      {/* Level filter mismatch */}
       {!loading && !error && lines.length > 0 && filtered.length === 0 && (
         <div className="flex items-center justify-center h-20 text-gray-600">
           No {levelFilter} entries in current output.
         </div>
       )}
 
-      {/* Cursor */}
+      {/* Cursor blink */}
       {!loading && !error && (
         <div className="px-2 py-0.5 mt-1">
           <span className="text-gray-700 animate-pulse">▊</span>
@@ -270,27 +309,6 @@ function LogViewer({
       <div ref={bottomRef} />
     </div>
   );
-}
-
-// ── Timestamp formatter ───────────────────────────────────────────────────────
-
-function formatTs(ts: string): string {
-  try {
-    const d = new Date(ts);
-    if (isNaN(d.getTime())) return ts.slice(0, 13); // raw prefix fallback
-    return (
-      d.toLocaleTimeString("en-US", {
-        hour12:  false,
-        hour:    "2-digit",
-        minute:  "2-digit",
-        second:  "2-digit",
-      }) +
-      "." +
-      String(d.getMilliseconds()).padStart(3, "0")
-    );
-  } catch {
-    return ts.slice(0, 13);
-  }
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -308,41 +326,45 @@ export function ProjectLogsCenter({
   initialSources,
   initialSelectedId,
 }: {
-  projectId:         string;
-  initialSources:    LogSource[];
+  projectId:          string;
+  initialSources:     LogSource[];
   initialSelectedId?: string;
 }) {
-  const [sources, setSources]             = useState<LogSource[]>(initialSources);
-  const [selectedId, setSelectedId]       = useState<string | null>(
+  const [sources, setSources]         = useState<LogSource[]>(initialSources);
+  const [selectedId, setSelectedId]   = useState<string | null>(
     initialSelectedId ??
     initialSources.find((s) => s.available)?.id ??
     null,
   );
-  const [centerState, setCenterState]     = useState<CenterState>({ phase: "idle" });
-  const [levelFilter, setLevelFilter]     = useState<LevelFilter>("ALL");
-  const [searchInput, setSearchInput]     = useState("");
-  const [copied, setCopied]               = useState(false);
-  const [isPending, startTransition]      = useTransition();
+  const [centerState, setCenterState] = useState<CenterState>({ phase: "idle" });
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>("ALL");
+  const [searchInput, setSearchInput] = useState("");
+  const [copied, setCopied]           = useState(false);
+  const [isPending, startTransition]  = useTransition();
   const [refreshingSources, setRefreshingSources] = useState(false);
 
-  // ── Load a source ─────────────────────────────────────────────────────────
+  // ── Load source ───────────────────────────────────────────────────────────
   const loadSource = useCallback(
     (sourceId: string) => {
       setCenterState({ phase: "loading_source" });
       setSearchInput("");
       startTransition(async () => {
-        const r = await readLogSourceAction(projectId, sourceId);
-        if (!r.ok) {
-          setCenterState({ phase: "error", error: r.error });
-          return;
+        try {
+          const r = await readLogSourceAction(projectId, sourceId);
+          if (!r.ok) {
+            setCenterState({ phase: "error", error: r.error });
+            return;
+          }
+          setCenterState({ phase: "loaded", lines: r.lines, truncated: r.truncated });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          setCenterState({ phase: "error", error: msg });
         }
-        setCenterState({ phase: "loaded", lines: r.lines, truncated: r.truncated });
       });
     },
     [projectId],
   );
 
-  // Auto-load when selectedId changes
   useEffect(() => {
     if (selectedId) loadSource(selectedId);
     else setCenterState({ phase: "idle" });
@@ -354,12 +376,17 @@ export function ProjectLogsCenter({
       if (q.trim().length < 2) return;
       setCenterState({ phase: "searching" });
       startTransition(async () => {
-        const r = await searchLogsAction(projectId, q.trim());
-        if (!r.ok) {
-          setCenterState({ phase: "error", error: r.error });
-          return;
+        try {
+          const r = await searchLogsAction(projectId, q.trim());
+          if (!r.ok) {
+            setCenterState({ phase: "error", error: r.error });
+            return;
+          }
+          setCenterState({ phase: "search_results", lines: r.lines, query: q.trim() });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          setCenterState({ phase: "error", error: msg });
         }
-        setCenterState({ phase: "search_results", lines: r.lines, query: q.trim() });
       });
     },
     [projectId],
@@ -371,7 +398,7 @@ export function ProjectLogsCenter({
     else setCenterState({ phase: "idle" });
   }
 
-  // ── Refresh sources sidebar ───────────────────────────────────────────────
+  // ── Refresh sources ───────────────────────────────────────────────────────
   async function refreshSources() {
     setRefreshingSources(true);
     try {
@@ -382,11 +409,11 @@ export function ProjectLogsCenter({
     }
   }
 
-  // ── Copy to clipboard ─────────────────────────────────────────────────────
+  // ── Copy ──────────────────────────────────────────────────────────────────
   function handleCopy() {
     const lines =
-      centerState.phase === "loaded"        ? centerState.lines :
-      centerState.phase === "search_results"? centerState.lines : [];
+      centerState.phase === "loaded"         ? centerState.lines :
+      centerState.phase === "search_results" ? centerState.lines : [];
     const text = lines.map((l) => l.text).join("\n");
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
@@ -394,7 +421,7 @@ export function ProjectLogsCenter({
     });
   }
 
-  // ── Download (via route handler) ──────────────────────────────────────────
+  // ── Download ──────────────────────────────────────────────────────────────
   function handleDownload() {
     if (!selectedId) return;
     const url = `/projects/${projectId}/logs/download?source=${encodeURIComponent(selectedId)}`;
@@ -404,20 +431,21 @@ export function ProjectLogsCenter({
     a.click();
   }
 
-  // ── Derived state ─────────────────────────────────────────────────────────
-  const isLoading  = centerState.phase === "loading_source" || centerState.phase === "searching" || isPending;
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const isLoading    = centerState.phase === "loading_source" || centerState.phase === "searching" || isPending;
   const isSearchMode = centerState.phase === "search_results";
   const currentLines =
     centerState.phase === "loaded"         ? centerState.lines :
     centerState.phase === "search_results" ? centerState.lines : [];
-  const truncated  = centerState.phase === "loaded" ? centerState.truncated : false;
-  const viewError  = centerState.phase === "error"  ? centerState.error    : null;
-
+  const truncated    = centerState.phase === "loaded" ? centerState.truncated : false;
+  const viewError    = centerState.phase === "error"  ? centerState.error    : null;
   const selectedSource = sources.find((s) => s.id === selectedId);
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* ── Top toolbar ──────────────────────────────────────────────────────── */}
+    <div className="flex flex-col overflow-hidden">
+
+      {/* ── Toolbar ── (shrink-0, stays at top) */}
       <div className="flex items-center gap-2 border-b bg-background px-3 py-2 shrink-0 flex-wrap">
         {/* Source label */}
         <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
@@ -426,7 +454,7 @@ export function ProjectLogsCenter({
             <span className="text-muted-foreground">Search results</span>
           ) : selectedSource ? (
             <>
-              <span className="truncate">{selectedSource.label}</span>
+              <span className="truncate max-w-[180px]">{selectedSource.label}</span>
               {selectedSource.subLabel && (
                 <span className="text-muted-foreground font-normal text-xs hidden sm:inline">
                   <ChevronRight className="inline h-3 w-3" />
@@ -462,7 +490,7 @@ export function ProjectLogsCenter({
                 if (e.key === "Escape") clearSearch();
               }}
               placeholder="Search DB logs…"
-              className="h-7 pl-6 pr-6 text-xs w-48 sm:w-56"
+              className="h-7 pl-6 pr-6 text-xs w-44 sm:w-52"
             />
             {searchInput && (
               <button
@@ -474,7 +502,7 @@ export function ProjectLogsCenter({
             )}
           </div>
 
-          {/* Refresh current */}
+          {/* Refresh */}
           <Button
             variant="ghost"
             size="sm"
@@ -515,40 +543,37 @@ export function ProjectLogsCenter({
         </div>
       </div>
 
-      {/* ── Body: sidebar + viewer ───────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Source sidebar */}
-        <div className="flex flex-col border-r">
-          <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/20 shrink-0">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Sources
-            </span>
-            <button
-              onClick={refreshSources}
-              disabled={refreshingSources}
-              className="text-muted-foreground hover:text-foreground disabled:opacity-50"
-              title="Refresh source list"
-            >
-              <RefreshCw className={cn("h-3 w-3", refreshingSources && "animate-spin")} />
-            </button>
-          </div>
-          <SourceSidebar
-            sources={sources}
-            selectedId={selectedId}
-            onSelect={(id) => setSelectedId(id)}
-            loading={isLoading}
-          />
-        </div>
+      {/* ── Body: sidebar + viewer ──────────────────────────────────────────── */}
+      {/*
+       * KEY FIX: explicit height so the body doesn't depend on h-full
+       * propagating correctly through the flex chain.
+       *
+       * 220px ≈ TopBar (56px) + WorkspaceNav (49px) + toolbar above (48px) + buffer.
+       * min-h ensures usability on short viewports / mobile.
+       * On narrow screens the layout stacks vertically (flex-col); on lg+ it goes side-by-side.
+       */}
+      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-220px)] h-[calc(100vh-220px)] overflow-hidden border-t">
 
-        {/* Log viewer */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Sidebar */}
+        <SourceSidebar
+          sources={sources}
+          selectedId={selectedId}
+          onSelect={(id) => setSelectedId(id)}
+          loading={isLoading}
+          onRefresh={refreshSources}
+          refreshing={refreshingSources}
+        />
+
+        {/* Right panel */}
+        <section className="flex-1 min-w-0 flex flex-col overflow-hidden">
+
           {/* Search mode banner */}
           {isSearchMode && (
             <div className="flex items-center gap-2 bg-blue-50 border-b border-blue-200 px-4 py-1.5 text-xs text-blue-700 shrink-0">
-              <Search className="h-3 w-3" />
-              Showing search results for&nbsp;
+              <Search className="h-3 w-3 shrink-0" />
+              Showing results for&nbsp;
               <span className="font-medium">"{(centerState as { query: string }).query}"</span>
-              <span className="text-blue-500">({currentLines.length} matches)</span>
+              <span className="text-blue-500">({currentLines.length} match{currentLines.length !== 1 ? "es" : ""})</span>
               <button
                 onClick={clearSearch}
                 className="ml-auto flex items-center gap-1 hover:text-blue-900"
@@ -558,6 +583,7 @@ export function ProjectLogsCenter({
             </div>
           )}
 
+          {/* Log viewer — fills all remaining height */}
           <LogViewer
             lines={currentLines}
             loading={isLoading}
@@ -567,7 +593,7 @@ export function ProjectLogsCenter({
             searchQuery={isSearchMode ? (centerState as { query: string }).query : ""}
           />
 
-          {/* Line count footer */}
+          {/* Footer: line count */}
           {!isLoading && currentLines.length > 0 && (
             <div className="shrink-0 border-t bg-muted/20 px-4 py-1 text-[10px] text-muted-foreground flex items-center gap-3">
               <span>{currentLines.length} line{currentLines.length !== 1 ? "s" : ""}</span>
@@ -578,7 +604,7 @@ export function ProjectLogsCenter({
               )}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );
