@@ -14,11 +14,19 @@ import { db }                   from "@/lib/db";
 import { getDiskUsage }         from "./admin-disk-usage";
 import { getPm2Health }         from "./admin-pm2-health";
 import { getSchedulerStatus }   from "@/lib/scheduler/scheduler-status";
+import {
+  getCachedSection,
+  setCachedSection,
+} from "./admin-health-cache";
 import type {
   AdminHealthReport,
   AdminSystemWarning,
   AdminOverallStatus,
   AdminSchedulerSummary,
+  AdminFastSummary,
+  AdminPm2Section,
+  AdminDiskSection,
+  AdminSchedulersSection,
 } from "./admin-health-types";
 import { STALE_THRESHOLD_MS }   from "@/lib/operations/project-operation-locks";
 
@@ -340,4 +348,340 @@ export async function runAdminHealthReport(): Promise<AdminHealthReport> {
   const overallStatus = computeOverallStatus(warnings);
 
   return { ...partial, warnings, overallStatus };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 33: Fast summary + async section runners
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Fast warnings (DB-only) ───────────────────────────────────────────────────
+
+function buildFastWarnings(
+  opCounts:                    { stale: number },
+  deployFailed24h:             number,
+  scheduledFailed24h:          number,
+  projectsWithoutRecentBackup: number,
+): AdminSystemWarning[] {
+  const warnings: AdminSystemWarning[] = [];
+
+  if (opCounts.stale > 0) {
+    warnings.push({
+      severity:    "warning",
+      title:       `${opCounts.stale} stale operation${opCounts.stale > 1 ? "s" : ""}`,
+      description: "One or more operations have been running longer than expected. Check the Operations page.",
+      href:        "/projects",
+    });
+  }
+
+  if (deployFailed24h > 0) {
+    warnings.push({
+      severity:    "warning",
+      title:       `${deployFailed24h} failed deployment${deployFailed24h > 1 ? "s" : ""} in last 24h`,
+      description: "Recent deployments have failed. Review the affected projects.",
+      href:        "/projects",
+    });
+  }
+
+  if (scheduledFailed24h > 0) {
+    warnings.push({
+      severity:    "warning",
+      title:       `${scheduledFailed24h} scheduled backup${scheduledFailed24h > 1 ? "s" : ""} failed in last 24h`,
+      description: "Automatic backup jobs have failed. Check the Backups page for affected projects.",
+      href:        "/projects",
+    });
+  }
+
+  if (projectsWithoutRecentBackup > 0) {
+    warnings.push({
+      severity:    "info",
+      title:       `${projectsWithoutRecentBackup} project${projectsWithoutRecentBackup > 1 ? "s" : ""} without a recent backup`,
+      description: "Some published projects have no backup in the last 7 days.",
+      href:        "/projects",
+    });
+  }
+
+  return warnings;
+}
+
+// ── runAdminFastSummary ───────────────────────────────────────────────────────
+
+export async function runAdminFastSummary(forceRefresh = false): Promise<AdminFastSummary> {
+  if (!forceRefresh) {
+    const cached = getCachedSection<AdminFastSummary>("fast");
+    if (cached?.isFresh) {
+      return { ...cached.value, cacheStatus: "fresh" };
+    }
+    if (cached) {
+      // Return stale while caller decides whether to re-fetch
+      return { ...cached.value, cacheStatus: "stale" };
+    }
+  }
+
+  const now    = new Date();
+  const ago24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const ago7d  = new Date(now.getTime() -  7 * 24 * 60 * 60 * 1000);
+
+  const [
+    projectCount,
+    publishedCount,
+    domainCount,
+    domainActive,
+    domainFailed,
+    backupCount,
+    userCount,
+    opCounts,
+    deploy24hCounts,
+    latestFailures,
+    scheduledEnabled,
+    scheduledFailed24h,
+    projectsWithoutRecentBackup,
+    recentAuditEvents,
+  ] = await Promise.all([
+    db.project.count().catch(() => 0),
+
+    db.project.count({
+      where: { domains: { some: { status: "ACTIVE" } } },
+    }).catch(() => 0),
+
+    db.domain.count().catch(() => 0),
+
+    db.domain.count({ where: { status: "ACTIVE" } }).catch(() => 0),
+
+    db.domain.count({ where: { status: "FAILED" } }).catch(() => 0),
+
+    db.projectBackup.count({ where: { status: "ready" } }).catch(() => 0),
+
+    db.user.count().catch(() => 0),
+
+    getOperationCounts().catch(() => ({ active: 0, failed24h: 0, stale: 0 })),
+
+    Promise.all([
+      db.deployment.count({ where: { status: "SUCCESS", startedAt: { gte: ago24h } } }).catch(() => 0),
+      db.deployment.count({ where: { status: "FAILED",  startedAt: { gte: ago24h } } }).catch(() => 0),
+    ]),
+
+    db.deployment.findMany({
+      where:   { status: "FAILED", startedAt: { gte: ago24h } },
+      orderBy: { startedAt: "desc" },
+      take:    5,
+      select: {
+        id:           true,
+        errorMessage: true,
+        startedAt:    true,
+        project: { select: { id: true, name: true, slug: true } },
+      },
+    }).catch(() => []),
+
+    db.projectBackupSchedule.count({ where: { enabled: true } }).catch(() => 0),
+
+    db.projectBackupSchedule.count({
+      where: { lastFailureAt: { gte: ago24h } },
+    }).catch(() => 0),
+
+    db.project.count({
+      where: {
+        domains: { some: { status: "ACTIVE" } },
+        backups: { none: { status: "ready", completedAt: { gte: ago7d } } },
+      },
+    }).catch(() => 0),
+
+    db.projectAuditEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      take:    20,
+      select: {
+        id:        true,
+        action:    true,
+        summary:   true,
+        result:    true,
+        createdAt: true,
+      },
+    }).catch(() => []),
+  ]);
+
+  const [success24h, deployFailed24h] = deploy24hCounts;
+
+  const fastWarnings = buildFastWarnings(
+    opCounts,
+    deployFailed24h,
+    scheduledFailed24h,
+    projectsWithoutRecentBackup,
+  );
+
+  const result: AdminFastSummary = {
+    generatedAt:  now.toISOString(),
+    cacheStatus:  "miss",
+
+    totals: {
+      projects:          projectCount,
+      publishedProjects: publishedCount,
+      domains:           domainCount,
+      backups:           backupCount,
+      users:             userCount,
+    },
+
+    operations:  opCounts,
+
+    deployments: {
+      success24h,
+      failed24h:  deployFailed24h,
+      latestFailures: latestFailures.map((d) => ({
+        projectId:    d.project.id,
+        projectName:  d.project.name,
+        projectSlug:  d.project.slug,
+        deploymentId: d.id,
+        errorMessage: d.errorMessage,
+        startedAt:    d.startedAt.toISOString(),
+      })),
+    },
+
+    backups: {
+      scheduledEnabled,
+      scheduledFailed24h,
+      projectsWithoutRecentBackup,
+    },
+
+    domains: {
+      total:   domainCount,
+      active:  domainActive,
+      errored: domainFailed,
+    },
+
+    recentAuditEvents: recentAuditEvents.map((e) => ({
+      id:        e.id,
+      action:    e.action,
+      summary:   e.summary,
+      result:    e.result,
+      createdAt: e.createdAt.toISOString(),
+    })),
+
+    fastWarnings,
+  };
+
+  setCachedSection("fast", result);
+  return result;
+}
+
+// ── runAdminPm2Section ────────────────────────────────────────────────────────
+
+export async function runAdminPm2Section(forceRefresh = false): Promise<AdminPm2Section> {
+  if (!forceRefresh) {
+    const cached = getCachedSection<AdminPm2Section>("pm2");
+    if (cached?.isFresh) return { ...cached.value, cacheStatus: "fresh" };
+    if (cached)          return { ...cached.value, cacheStatus: "stale" };
+  }
+
+  const pm2 = await getPm2Health().catch(() => ({
+    status:    "unknown" as const,
+    processes: [],
+  }));
+
+  const warnings: AdminSystemWarning[] = [];
+  if (pm2.status === "critical") {
+    warnings.push({
+      severity:    "critical",
+      title:       "PM2 process error",
+      description: "One or more managed processes are in an errored state.",
+    });
+  } else if (pm2.status === "warning") {
+    warnings.push({
+      severity:    "warning",
+      title:       "PM2 process stopped",
+      description: "One or more managed processes are stopped.",
+    });
+  }
+
+  const result: AdminPm2Section = {
+    generatedAt: new Date().toISOString(),
+    cacheStatus: "miss",
+    status:      pm2.status,
+    processes:   pm2.processes,
+    warnings,
+  };
+
+  setCachedSection("pm2", result);
+  return result;
+}
+
+// ── runAdminDiskSection ───────────────────────────────────────────────────────
+
+export async function runAdminDiskSection(forceRefresh = false): Promise<AdminDiskSection> {
+  if (!forceRefresh) {
+    const cached = getCachedSection<AdminDiskSection>("disk");
+    if (cached?.isFresh) return { ...cached.value, cacheStatus: "fresh" };
+    if (cached)          return { ...cached.value, cacheStatus: "stale" };
+  }
+
+  const disk = await getDiskUsage().catch((): import("./admin-disk-usage").DiskUsageResult => ({ status: "unknown" }));
+
+  const warnings: AdminSystemWarning[] = [];
+  if (disk.status === "critical") {
+    warnings.push({
+      severity:    "critical",
+      title:       "Disk critically full",
+      description: `System disk is ${disk.usagePct ?? "?"}% full. Free space is dangerously low.`,
+    });
+  } else if (disk.status === "warning") {
+    warnings.push({
+      severity:    "warning",
+      title:       "Disk usage high",
+      description: `System disk is ${disk.usagePct ?? "?"}% full. Consider cleaning up old releases or backups.`,
+    });
+  }
+
+  const result: AdminDiskSection = {
+    generatedAt:          new Date().toISOString(),
+    cacheStatus:          "miss",
+    status:               disk.status,
+    totalBytes:           disk.totalBytes,
+    usedBytes:            disk.usedBytes,
+    freeBytes:            disk.freeBytes,
+    usagePct:             disk.usagePct,
+    projectStorageBytes:  disk.projectStorageBytes,
+    releaseStorageBytes:  disk.releaseStorageBytes,
+    backupStorageBytes:   disk.backupStorageBytes,
+    warnings,
+  };
+
+  setCachedSection("disk", result);
+  return result;
+}
+
+// ── runAdminSchedulersSection ─────────────────────────────────────────────────
+
+export async function runAdminSchedulersSection(forceRefresh = false): Promise<AdminSchedulersSection> {
+  if (!forceRefresh) {
+    const cached = getCachedSection<AdminSchedulersSection>("schedulers");
+    if (cached?.isFresh) return { ...cached.value, cacheStatus: "fresh" };
+    if (cached)          return { ...cached.value, cacheStatus: "stale" };
+  }
+
+  const alertsSummary  = toSchedulerSummary("alerts");
+  const backupsSummary = toSchedulerSummary("backups");
+
+  const warnings: AdminSystemWarning[] = [];
+  if (alertsSummary.status === "stale") {
+    warnings.push({
+      severity:    "warning",
+      title:       "Alert scheduler stale",
+      description: "The alert scheduler has not ticked recently. It may have crashed or been disabled.",
+    });
+  }
+  if (backupsSummary.status === "stale") {
+    warnings.push({
+      severity:    "warning",
+      title:       "Backup scheduler stale",
+      description: "The backup scheduler has not ticked recently. Scheduled backups may not be running.",
+    });
+  }
+
+  const result: AdminSchedulersSection = {
+    generatedAt: new Date().toISOString(),
+    cacheStatus: "miss",
+    alerts:      alertsSummary,
+    backups:     backupsSummary,
+    warnings,
+  };
+
+  setCachedSection("schedulers", result);
+  return result;
 }
