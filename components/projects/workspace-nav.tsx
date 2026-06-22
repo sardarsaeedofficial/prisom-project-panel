@@ -39,6 +39,7 @@ import {
   ListChecks,
   HardDrive,
   History,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -113,6 +114,7 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
         { label: "Backups",    href: `${base}/backups`,    icon: Archive    },
         { label: "Storage",    href: `${base}/storage`,    icon: HardDrive  },
         { label: "Operations", href: `${base}/operations`, icon: ListChecks },
+        { label: "Releases",   href: `${base}/releases`,   icon: Tag        },
       ],
     },
     {

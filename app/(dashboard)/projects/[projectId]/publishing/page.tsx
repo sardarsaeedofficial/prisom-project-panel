@@ -34,7 +34,8 @@ import { ReadinessPanel }        from "@/components/projects/readiness-panel";
 import { DeploymentConfigPanel } from "@/components/projects/deployment-config-panel";
 import { DeploymentHistoryPanel } from "@/components/projects/deployment-history-panel";
 import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
-import { ReplitImportChecklist } from "@/components/projects/replit-import-checklist";
+import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
+import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -336,6 +337,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <ProjectServicesPanel projectId={projectId} />
               </CardContent>
             </Card>
+          )}
+
+          {/* ── Sprint 39: Release promotion workflow ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <ProjectPromotionPanel projectId={projectId} />
           )}
 
           {/* ── Sprint 23: Replit import checklist (collapsible, dismissable) ── */}

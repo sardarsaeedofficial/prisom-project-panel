@@ -90,6 +90,15 @@ export const JOB_TEMPLATES = {
     confirmationText:      "BACKUP",
     confirmationHint:      "Type BACKUP to confirm",
   },
+  release_preflight: {
+    jobType:         "release_preflight",
+    scopeType:       "project",
+    title:           "Release Preflight Check",
+    description:     "Run preflight checks for the latest successful deployment of a selected project.",
+    requiresProject: true,
+    destructive:     false,
+    retryable:       true,
+  },
 } as const satisfies Record<string, JobTemplate>;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

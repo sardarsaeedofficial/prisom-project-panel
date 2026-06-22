@@ -1,0 +1,214 @@
+import type { Metadata }  from "next";
+import { notFound }        from "next/navigation";
+import Link                from "next/link";
+import {
+  CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
+  RotateCcw, ChevronLeft, GitBranch,
+} from "lucide-react";
+import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
+import { WorkspaceNav }               from "@/components/projects/workspace-nav";
+import { Badge }                       from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+}                                      from "@/components/ui/card";
+import { db }                          from "@/lib/db";
+import { listProjectPromotions }       from "@/lib/releases/release-promotion-service";
+import { requireProjectPermission }    from "@/lib/auth/project-membership";
+
+export const dynamic  = "force-dynamic";
+export const metadata: Metadata = { title: "Releases" };
+
+type Props = { params: Promise<{ projectId: string }> };
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function promoStatusBadge(status: string) {
+  const map: Record<string, { variant: "success" | "warning" | "error" | "secondary"; label: string }> = {
+    pending:   { variant: "secondary", label: "Pending" },
+    approved:  { variant: "warning",   label: "Approved" },
+    promoting: { variant: "warning",   label: "Promoting" },
+    promoted:  { variant: "success",   label: "Promoted" },
+    failed:    { variant: "error",     label: "Failed" },
+    cancelled: { variant: "secondary", label: "Cancelled" },
+  };
+  const m = map[status] ?? { variant: "secondary" as const, label: status };
+  return <Badge variant={m.variant}>{m.label}</Badge>;
+}
+
+function preflightIcon(status: string) {
+  if (status === "passed")  return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+  if (status === "warning") return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />;
+  if (status === "failed")  return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  return <Clock className="h-3.5 w-3.5 text-muted-foreground" />;
+}
+
+export default async function ReleasesPage({ params }: Props) {
+  const { projectId } = await params;
+
+  const ctx = await requireProjectPermission(projectId, "project.view");
+  if (!ctx.ok) notFound();
+
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { id: true, name: true, slug: true },
+  });
+  if (!project) notFound();
+
+  const [promotions, deployments] = await Promise.all([
+    listProjectPromotions(projectId, 20),
+    db.deployment.findMany({
+      where:   { projectId, status: "SUCCESS" },
+      orderBy: { createdAt: "desc" },
+      take:    20,
+      select: {
+        id:           true,
+        metadata:     true,
+        createdAt:    true,
+        isActive:     true,
+        activatedAt:  true,
+        commitSha:    true,
+        commitMessage: true,
+        duration:     true,
+        branch:       true,
+      },
+    }),
+  ]);
+
+  // Build a map from deploymentId → promotion for quick lookup
+  const promoByDeploymentId = new Map(
+    promotions.filter((p) => p.deploymentId).map((p) => [p.deploymentId!, p]),
+  );
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <WorkspaceNav projectId={projectId} />
+      <DashboardShell>
+        <div className="flex items-center gap-2 mb-2">
+          <Link
+            href={`/projects/${projectId}/publishing`}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Publishing
+          </Link>
+        </div>
+
+        <PageHeader
+          title="Releases"
+          description="Deployment history, release promotions, and rollback targets."
+        />
+
+        <div className="space-y-5 max-w-3xl">
+
+          {/* ── Promotions ── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Rocket className="h-4 w-4" />
+                Release Promotions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {promotions.length === 0 ? (
+                <div className="py-8 text-center">
+                  <Rocket className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No release promotions yet.</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Use the <Link href={`/projects/${projectId}/publishing`} className="text-primary hover:underline">Publishing</Link> page to promote a release.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {promotions.map((p) => (
+                    <div key={p.id} className="py-3 flex items-start gap-3">
+                      <div className="pt-0.5">{preflightIcon(p.preflightStatus)}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <code className="text-sm font-mono font-medium">{p.deploymentRef.slice(0, 16)}</code>
+                          {promoStatusBadge(p.status)}
+                        </div>
+                        <div className="mt-1 flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
+                          <span>{formatDate(p.createdAt)}</span>
+                          {p.approvedByEmail && <span>by {p.approvedByEmail}</span>}
+                          {p.rollbackDeploymentRef && p.status === "promoted" && (
+                            <span className="flex items-center gap-1">
+                              <RotateCcw className="h-3 w-3" />
+                              rollback: <code className="font-mono">{p.rollbackDeploymentRef.slice(0, 12)}</code>
+                            </span>
+                          )}
+                        </div>
+                        {p.failureReason && (
+                          <p className="mt-1 text-xs text-destructive">{p.failureReason.slice(0, 160)}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Deployment history ── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Successful Deployments</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {deployments.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No successful deployments.</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {deployments.map((dep) => {
+                    const meta          = dep.metadata as Record<string, unknown> | null;
+                    const deploymentRef = (meta?.deploymentRef as string) ?? dep.id;
+                    const promo         = promoByDeploymentId.get(dep.id);
+
+                    return (
+                      <div key={dep.id} className="py-3 flex items-start gap-3">
+                        <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <code className="text-sm font-mono font-medium">{deploymentRef.slice(0, 16)}</code>
+                            {dep.isActive && <Badge variant="success" className="text-[10px]">Active</Badge>}
+                            {promo && promoStatusBadge(promo.status)}
+                          </div>
+                          <div className="mt-1 flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
+                            <span>{formatDate(dep.createdAt.toISOString())}</span>
+                            {dep.branch && (
+                              <span className="flex items-center gap-1">
+                                <GitBranch className="h-3 w-3" />
+                                {dep.branch}
+                              </span>
+                            )}
+                            {dep.commitSha && <code className="font-mono">{dep.commitSha.slice(0, 7)}</code>}
+                            {dep.duration && (
+                              <span>{Math.round(dep.duration / 1000)}s</span>
+                            )}
+                          </div>
+                          {dep.commitMessage && (
+                            <p className="mt-0.5 text-xs text-muted-foreground truncate max-w-md">
+                              {dep.commitMessage}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+        </div>
+      </DashboardShell>
+    </div>
+  );
+}

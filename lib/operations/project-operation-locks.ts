@@ -24,6 +24,7 @@ export const STALE_THRESHOLD_MS: Record<OperationType, number> = {
   backup_delete:        10 * 60 * 1000,   // 10 min
   patch_apply:          10 * 60 * 1000,   // 10 min
   storage_cleanup:      15 * 60 * 1000,   // 15 min
+  release_promotion:    15 * 60 * 1000,   // 15 min
 };
 
 // ── Compatibility matrix ──────────────────────────────────────────────────────
@@ -83,6 +84,14 @@ export const BLOCKS_IF_RUNNING: Record<OperationType, Set<OperationType>> = {
     "backup_restore",
     "patch_apply",
     "storage_cleanup",
+  ]),
+  // Release promotion blocked by anything that changes process/source state
+  release_promotion: new Set<OperationType>([
+    "deploy",
+    "multi_service_deploy",
+    "backup_restore",
+    "patch_apply",
+    "release_promotion",
   ]),
 };
 

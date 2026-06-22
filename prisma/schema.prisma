@@ -423,6 +423,9 @@ model Project {
   // Sprint 37: unified notifications
   notifications       UserNotification[]
 
+  // Sprint 39: release promotions
+  releasePromotions   ProjectReleasePromotion[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1663,4 +1666,63 @@ model UserNotification {
   @@index([userId, readAt, createdAt])
   @@index([projectId, createdAt])
   @@index([category, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECT RELEASE PROMOTION  (Sprint 39: release promotion workflow)
+//
+// Records a formal approval of a deployment as the production release.
+// Sits on top of the existing deploy/rollback system — does not replace it.
+// Safety: cannot promote failed deployments, requires PROMOTE confirmation,
+//         uses operation locking, always records rollback target before promoting.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectReleasePromotion {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// The Deployment record being promoted (null = legacy ref only)
+  deploymentId String?
+
+  /// Release folder name (dep_xxx / git sha prefix / cuid)
+  deploymentRef String
+
+  /// Source commit or file hash from deploy runner
+  sourceRef String?
+
+  /// Absolute release dir path (logged only — never sent to client)
+  releasePath String?
+
+  /// pending | approved | promoting | promoted | failed | cancelled
+  status String @default("pending")
+
+  /// not_run | running | passed | failed | warning
+  preflightStatus String @default("not_run")
+
+  /// Array of ReleaseReadinessCheck objects
+  preflightJson Json?
+
+  approvedByUserId String?
+  approvedByEmail  String?
+  approvedAt       DateTime?
+
+  promotedAt    DateTime?
+  failedAt      DateTime?
+  failureReason String?
+
+  /// deploymentRef of the deployment that was live before this promotion
+  rollbackDeploymentRef String?
+  rollbackDeploymentId  String?
+  rollbackReady         Boolean @default(false)
+
+  /// Safe non-secret metadata
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
+  @@index([deploymentId])
 }
