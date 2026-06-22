@@ -39,6 +39,11 @@ const WORKER_ID = `worker_${Date.now().toString(36)}`;
 // ── Tick ──────────────────────────────────────────────────────────────────────
 
 async function workerTick(): Promise<void> {
+  // Register heartbeat so Admin Console shows worker as "running"
+  import("@/lib/scheduler/scheduler-status")
+    .then(({ registerSchedulerHeartbeat }) => registerSchedulerHeartbeat("jobs"))
+    .catch(() => null);
+
   // Claim and execute up to WORKER_CLAIM_LIMIT jobs per tick
   let claimed = 0;
   for (let i = 0; i < WORKER_CLAIM_LIMIT; i++) {

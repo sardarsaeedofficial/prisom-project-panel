@@ -68,8 +68,20 @@ registerJobHandler("scheduled_backup", async (_jobId, metadata) => {
   const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
   if (!projectId) throw new Error("scheduled_backup handler requires projectId in metadata");
 
+  // Sprint 36: manually-triggered jobs (created via template) require BACKUP confirmation
+  const isManualJob = typeof metadata.templateId === "string";
+  if (isManualJob && metadata.confirmation !== "BACKUP") {
+    throw new Error(
+      "Manual scheduled backup requires BACKUP confirmation in job metadata. " +
+      "Use the manual job runner and type BACKUP to confirm.",
+    );
+  }
+
   const { runScheduledBackupForProject } = await import("@/lib/backups/backup-schedule-runner");
-  const result = await runScheduledBackupForProject({ projectId, isUserTriggered: false });
+  const result = await runScheduledBackupForProject({
+    projectId,
+    isUserTriggered: isManualJob,
+  });
 
   if (result.skipped)  return `Skipped: ${result.reason ?? "unknown reason"}`;
   if (!result.ok)      throw new Error(result.error ?? "Backup failed");
