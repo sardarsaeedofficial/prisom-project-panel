@@ -55,9 +55,19 @@ export function startBackupScheduler(): void {
   globalForScheduler.__prisomBackupSchedulerStarted = true;
 
   setInterval(() => {
-    runDueBackupSchedules().catch((err: unknown) => {
-      console.error("[backup-scheduler] tick error:", err);
-    });
+    runDueBackupSchedules()
+      .then(() => {
+        // Sprint 31: register heartbeat for Admin Console scheduler status
+        import("@/lib/scheduler/scheduler-status").then(({ registerSchedulerHeartbeat }) => {
+          registerSchedulerHeartbeat("backups");
+        }).catch(() => null);
+      })
+      .catch((err: unknown) => {
+        console.error("[backup-scheduler] tick error:", err);
+        import("@/lib/scheduler/scheduler-status").then(({ registerSchedulerHeartbeat }) => {
+          registerSchedulerHeartbeat("backups", err instanceof Error ? err.message : String(err));
+        }).catch(() => null);
+      });
   }, SCHEDULER_TICK_MS);
 
   console.log("[backup-scheduler] started — tick every 5 min");

@@ -12,6 +12,7 @@ import {
   BookOpen,
   ChevronRight,
   Boxes,
+  TerminalSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,7 +81,7 @@ function NavItem({ href, icon: Icon, title, isActive, isChild }: NavItemProps) {
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -127,6 +128,16 @@ export function Sidebar() {
                 </div>
               );
             })}
+
+            {/* Admin Console — visible only to OWNER / ADMIN */}
+            {isAdmin && (
+              <NavItem
+                href="/admin"
+                icon={TerminalSquare}
+                title="Admin"
+                isActive={pathname === "/admin" || pathname.startsWith("/admin/")}
+              />
+            )}
           </nav>
         </ScrollArea>
 

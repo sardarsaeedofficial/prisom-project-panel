@@ -82,9 +82,19 @@ export function startAlertScheduler(): void {
   globalForScheduler.__prisomAlertSchedulerStarted = true;
 
   setInterval(() => {
-    runDueProjectAlertChecks().catch((err: unknown) => {
-      console.error("[alert-scheduler] tick error:", err);
-    });
+    runDueProjectAlertChecks()
+      .then(() => {
+        // Sprint 31: register heartbeat for Admin Console scheduler status
+        import("@/lib/scheduler/scheduler-status").then(({ registerSchedulerHeartbeat }) => {
+          registerSchedulerHeartbeat("alerts");
+        }).catch(() => null);
+      })
+      .catch((err: unknown) => {
+        console.error("[alert-scheduler] tick error:", err);
+        import("@/lib/scheduler/scheduler-status").then(({ registerSchedulerHeartbeat }) => {
+          registerSchedulerHeartbeat("alerts", err instanceof Error ? err.message : String(err));
+        }).catch(() => null);
+      });
   }, SCHEDULER_TICK_MS);
 
   console.log("[alert-scheduler] started — tick every 60 s, minimum interval 5 min per project");
