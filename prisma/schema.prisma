@@ -426,6 +426,9 @@ model Project {
   // Sprint 39: release promotions
   releasePromotions   ProjectReleasePromotion[]
 
+  // Sprint 40: GitHub auto-sync settings
+  githubSyncSettings  ProjectGitHubSyncSettings?
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1725,4 +1728,39 @@ model ProjectReleasePromotion {
   @@index([projectId, createdAt])
   @@index([status, createdAt])
   @@index([deploymentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GITHUB AUTO-SYNC SETTINGS  (1:1 per Project — opt-in, all off by default)
+//
+// Sprint 40: Controls whether a project auto-pulls from GitHub on push webhook
+//            and/or auto-deploys after a successful pull. Both are opt-in and
+//            never touch a dirty worktree.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectGitHubSyncSettings {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Auto-pull from remote on push webhook (ff-only, refused on dirty worktree)
+  autoPullEnabled   Boolean @default(false)
+  /// Auto-deploy after a successful auto-pull
+  autoDeployEnabled Boolean @default(false)
+
+  /// SHA that was HEAD after the last successful local pull
+  lastLocalSha  String?
+  /// SHA of the remote HEAD at last fetch
+  lastRemoteSha String?
+
+  /// "idle" | "syncing" | "synced" | "dirty" | "behind" | "failed" | "blocked"
+  lastSyncStatus  String?
+  lastSyncMessage String?
+  lastSyncedAt    DateTime?
+  lastWebhookAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
 }

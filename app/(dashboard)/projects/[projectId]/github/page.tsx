@@ -25,8 +25,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { SyncButton } from "@/components/github/sync-button";
 import { RepairInstallationIdButton } from "@/components/github/repair-installation-id-button";
-import { GithubLocalGitPanel } from "@/components/projects/github-local-git-panel";
-import { ProjectGitPanel } from "@/components/projects/project-git-panel";
+import { GithubLocalGitPanel }       from "@/components/projects/github-local-git-panel";
+import { ProjectGitPanel }           from "@/components/projects/project-git-panel";
+import { ProjectGitHubSyncPanel }    from "@/components/projects/project-github-sync-panel";
 import { db } from "@/lib/db";
 import { getProjectGitHubData } from "@/lib/data/github";
 import { unlinkGitHubRepositoryAction } from "@/app/actions/github";
@@ -191,6 +192,16 @@ export default async function ProjectGithubPage({ params }: Props) {
                   Git Operations
                 </h2>
                 <ProjectGitPanel projectId={projectId} />
+              </div>
+            )}
+
+            {/* Sprint 40 — Auto-sync settings (local git initialized) */}
+            {localGitStatus.initialized && (
+              <div className="space-y-2">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-0.5">
+                  Auto-Sync
+                </h2>
+                <ProjectGitHubSyncPanel projectId={projectId} />
               </div>
             )}
           </div>
@@ -459,6 +470,14 @@ export default async function ProjectGithubPage({ params }: Props) {
                 )}
               </CardContent>
             </Card>
+
+            {/* Sprint 40 — Auto-sync settings for GitHub App repos */}
+            <div className="space-y-2">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-0.5">
+                Auto-Sync
+              </h2>
+              <ProjectGitHubSyncPanel projectId={projectId} />
+            </div>
           </div>
         ) : (
           /* ── Generic "no repo connected" card (GitHub App projects with no repo) ── */

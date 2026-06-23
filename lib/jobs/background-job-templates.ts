@@ -99,6 +99,27 @@ export const JOB_TEMPLATES = {
     destructive:     false,
     retryable:       true,
   },
+  github_sync_now: {
+    jobType:         "github_sync",
+    scopeType:       "project",
+    title:           "GitHub Sync",
+    description:     "Fetch remote changes and, if auto-pull is enabled and the worktree is clean, pull the latest commit.",
+    requiresProject: true,
+    destructive:     false,
+    retryable:       true,
+  },
+  github_auto_deploy_now: {
+    jobType:               "github_auto_deploy",
+    scopeType:             "project",
+    title:                 "GitHub Auto-Deploy",
+    description:           "Deploy the project after a successful GitHub sync. Requires auto-deploy to be enabled and a recent successful sync.",
+    requiresProject:       true,
+    destructive:           true,
+    retryable:             false,
+    requiresConfirmation:  true,
+    confirmationText:      "DEPLOY",
+    confirmationHint:      "Type DEPLOY to confirm",
+  },
 } as const satisfies Record<string, JobTemplate>;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

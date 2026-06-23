@@ -5,7 +5,9 @@ import {
   recordGitHubPushEvent,
   type DetectedRepoInput,
 } from "@/lib/data/github";
-import { db } from "@/lib/db";
+import { db }                    from "@/lib/db";
+import { createBackgroundJob }   from "@/lib/jobs/background-job-service";
+import { recordWebhookReceived } from "@/lib/github/github-sync-service";
 
 // Always render on-demand — never cache a webhook endpoint
 export const dynamic = "force-dynamic";
@@ -513,6 +515,42 @@ async function handlePush(payload: PushPayload, delivery: string) {
       filesChanged: result.totalChanged,
     },
   });
+
+  // Sprint 40: If the project has auto-sync settings, record webhook receipt and
+  // queue a github_sync job. The job handler checks auto-pull/auto-deploy flags
+  // and never touches a dirty worktree.
+  void (async () => {
+    try {
+      const syncSettings = await db.projectGitHubSyncSettings.findUnique({
+        where:  { projectId: linkedRepo.projectId },
+        select: { id: true, autoPullEnabled: true, autoDeployEnabled: true },
+      });
+      if (syncSettings) {
+        await recordWebhookReceived(linkedRepo.projectId);
+        // Only queue if auto-pull or auto-deploy is enabled
+        if (syncSettings.autoPullEnabled || syncSettings.autoDeployEnabled) {
+          await createBackgroundJob({
+            jobType:     "github_sync",
+            scopeType:   "project",
+            projectId:   linkedRepo.projectId,
+            title:       `GitHub sync — ${fullName}@${branch}`,
+            description: `Triggered by push webhook: ${payload.after.slice(0, 7)}`,
+            metadata:    {
+              projectId: linkedRepo.projectId,
+              branch,
+              commitSha: payload.after,
+              fullName,
+              delivery,
+            },
+            maxAttempts: 2,
+            priority:    6,
+          });
+        }
+      }
+    } catch {
+      // Non-fatal — sync job queuing must never affect webhook response
+    }
+  })();
 
   return NextResponse.json({
     received: true,

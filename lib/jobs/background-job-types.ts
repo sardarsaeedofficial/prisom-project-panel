@@ -15,7 +15,9 @@ export type JobType =
   | "admin_health"
   | "go_live_check"
   | "operation_sync"
-  | "release_preflight";
+  | "release_preflight"
+  | "github_sync"
+  | "github_auto_deploy";
 
 export const JOB_TYPES: JobType[] = [
   "alert_check",
@@ -26,17 +28,21 @@ export const JOB_TYPES: JobType[] = [
   "go_live_check",
   "operation_sync",
   "release_preflight",
+  "github_sync",
+  "github_auto_deploy",
 ];
 
 export const JOB_TYPE_LABELS: Record<JobType, string> = {
-  alert_check:       "Alert Check",
-  scheduled_backup:  "Scheduled Backup",
-  storage_cleanup:   "Storage Cleanup",
-  domain_health:     "Domain Health",
-  admin_health:      "Admin Health Cache",
-  go_live_check:     "Go-Live Check",
-  operation_sync:    "Operation Sync",
-  release_preflight: "Release Preflight",
+  alert_check:        "Alert Check",
+  scheduled_backup:   "Scheduled Backup",
+  storage_cleanup:    "Storage Cleanup",
+  domain_health:      "Domain Health",
+  admin_health:       "Admin Health Cache",
+  go_live_check:      "Go-Live Check",
+  operation_sync:     "Operation Sync",
+  release_preflight:  "Release Preflight",
+  github_sync:        "GitHub Sync",
+  github_auto_deploy: "GitHub Auto-Deploy",
 };
 
 // ── Job status ────────────────────────────────────────────────────────────────

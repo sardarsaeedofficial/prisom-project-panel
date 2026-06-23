@@ -145,3 +145,182 @@ registerJobHandler("storage_cleanup", async (_jobId, _metadata) => {
   // runStorageCleanup(). This handler just acknowledges it.
   return "Storage cleanup job acknowledged — cleanup was executed at job creation time";
 });
+
+// release_preflight — run preflight checks for the latest successful deployment
+registerJobHandler("release_preflight", async (_jobId, metadata) => {
+  const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+  if (!projectId) throw new Error("release_preflight handler requires projectId in metadata");
+
+  const { db } = await import("@/lib/db");
+  const dep = await db.deployment.findFirst({
+    where:   { projectId, status: "SUCCESS" },
+    orderBy: { createdAt: "desc" },
+    select:  { id: true },
+  });
+  if (!dep) return `No successful deployment found for project ${projectId} — skipped`;
+
+  const { runReleasePreflight } = await import("@/lib/releases/release-preflight-runner");
+  const report = await runReleasePreflight(projectId, dep.id);
+  return `Preflight complete: ${report.overallStatus} (${report.checks.filter((c) => c.status === "fail").length} blocking failures)`;
+});
+
+// ── Sprint 40: GitHub auto-sync handlers ──────────────────────────────────────
+
+// github_sync — fetch remote + optional ff-only pull (never on dirty worktree)
+registerJobHandler("github_sync", async (_jobId, metadata) => {
+  const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+  if (!projectId) throw new Error("github_sync handler requires projectId in metadata");
+
+  const { runLocalGitSync } = await import("@/lib/github/github-sync-service");
+  const { db } = await import("@/lib/db");
+
+  // Read current sync settings to decide whether to auto-pull
+  const settings = await db.projectGitHubSyncSettings.findUnique({
+    where:  { projectId },
+    select: { autoPullEnabled: true, autoDeployEnabled: true },
+  });
+  const autoPull = settings?.autoPullEnabled ?? false;
+
+  const result = await runLocalGitSync(projectId, { autoPull });
+
+  if (!result.ok) throw new Error(result.message);
+
+  // Queue auto-deploy if pull succeeded and autoDeployEnabled
+  if (result.status === "synced" && result.pulledCommits && settings?.autoDeployEnabled) {
+    const { createBackgroundJob } = await import("@/lib/jobs/background-job-service");
+    await createBackgroundJob({
+      jobType:     "github_auto_deploy",
+      scopeType:   "project",
+      projectId,
+      title:       "GitHub Auto-Deploy",
+      description: `Auto-deploy triggered after syncing ${result.pulledCommits} commit(s)`,
+      metadata:    { projectId, triggeredBySyncCommits: result.pulledCommits },
+      maxAttempts: 1,
+      priority:    4,
+    });
+  }
+
+  return result.message;
+});
+
+// github_auto_deploy — deploy after a successful sync
+// Note: this handler intentionally triggers a deployment (exception to the
+// Sprint 35 "no deploy" rule — Sprint 40 explicitly adds this capability).
+registerJobHandler("github_auto_deploy", async (_jobId, metadata) => {
+  const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+  if (!projectId) throw new Error("github_auto_deploy handler requires projectId in metadata");
+
+  const { db } = await import("@/lib/db");
+
+  // Verify auto-deploy is still enabled (setting may have changed since job was queued)
+  const settings = await db.projectGitHubSyncSettings.findUnique({
+    where:  { projectId },
+    select: { autoDeployEnabled: true, lastSyncStatus: true },
+  });
+  if (!settings?.autoDeployEnabled) return "Auto-deploy is disabled — skipped";
+  if (settings.lastSyncStatus !== "synced") {
+    return `Last sync status is "${settings.lastSyncStatus}" — deploy skipped (requires "synced")`;
+  }
+
+  // Get project + full deploy config
+  const project = await db.project.findUnique({
+    where:   { id: projectId },
+    select:  { slug: true, name: true, deploymentConfig: true },
+  });
+  if (!project)                  throw new Error("Project not found");
+  if (!project.deploymentConfig) return "No deployment config — deploy skipped";
+
+  const cfg = project.deploymentConfig as import("@prisma/client").ProjectDeploymentConfig;
+
+  // Guard: no concurrent build
+  const { DeploymentStatus, DeploymentSource } = await import("@prisma/client");
+  const inFlight = await db.deployment.findFirst({
+    where:  { projectId, status: DeploymentStatus.BUILDING },
+    select: { id: true },
+  });
+  if (inFlight) return "Deployment already in progress — skipped";
+
+  // Acquire operation lock
+  const { startProjectOperation, completeProjectOperation, failProjectOperation } =
+    await import("@/lib/operations/project-operation-service");
+  const opId = await startProjectOperation({
+    projectId,
+    operationType: "deploy",
+    title:         `GitHub auto-deploy ${project.slug}`,
+  });
+
+  // Create BUILDING deployment record
+  const deployStart = new Date();
+  const deployment = await db.deployment.create({
+    data: { projectId, status: DeploymentStatus.BUILDING, source: DeploymentSource.MANUAL, startedAt: deployStart },
+  });
+
+  try {
+    // Fetch decrypted env vars (NEVER logged)
+    const { getDecryptedEnvVarsForDeploy } = await import("@/app/actions/project-envvars");
+    const envVars = await getDecryptedEnvVarsForDeploy(projectId, "production");
+
+    const { runProjectDeployment } = await import("@/lib/projects/project-deploy-runner");
+    const result = await runProjectDeployment({
+      slug:            project.slug,
+      installCommand:  cfg.installCommand,
+      buildCommand:    cfg.buildCommand,
+      startCommand:    cfg.startCommand,
+      rootDirectory:   cfg.rootDirectory,
+      port:            cfg.port,
+      pm2Name:         cfg.pm2Name,
+      healthPath:      cfg.healthPath,
+      nodeEnv:         cfg.nodeEnv,
+      envVars,
+      routeMode:       (cfg as unknown as { routeMode?: string }).routeMode as import("@/lib/projects/project-deploy-runner").RouteMode ?? "fullstack_node",
+      staticOutputDir: cfg.staticOutputDir,
+      apiPrefix:       (cfg as unknown as { apiPrefix?: string }).apiPrefix,
+    });
+
+    const finalStatus = result.ok ? DeploymentStatus.SUCCESS : DeploymentStatus.FAILED;
+    await db.deployment.update({
+      where: { id: deployment.id },
+      data: {
+        status:     finalStatus,
+        finishedAt: new Date(),
+        duration:   Date.now() - deployStart.getTime(),
+        ...(result.ok ? {} : { errorMessage: result.error.slice(0, 2_000) }),
+        metadata: {
+          deploymentRef: result.deploymentRef ?? null,
+          releasePath:   result.releasePath   ?? null,
+          pm2Name:       cfg.pm2Name,
+          port:          cfg.port,
+          envVarNames:   Object.keys(envVars),
+          output:        result.output.slice(0, 10_000),
+        },
+      },
+    });
+
+    await completeProjectOperation(opId);
+
+    if (!result.ok) throw new Error(result.error);
+
+    // Audit
+    try {
+      const { writeProjectAuditEvent } = await import("@/lib/audit/project-audit");
+      await writeProjectAuditEvent({
+        projectId,
+        category: "git",
+        action:   "project.github.auto_deploy",
+        summary:  `GitHub auto-deploy succeeded for ${project.name}`,
+        result:   "success",
+        metadata: { deploymentId: deployment.id, deploymentRef: result.deploymentRef ?? null },
+      });
+    } catch { /* non-fatal */ }
+
+    return `Auto-deploy completed: ${result.deploymentRef ?? deployment.id}`;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    await failProjectOperation(opId, reason);
+    await db.deployment.update({
+      where: { id: deployment.id },
+      data:  { status: DeploymentStatus.FAILED, finishedAt: new Date(), errorMessage: reason.slice(0, 2_000) },
+    }).catch(() => null);
+    throw err;
+  }
+});

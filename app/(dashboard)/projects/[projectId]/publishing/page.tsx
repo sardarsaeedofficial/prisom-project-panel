@@ -36,6 +36,8 @@ import { DeploymentHistoryPanel } from "@/components/projects/deployment-history
 import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import Link                         from "next/link";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -112,7 +114,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, dbDeployConfig, allDomains, serviceCount] = await Promise.all([
+  const [deployments, dbDeployConfig, allDomains, serviceCount, syncSettings] = await Promise.all([
     getProjectDeployments(projectId),
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
     db.domain.findMany({
@@ -122,6 +124,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
     }),
     // Sprint 23: detect multi-service mode
     db.projectService.count({ where: { projectId } }),
+    // Sprint 40: GitHub auto-sync status (non-fatal)
+    db.projectGitHubSyncSettings.findUnique({
+      where:  { projectId },
+      select: { lastSyncStatus: true, lastSyncMessage: true, lastSyncedAt: true },
+    }).catch(() => null),
   ]);
 
   // A project is in multi-service mode if it has any ProjectService rows
@@ -187,6 +194,51 @@ export default async function ProjectPublishingPage({ params }: Props) {
               hasConfig={!!dbDeployConfig}
               defaultEnv="production"
             />
+          )}
+
+          {/* ── Sprint 40: dirty worktree warning ── */}
+          {syncSettings?.lastSyncStatus === "dirty" && (
+            <Card className="border-yellow-500/40 bg-yellow-50/30 dark:bg-yellow-950/10">
+              <CardContent className="py-3 px-4 flex items-start gap-3">
+                <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+                    Uncommitted changes — auto-pull blocked
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                    {syncSettings.lastSyncMessage ?? "Worktree has uncommitted changes."}
+                  </p>
+                </div>
+                <Link
+                  href={`/projects/${projectId}/github`}
+                  className="shrink-0 inline-flex items-center gap-1 text-xs text-primary hover:underline whitespace-nowrap"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Resolve
+                </Link>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Sprint 40: behind remote notice ── */}
+          {syncSettings?.lastSyncStatus === "behind" && (
+            <Card className="border-blue-500/30 bg-blue-50/20 dark:bg-blue-950/10">
+              <CardContent className="py-3 px-4 flex items-start gap-3">
+                <RefreshCw className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Behind remote</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {syncSettings.lastSyncMessage ?? "New commits are available on the remote."}
+                  </p>
+                </div>
+                <Link
+                  href={`/projects/${projectId}/github`}
+                  className="shrink-0 inline-flex items-center gap-1 text-xs text-primary hover:underline whitespace-nowrap"
+                >
+                  Sync
+                </Link>
+              </CardContent>
+            </Card>
           )}
 
           {/* ── LocalShop: static VPS config (unchanged path) ── */}
