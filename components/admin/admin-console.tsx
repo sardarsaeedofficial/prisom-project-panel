@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   RefreshCw,
@@ -29,8 +29,9 @@ import {
   getAdminSchedulersSectionAction,
   getAdminStorageSectionAction,
   getAdminJobsSectionAction,
-  refreshAllAdminSectionsAction,
 }                                                from "@/app/actions/admin-health";
+import { useAdminAsyncSection }                  from "./use-admin-async-section";
+import { AdminSectionStatusCard }                from "./admin-section-status-card";
 import type {
   AdminFastSummary,
   AdminPm2Section,
@@ -74,9 +75,9 @@ function fmtRelative(iso: string): string {
 
 function computeOverall(
   fastSummary:  AdminFastSummary | null,
-  pm2:          AdminPm2Section | null,
-  disk:         AdminDiskSection | null,
-  schedulers:   AdminSchedulersSection | null,
+  pm2:          AdminPm2Section | null | undefined,
+  disk:         AdminDiskSection | null | undefined,
+  schedulers:   AdminSchedulersSection | null | undefined,
   pm2Loading:   boolean,
   diskLoading:  boolean,
   schLoading:   boolean,
@@ -435,16 +436,26 @@ function FailedDeployRow({ d }: { d: AdminFastSummary["deployments"]["latestFail
   );
 }
 
-// ── Section state helper ──────────────────────────────────────────────────────
+// ── Section loader factory ────────────────────────────────────────────────────
+// Wraps a section action to match the shape useAdminAsyncSection expects.
+// forceRef is set to true before calling retry() to bypass cache on demand.
 
-type SectionState<T> = {
-  data:    T | null;
-  loading: boolean;
-  error:   string | null;
-};
-
-function initialSection<T>(): SectionState<T> {
-  return { data: null, loading: true, error: null };
+function mkSectionLoader<T extends { generatedAt: string; cacheStatus: string }>(
+  action:   (force: boolean) => Promise<
+    { ok: true; data: T } |
+    { ok: false; error: string; staleData?: T | null; staleGeneratedAt?: string }
+  >,
+  forceRef: React.MutableRefObject<boolean>,
+) {
+  return () => {
+    const force = forceRef.current;
+    forceRef.current = false;
+    return action(force).then((r) =>
+      r.ok
+        ? { ok: true  as const, data: r.data, generatedAt: r.data.generatedAt, cacheStatus: r.data.cacheStatus }
+        : { ok: false as const, error: r.error, staleData: r.staleData ?? null, staleGeneratedAt: r.staleGeneratedAt },
+    );
+  };
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -459,118 +470,109 @@ export function AdminConsole({
   actorRole?:         string;
 }) {
   const [fastSummary, setFastSummary] = useState<AdminFastSummary | null>(initialFastSummary);
-  const [pm2,     setPm2]     = useState<SectionState<AdminPm2Section>>(initialSection);
-  const [disk,    setDisk]    = useState<SectionState<AdminDiskSection>>(initialSection);
-  const [sch,     setSch]     = useState<SectionState<AdminSchedulersSection>>(initialSection);
-  const [storage, setStorage] = useState<SectionState<AdminStorageSection>>(initialSection);
-  const [jobs,    setJobs]    = useState<SectionState<AdminJobsSection>>(initialSection);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ── Section loaders ─────────────────────────────────────────────────────────
+  // ── Force-refresh refs (set to true before calling retry to bypass cache) ───
+  const pm2Force     = useRef(false);
+  const diskForce    = useRef(false);
+  const schForce     = useRef(false);
+  const storageForce = useRef(false);
+  const jobsForce    = useRef(false);
 
-  const loadPm2 = useCallback((force = false) => {
-    setPm2((s) => ({ ...s, loading: true }));
-    getAdminPm2SectionAction(force)
-      .then((res) => {
-        if (res.ok) setPm2({ data: res.data, loading: false, error: null });
-        else        setPm2({ data: null,      loading: false, error: res.error });
-      })
-      .catch(() => setPm2({ data: null, loading: false, error: "Failed to load PM2 status" }));
-  }, []);
+  // ── Per-section async state via hook (timeout + slow + stale fallback) ──────
 
-  const loadDisk = useCallback((force = false) => {
-    setDisk((s) => ({ ...s, loading: true }));
-    getAdminDiskSectionAction(force)
-      .then((res) => {
-        if (res.ok) setDisk({ data: res.data, loading: false, error: null });
-        else        setDisk({ data: null,      loading: false, error: res.error });
-      })
-      .catch(() => setDisk({ data: null, loading: false, error: "Failed to load disk usage" }));
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadPm2Fn     = useCallback(mkSectionLoader<AdminPm2Section>(getAdminPm2SectionAction, pm2Force), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadDiskFn    = useCallback(mkSectionLoader<AdminDiskSection>(getAdminDiskSectionAction, diskForce), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadSchFn     = useCallback(mkSectionLoader<AdminSchedulersSection>(getAdminSchedulersSectionAction, schForce), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadStorageFn = useCallback(mkSectionLoader<AdminStorageSection>(getAdminStorageSectionAction, storageForce), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadJobsFn    = useCallback(mkSectionLoader<AdminJobsSection>(getAdminJobsSectionAction, jobsForce), []);
 
-  const loadSchedulers = useCallback((force = false) => {
-    setSch((s) => ({ ...s, loading: true }));
-    getAdminSchedulersSectionAction(force)
-      .then((res) => {
-        if (res.ok) setSch({ data: res.data, loading: false, error: null });
-        else        setSch({ data: null,      loading: false, error: res.error });
-      })
-      .catch(() => setSch({ data: null, loading: false, error: "Failed to load scheduler status" }));
-  }, []);
+  const pm2Section     = useAdminAsyncSection<AdminPm2Section>({ sectionName: "PM2 Processes",         load: loadPm2Fn,     timeoutMs: 12_000, slowAfterMs: 3_000 });
+  const diskSection    = useAdminAsyncSection<AdminDiskSection>({ sectionName: "Disk Usage",            load: loadDiskFn,    timeoutMs: 15_000, slowAfterMs: 4_000 });
+  const schSection     = useAdminAsyncSection<AdminSchedulersSection>({ sectionName: "Schedulers",     load: loadSchFn,     timeoutMs: 12_000, slowAfterMs: 3_000 });
+  const storageSection = useAdminAsyncSection<AdminStorageSection>({ sectionName: "Backup Storage",    load: loadStorageFn, timeoutMs: 15_000, slowAfterMs: 4_000 });
+  const jobsSection    = useAdminAsyncSection<AdminJobsSection>({ sectionName: "Background Jobs",      load: loadJobsFn,    timeoutMs: 12_000, slowAfterMs: 3_000 });
 
-  const loadStorage = useCallback((force = false) => {
-    setStorage((s) => ({ ...s, loading: true }));
-    getAdminStorageSectionAction(force)
-      .then((res) => {
-        if (res.ok) setStorage({ data: res.data, loading: false, error: null });
-        else        setStorage({ data: null,      loading: false, error: res.error });
-      })
-      .catch(() => setStorage({ data: null, loading: false, error: "Failed to load storage summary" }));
-  }, []);
+  // ── Initial load after mount (force=false → use cache if available) ─────────
 
-  const loadJobs = useCallback((force = false) => {
-    setJobs((s) => ({ ...s, loading: true }));
-    getAdminJobsSectionAction(force)
-      .then((res) => {
-        if (res.ok) setJobs({ data: res.data, loading: false, error: null });
-        else        setJobs({ data: null,      loading: false, error: res.error });
-      })
-      .catch(() => setJobs({ data: null, loading: false, error: "Failed to load jobs summary" }));
-  }, []);
-
-  // Load slow sections after mount
   useEffect(() => {
-    loadPm2();
-    loadDisk();
-    loadSchedulers();
-    loadStorage();
-    loadJobs();
-  }, [loadPm2, loadDisk, loadSchedulers, loadStorage, loadJobs]);
+    pm2Section.refresh();
+    diskSection.refresh();
+    schSection.refresh();
+    storageSection.refresh();
+    jobsSection.refresh();
+    // Intentionally only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // ── Global refresh ──────────────────────────────────────────────────────────
+  // ── Per-section retry handlers (force=true → bypass cache) ─────────────────
 
-  async function handleRefreshAll() {
+  const handleRetryPm2 = useCallback(() => {
+    pm2Force.current = true;
+    pm2Section.retry();
+  }, [pm2Section]);
+
+  const handleRetryDisk = useCallback(() => {
+    diskForce.current = true;
+    diskSection.retry();
+  }, [diskSection]);
+
+  const handleRetrySchedulers = useCallback(() => {
+    schForce.current = true;
+    schSection.retry();
+  }, [schSection]);
+
+  const handleRetryStorage = useCallback(() => {
+    storageForce.current = true;
+    storageSection.retry();
+  }, [storageSection]);
+
+  const handleRetryJobs = useCallback(() => {
+    jobsForce.current = true;
+    jobsSection.retry();
+  }, [jobsSection]);
+
+  // ── Global refresh (force all sections, run in parallel) ───────────────────
+
+  const handleRefreshAll = useCallback(async () => {
     setRefreshing(true);
-    setPm2((s)     => ({ ...s, loading: true }));
-    setDisk((s)    => ({ ...s, loading: true }));
-    setSch((s)     => ({ ...s, loading: true }));
-    setStorage((s) => ({ ...s, loading: true }));
-    setJobs((s)    => ({ ...s, loading: true }));
-
+    pm2Force.current = diskForce.current = schForce.current =
+      storageForce.current = jobsForce.current = true;
+    // Fire all section refreshes simultaneously
+    pm2Section.refresh();
+    diskSection.refresh();
+    schSection.refresh();
+    storageSection.refresh();
+    jobsSection.refresh();
+    // Refresh fast summary in background
     try {
-      const results = await refreshAllAdminSectionsAction();
-      if (results.fast.ok)        setFastSummary(results.fast.summary);
-      if (results.pm2.ok)         setPm2({ data: results.pm2.data,           loading: false, error: null });
-      else                        setPm2({ data: null,                        loading: false, error: results.pm2.error });
-      if (results.disk.ok)        setDisk({ data: results.disk.data,          loading: false, error: null });
-      else                        setDisk({ data: null,                       loading: false, error: results.disk.error });
-      if (results.schedulers.ok)  setSch({ data: results.schedulers.data,    loading: false, error: null });
-      else                        setSch({ data: null,                        loading: false, error: results.schedulers.error });
-      if (results.storage.ok)     setStorage({ data: results.storage.data,   loading: false, error: null });
-      else                        setStorage({ data: null,                    loading: false, error: results.storage.error });
-      if (results.jobs.ok)        setJobs({ data: results.jobs.data,          loading: false, error: null });
-      else                        setJobs({ data: null,                       loading: false, error: results.jobs.error });
-    } catch {
-      setPm2((s)     => ({ ...s, loading: false }));
-      setDisk((s)    => ({ ...s, loading: false }));
-      setSch((s)     => ({ ...s, loading: false }));
-      setStorage((s) => ({ ...s, loading: false }));
-      setJobs((s)    => ({ ...s, loading: false }));
-    } finally {
-      setRefreshing(false);
-    }
-  }
+      const { getAdminFastSummaryAction } = await import("@/app/actions/admin-health");
+      const res = await getAdminFastSummaryAction(true);
+      if (res.ok) setFastSummary(res.summary);
+    } catch { /* non-fatal */ }
+    setRefreshing(false);
+  }, [pm2Section, diskSection, schSection, storageSection, jobsSection]);
 
-  // ── Derived overall status ──────────────────────────────────────────────────
+  // ── Derived data for display ────────────────────────────────────────────────
+
+  // Extract data from state for computeOverall — stale or fresh, any is fine
+  const pm2Data     = pm2Section.state.data;
+  const diskData    = diskSection.state.data;
+  const schData     = schSection.state.data;
 
   const { status: overallStatus, warnings, isPartial } = computeOverall(
     fastSummary,
-    pm2.data,
-    disk.data,
-    sch.data,
-    pm2.loading,
-    disk.loading,
-    sch.loading,
+    pm2Data,
+    diskData,
+    schData,
+    pm2Section.state.status    === "loading",
+    diskSection.state.status   === "loading",
+    schSection.state.status    === "loading",
   );
 
   const f = fastSummary;
@@ -642,17 +644,17 @@ export function AdminConsole({
             />
             <StatCard
               label="Disk Usage"
-              value={disk.data?.usagePct !== undefined ? `${disk.data.usagePct}%` : disk.loading ? "…" : "—"}
+              value={diskData?.usagePct !== undefined ? `${diskData.usagePct}%` : diskSection.state.status === "loading" ? "…" : "—"}
               sub={
-                disk.data?.usedBytes !== undefined && disk.data.totalBytes !== undefined
-                  ? `${fmtBytes(disk.data.usedBytes)} / ${fmtBytes(disk.data.totalBytes)}`
-                  : disk.loading ? "Loading…" : undefined
+                diskData?.usedBytes !== undefined && diskData.totalBytes !== undefined
+                  ? `${fmtBytes(diskData.usedBytes)} / ${fmtBytes(diskData.totalBytes)}`
+                  : diskSection.state.status === "loading" ? "Loading…" : undefined
               }
               icon={HardDrive}
               accent={
-                disk.data?.status === "critical" ? "red"
-              : disk.data?.status === "warning"  ? "yellow"
-              : disk.data?.status === "healthy"  ? "green"
+                diskData?.status === "critical" ? "red"
+              : diskData?.status === "warning"  ? "yellow"
+              : diskData?.status === "healthy"  ? "green"
               : undefined
               }
             />
@@ -691,78 +693,46 @@ export function AdminConsole({
           {/* PM2 + Disk (async) */}
           <div className="grid gap-4 lg:grid-cols-2">
             {/* PM2 */}
-            {pm2.loading ? (
-              <SectionSkeleton />
-            ) : pm2.error ? (
-              <div className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={Server}
-                  title="PM2 Processes"
-                  onRefresh={() => loadPm2(true)}
-                  loading={false}
-                />
-                <p className="text-sm text-red-500">{pm2.error}</p>
-              </div>
-            ) : (
-              <section className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={Server}
-                  title="PM2 Processes"
-                  badge={<StatusBadge status={pm2.data!.status} />}
-                  generatedAt={pm2.data!.generatedAt}
-                  cacheStatus={pm2.data!.cacheStatus}
-                  onRefresh={() => loadPm2(true)}
-                  loading={pm2.loading}
-                />
-                <Pm2Table processes={pm2.data!.processes} />
-              </section>
-            )}
+            <AdminSectionStatusCard
+              title="PM2 Processes"
+              icon={Server}
+              state={pm2Section.state}
+              onRetry={handleRetryPm2}
+              badge={pm2Data ? <StatusBadge status={pm2Data.status} /> : undefined}
+            >
+              <Pm2Table processes={pm2Data?.processes ?? []} />
+            </AdminSectionStatusCard>
 
             {/* Disk */}
-            {disk.loading ? (
-              <SectionSkeleton />
-            ) : disk.error ? (
-              <div className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={HardDrive}
-                  title="Disk Usage"
-                  onRefresh={() => loadDisk(true)}
-                  loading={false}
-                />
-                <p className="text-sm text-red-500">{disk.error}</p>
-              </div>
-            ) : (
-              <section className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={HardDrive}
-                  title="Disk Usage"
-                  badge={<StatusBadge status={disk.data!.status} />}
-                  generatedAt={disk.data!.generatedAt}
-                  cacheStatus={disk.data!.cacheStatus}
-                  onRefresh={() => loadDisk(true)}
-                  loading={disk.loading}
-                />
+            <AdminSectionStatusCard
+              title="Disk Usage"
+              icon={HardDrive}
+              state={diskSection.state}
+              onRetry={handleRetryDisk}
+              badge={diskData ? <StatusBadge status={diskData.status} /> : undefined}
+            >
+              {diskData && (
                 <div className="space-y-2 text-sm">
-                  {disk.data!.usagePct !== undefined ? (
+                  {diskData.usagePct !== undefined ? (
                     <div>
                       <div className="flex justify-between text-xs text-muted-foreground mb-1">
                         <span>System disk</span>
-                        <span>{disk.data!.usagePct}%</span>
+                        <span>{diskData.usagePct}%</span>
                       </div>
                       <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
                         <div
                           className={cn(
                             "h-full rounded-full transition-all",
-                            disk.data!.usagePct >= 90 ? "bg-red-500"
-                          : disk.data!.usagePct >= 70 ? "bg-yellow-500"
+                            diskData.usagePct >= 90 ? "bg-red-500"
+                          : diskData.usagePct >= 70 ? "bg-yellow-500"
                           : "bg-green-500",
                           )}
-                          style={{ width: `${Math.min(disk.data!.usagePct, 100)}%` }}
+                          style={{ width: `${Math.min(diskData.usagePct, 100)}%` }}
                         />
                       </div>
-                      {disk.data!.freeBytes !== undefined && (
+                      {diskData.freeBytes !== undefined && (
                         <p className="text-xs text-muted-foreground mt-1">
-                          {fmtBytes(disk.data!.freeBytes)} free
+                          {fmtBytes(diskData.freeBytes)} free
                         </p>
                       )}
                     </div>
@@ -774,51 +744,38 @@ export function AdminConsole({
                   <div className="pt-2 border-t space-y-1">
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Projects storage</span>
-                      <span>{disk.data!.projectStorageBytes !== undefined ? fmtBytes(disk.data!.projectStorageBytes) : "—"}</span>
+                      <span>{diskData.projectStorageBytes !== undefined ? fmtBytes(diskData.projectStorageBytes) : "—"}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Releases storage</span>
-                      <span>{disk.data!.releaseStorageBytes !== undefined ? fmtBytes(disk.data!.releaseStorageBytes) : "—"}</span>
+                      <span>{diskData.releaseStorageBytes !== undefined ? fmtBytes(diskData.releaseStorageBytes) : "—"}</span>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-muted-foreground">Backups storage</span>
-                      <span>{disk.data!.backupStorageBytes !== undefined ? fmtBytes(disk.data!.backupStorageBytes) : "—"}</span>
+                      <span>{diskData.backupStorageBytes !== undefined ? fmtBytes(diskData.backupStorageBytes) : "—"}</span>
                     </div>
                   </div>
                 </div>
-              </section>
-            )}
+              )}
+            </AdminSectionStatusCard>
           </div>
 
           {/* Schedulers (async) + Domains & Backups (fast) */}
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Schedulers */}
-            {sch.loading ? (
-              <SectionSkeleton />
-            ) : sch.error ? (
-              <div className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={CalendarClock}
-                  title="Background Schedulers"
-                  onRefresh={() => loadSchedulers(true)}
-                  loading={false}
-                />
-                <p className="text-sm text-red-500">{sch.error}</p>
-              </div>
-            ) : (
-              <section className="rounded-lg border bg-card p-4">
-                <SectionHeader
-                  icon={CalendarClock}
-                  title="Background Schedulers"
-                  generatedAt={sch.data!.generatedAt}
-                  cacheStatus={sch.data!.cacheStatus}
-                  onRefresh={() => loadSchedulers(true)}
-                  loading={sch.loading}
-                />
-                <SchedulerRow label="Alert scheduler"  s={sch.data!.alerts} />
-                <SchedulerRow label="Backup scheduler" s={sch.data!.backups} />
-              </section>
-            )}
+            <AdminSectionStatusCard
+              title="Background Schedulers"
+              icon={CalendarClock}
+              state={schSection.state}
+              onRetry={handleRetrySchedulers}
+            >
+              {schData && (
+                <>
+                  <SchedulerRow label="Alert scheduler"  s={schData.alerts} />
+                  <SchedulerRow label="Backup scheduler" s={schData.backups} />
+                </>
+              )}
+            </AdminSectionStatusCard>
 
             {/* Domains + Backups (from fast summary) */}
             <section className="rounded-lg border bg-card p-4 space-y-3">
@@ -860,113 +817,87 @@ export function AdminConsole({
           </div>
 
           {/* Storage section (async) */}
-          {storage.loading ? (
-            <SectionSkeleton />
-          ) : storage.error ? (
-            <div className="rounded-lg border bg-card p-4">
-              <SectionHeader
-                icon={HardDrive}
-                title="Backup Storage"
-                onRefresh={() => loadStorage(true)}
-                loading={false}
-              />
-              <p className="text-sm text-red-500">{storage.error}</p>
-            </div>
-          ) : storage.data ? (
-            <section className="rounded-lg border bg-card p-4 space-y-3">
-              <SectionHeader
-                icon={HardDrive}
-                title="Backup Storage"
-                generatedAt={storage.data.generatedAt}
-                cacheStatus={storage.data.cacheStatus}
-                onRefresh={() => loadStorage(true)}
-                loading={storage.loading}
-              />
-              <div className="flex items-center justify-between text-sm border-b pb-2">
-                <span className="text-muted-foreground">Total backup bytes</span>
-                <span className="font-semibold">{fmtBytes(storage.data.totalBackupBytes)}</span>
-              </div>
-              {storage.data.projectsOverRetention > 0 && (
-                <p className="text-xs text-amber-600">
-                  {storage.data.projectsOverRetention} project(s) have backups exceeding retention limits.
-                </p>
-              )}
-              {storage.data.topProjects.length > 0 && (
-                <div className="divide-y text-xs">
-                  {storage.data.topProjects.slice(0, 5).map((p) => (
-                    <div key={p.projectId} className="flex items-center justify-between py-1.5 gap-2">
-                      <Link
-                        href={`/projects/${p.projectId}/storage`}
-                        className="font-medium hover:underline truncate"
-                      >
-                        {p.projectName}
-                      </Link>
-                      <span className="shrink-0 text-muted-foreground">
-                        {p.backupCount} backup(s) · {fmtBytes(p.totalBackupBytes)}
-                      </span>
-                    </div>
-                  ))}
+          <AdminSectionStatusCard
+            title="Backup Storage"
+            icon={HardDrive}
+            state={storageSection.state}
+            onRetry={handleRetryStorage}
+          >
+            {storageSection.state.data && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm border-b pb-2">
+                  <span className="text-muted-foreground">Total backup bytes</span>
+                  <span className="font-semibold">{fmtBytes(storageSection.state.data.totalBackupBytes)}</span>
                 </div>
-              )}
-            </section>
-          ) : null}
+                {storageSection.state.data.projectsOverRetention > 0 && (
+                  <p className="text-xs text-amber-600">
+                    {storageSection.state.data.projectsOverRetention} project(s) have backups exceeding retention limits.
+                  </p>
+                )}
+                {storageSection.state.data.topProjects.length > 0 && (
+                  <div className="divide-y text-xs">
+                    {storageSection.state.data.topProjects.slice(0, 5).map((p) => (
+                      <div key={p.projectId} className="flex items-center justify-between py-1.5 gap-2">
+                        <Link
+                          href={`/projects/${p.projectId}/storage`}
+                          className="font-medium hover:underline truncate"
+                        >
+                          {p.projectName}
+                        </Link>
+                        <span className="shrink-0 text-muted-foreground">
+                          {p.backupCount} backup(s) · {fmtBytes(p.totalBackupBytes)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </AdminSectionStatusCard>
 
           {/* Background Jobs section (async) */}
-          {jobs.loading ? (
-            <SectionSkeleton />
-          ) : jobs.error ? (
-            <div className="rounded-lg border bg-card p-4">
-              <SectionHeader
-                icon={Activity}
-                title="Background Jobs"
-                onRefresh={() => loadJobs(true)}
-                loading={false}
-              />
-              <p className="text-sm text-red-500">{jobs.error}</p>
-            </div>
-          ) : jobs.data ? (
-            <section className="rounded-lg border bg-card p-4 space-y-3">
-              <SectionHeader
-                icon={Activity}
-                title="Background Jobs"
-                generatedAt={jobs.data.generatedAt}
-                cacheStatus={jobs.data.cacheStatus}
-                onRefresh={() => loadJobs(true)}
-                loading={jobs.loading}
-              />
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-xs">
-                {[
-                  { label: "Active",       value: jobs.data.active,   accent: jobs.data.active   > 0 ? "text-purple-600" : "text-muted-foreground" },
-                  { label: "Queued",       value: jobs.data.queued,   accent: "text-muted-foreground" },
-                  { label: "Failed (24h)", value: jobs.data.failed24h, accent: jobs.data.failed24h > 0 ? "text-red-600" : "text-muted-foreground" },
-                  { label: "Stale",        value: jobs.data.stale,    accent: jobs.data.stale    > 0 ? "text-yellow-600" : "text-muted-foreground" },
-                  { label: "Success (24h)", value: jobs.data.success24h, accent: "text-green-600" },
-                ].map((item) => (
-                  <div key={item.label} className="flex flex-col gap-0.5">
-                    <span className="text-muted-foreground">{item.label}</span>
-                    <span className={`text-base font-semibold ${item.accent}`}>{item.value}</span>
-                  </div>
-                ))}
-              </div>
-              <Link
-                href="/admin/jobs"
-                className="inline-flex items-center gap-1.5 rounded border bg-background px-3 py-1.5 text-xs hover:bg-accent transition-colors"
-              >
-                View Background Jobs Dashboard
-                <ChevronRight className="h-3 w-3" />
-              </Link>
-              {jobs.data.warnings.length > 0 && (
-                <div className="space-y-1.5 pt-1 border-t">
-                  {jobs.data.warnings.map((w, i) => (
-                    <div key={i} className="flex items-start gap-2 text-xs">
-                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0 mt-0.5" />
-                      <span className="text-muted-foreground">{w.title}: {w.description}</span>
+          <AdminSectionStatusCard
+            title="Background Jobs"
+            icon={Activity}
+            state={jobsSection.state}
+            onRetry={handleRetryJobs}
+          >
+            {jobsSection.state.data && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 text-xs">
+                  {[
+                    { label: "Active",        value: jobsSection.state.data.active,    accent: jobsSection.state.data.active    > 0 ? "text-purple-600" : "text-muted-foreground" },
+                    { label: "Queued",        value: jobsSection.state.data.queued,    accent: "text-muted-foreground" },
+                    { label: "Failed (24h)",  value: jobsSection.state.data.failed24h, accent: jobsSection.state.data.failed24h > 0 ? "text-red-600" : "text-muted-foreground" },
+                    { label: "Stale",         value: jobsSection.state.data.stale,     accent: jobsSection.state.data.stale     > 0 ? "text-yellow-600" : "text-muted-foreground" },
+                    { label: "Success (24h)", value: jobsSection.state.data.success24h, accent: "text-green-600" },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col gap-0.5">
+                      <span className="text-muted-foreground">{item.label}</span>
+                      <span className={`text-base font-semibold ${item.accent}`}>{item.value}</span>
                     </div>
                   ))}
                 </div>
-              )}
-            </section>
-          ) : null}
+                <Link
+                  href="/admin/jobs"
+                  className="inline-flex items-center gap-1.5 rounded border bg-background px-3 py-1.5 text-xs hover:bg-accent transition-colors"
+                >
+                  View Background Jobs Dashboard
+                  <ChevronRight className="h-3 w-3" />
+                </Link>
+                {jobsSection.state.data.warnings.length > 0 && (
+                  <div className="space-y-1.5 pt-1 border-t">
+                    {jobsSection.state.data.warnings.map((w, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <AlertTriangle className="h-3.5 w-3.5 text-yellow-500 shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">{w.title}: {w.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </AdminSectionStatusCard>
 
           {/* Failed deployments (fast) */}
           {f.deployments.latestFailures.length > 0 && (

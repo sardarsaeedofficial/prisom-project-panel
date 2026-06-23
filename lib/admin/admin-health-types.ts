@@ -218,15 +218,15 @@ export type GetFastSummaryResult =
 
 export type GetPm2SectionResult =
   | { ok: true;  data: AdminPm2Section }
-  | { ok: false; error: string };
+  | { ok: false; error: string; staleData?: AdminPm2Section | null; staleGeneratedAt?: string };
 
 export type GetDiskSectionResult =
   | { ok: true;  data: AdminDiskSection }
-  | { ok: false; error: string };
+  | { ok: false; error: string; staleData?: AdminDiskSection | null; staleGeneratedAt?: string };
 
 export type GetSchedulersSectionResult =
   | { ok: true;  data: AdminSchedulersSection }
-  | { ok: false; error: string };
+  | { ok: false; error: string; staleData?: AdminSchedulersSection | null; staleGeneratedAt?: string };
 
 // ── Admin storage section (Sprint 34) ─────────────────────────────────────────
 
@@ -250,7 +250,7 @@ export type AdminStorageSection = {
 
 export type GetStorageSectionResult =
   | { ok: true;  data: AdminStorageSection }
-  | { ok: false; error: string };
+  | { ok: false; error: string; staleData?: AdminStorageSection | null; staleGeneratedAt?: string };
 
 // ── Admin jobs section (Sprint 35) ────────────────────────────────────────────
 
@@ -267,4 +267,4 @@ export type AdminJobsSection = {
 
 export type GetJobsSectionResult =
   | { ok: true;  data: AdminJobsSection }
-  | { ok: false; error: string };
+  | { ok: false; error: string; staleData?: AdminJobsSection | null; staleGeneratedAt?: string };
