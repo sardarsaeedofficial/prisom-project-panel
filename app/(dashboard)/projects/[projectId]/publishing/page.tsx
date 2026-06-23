@@ -133,6 +133,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
         id: true, name: true, slug: true, serviceType: true,
         internalPort: true, healthPath: true, staticOutputDir: true,
         spaFallback: true, isPrimary: true, isEnabled: true,
+        buildCommand: true, startCommand: true,
       },
     }),
     // Sprint 40: GitHub auto-sync status (non-fatal)

@@ -26,6 +26,9 @@ export type PlannerService = {
   spaFallback:     boolean;
   isPrimary:       boolean;
   isEnabled:       boolean;
+  // Optional — populated by planner-loader.ts; used for heuristic classification
+  buildCommand?:   string | null;
+  startCommand?:   string | null;
 };
 
 export type PlannerDeployConfig = {
@@ -195,74 +198,71 @@ function detectConflicts(
 
 // ── Service classification ────────────────────────────────────────────────────
 //
-// Services can have serviceType="node" even if they are static frontends
-// (e.g. a Vite/React build served by a static file server, or a service whose
-// serviceType wasn't set during Replit migration). Use multiple signals to
-// classify correctly so that Sardar-style ecommerce projects get API+static
-// routing rather than falling back to fullstack_node proxy.
+// Services can have serviceType="node" even when they are static frontends
+// (Replit migration sets everything to "node").  Use multiple signals ranked
+// by confidence so Sardar-style ecommerce projects get /api/* + static routing
+// rather than falling back to a fullstack_node proxy.
 
 type ServiceClass = "api" | "static_frontend";
 
 function classifyService(svc: PlannerService): ServiceClass {
-  // Explicit static serviceType is always static
+  // ── Definitive signals ────────────────────────────────────────────────────
+
   if (svc.serviceType === "static") return "static_frontend";
+  if (svc.spaFallback)              return "static_frontend";
 
-  const nameLower  = svc.name.toLowerCase();
-  const slugLower  = svc.slug.toLowerCase();
-  const combined   = `${nameLower} ${slugLower}`;
-  const outDir     = (svc.staticOutputDir ?? "").toLowerCase();
+  // ── Build command (most reliable when present) ────────────────────────────
 
-  // SPA fallback is a strong static signal
-  if (svc.spaFallback) return "static_frontend";
+  const buildCmd = (svc.buildCommand ?? "").toLowerCase();
+  if (/\bvite\b/.test(buildCmd))                    return "static_frontend";
+  if (/react-scripts\s+build/.test(buildCmd))        return "static_frontend";
+  if (/\bnext\s+build\b/.test(buildCmd))             return "static_frontend";
+  if (/\bnuxt\s+build\b/.test(buildCmd))             return "static_frontend";
+  if (/\bastro\s+build\b/.test(buildCmd))            return "static_frontend";
 
-  // Static output directories that end with common build output patterns
-  // e.g. artifacts/sardar-security/dist/public, dist/public, build, out
-  const staticDirPatterns = [
-    /\/dist\/public$/,
-    /\/dist$/,
-    /\/build$/,
-    /\/out$/,
-    /\/public$/,
-    /\/www$/,
-    /\/static$/,
-  ];
-  if (outDir && staticDirPatterns.some((re) => re.test(outDir))) return "static_frontend";
+  // ── Start command ─────────────────────────────────────────────────────────
 
-  // Name / slug keywords indicating a static frontend
-  const staticKeywords = [
-    "frontend",
-    "static",
-    "vite",
-    "react",
-    "nextjs",
-    "web-app",
-    "webapp",
-    "spa",
-    "client",
-    "ui",
-    "dist",
-  ];
-  // API keywords — if a name matches BOTH, API wins
-  const apiKeywords = [
-    "api",
-    "backend",
-    "server",
-    "express",
-    "fastify",
-    "hapi",
-    "koa",
-  ];
+  const startCmd = (svc.startCommand ?? "").toLowerCase();
+  // Pure Node server runners strongly imply API
+  if (/\bnode\s+dist\/index/.test(startCmd))         return "api";
+  if (/\bnode\s+src\/index/.test(startCmd))          return "api";
+  if (/\btsx?\s+src\/index/.test(startCmd))          return "api";
+  // Static preview servers imply frontend
+  if (/\bserve\b.*dist/.test(startCmd))              return "static_frontend";
+  if (/\bnpx\s+serve\b/.test(startCmd))              return "static_frontend";
+  if (/\bvite\s+preview\b/.test(startCmd))           return "static_frontend";
 
-  const hasStaticKw = staticKeywords.some((k) => combined.includes(k));
-  const hasApiKw    = apiKeywords.some((k) => combined.includes(k));
+  // ── Static output directory ───────────────────────────────────────────────
 
-  if (hasStaticKw && !hasApiKw) return "static_frontend";
+  const outDir = (svc.staticOutputDir ?? "").toLowerCase();
+  // Ends with typical build output patterns
+  if (/(\/(dist\/public|dist|build|out|public|www|\.next\/static))\/?$/.test(outDir)) {
+    return "static_frontend";
+  }
+  // Common Replit artifact paths (e.g. artifacts/sardar-security/dist/public)
+  if (outDir.includes("/dist/") || outDir.includes("/build/")) return "static_frontend";
 
-  // Health paths containing /api suggest an API service
-  const healthPath = (svc.healthPath ?? "").toLowerCase();
-  if (healthPath.includes("/api")) return "api";
+  // ── Name / slug keyword scoring ───────────────────────────────────────────
 
-  // Default: a node service with a port is an API
+  const nameLower = svc.name.toLowerCase();
+  const slugLower = svc.slug.toLowerCase();
+  const combined  = `${nameLower} ${slugLower}`;
+
+  const staticKw = ["frontend", "static", "vite", "spa", "client", "ui", "web-app", "webapp", "dist"];
+  const apiKw    = ["api", "backend", "server", "express", "fastify", "hapi", "koa"];
+
+  const staticScore = staticKw.filter((k) => combined.includes(k)).length;
+  const apiScore    = apiKw.filter((k) => combined.includes(k)).length;
+
+  if (staticScore > 0 && staticScore > apiScore)  return "static_frontend";
+  if (apiScore    > 0)                            return "api";
+
+  // ── Health path ───────────────────────────────────────────────────────────
+
+  if ((svc.healthPath ?? "").includes("/api")) return "api";
+
+  // ── Default: a node service with a port is assumed to be an API ───────────
+
   return "api";
 }
 

@@ -29,11 +29,12 @@ import {
   hasBackupConfig,
 }                                            from "@/lib/routing/nginx-route-apply";
 import { checkProjectRouteHealth }           from "@/lib/routing/project-route-health";
+import { loadPlannerInput }                  from "@/lib/routing/planner-loader";
 import type {
   ProjectRoutingActionResult,
   ProjectRouteHealthReport,
 }                                            from "@/lib/routing/project-route-types";
-import type { PlannerInput, PlannerService } from "@/lib/routing/project-route-planner";
+import type { PlannerInput }                 from "@/lib/routing/project-route-planner";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -41,66 +42,10 @@ type ActionResult<T = void> =
   | { ok: true;  data: T }
   | { ok: false; error: string; code?: string };
 
-// ── Loader: build planner input from DB ────────────────────────────────────────
+// ── Loader: delegated to shared lib/routing/planner-loader.ts ─────────────────
 
-async function buildPlannerInput(projectId: string): Promise<PlannerInput | null> {
-  const [project, config, services, domain] = await Promise.all([
-    db.project.findUnique({
-      where:  { id: projectId },
-      select: { slug: true, liveUrl: true },
-    }),
-    db.projectDeploymentConfig.findUnique({
-      where:  { projectId },
-      select: {
-        port:            true,
-        routeMode:       true,
-        apiPrefix:       true,
-        staticOutputDir: true,
-        publicStaticPath: true,
-        healthPath:      true,
-        primaryDomain:   true,
-      },
-    }),
-    db.projectService.findMany({
-      where:  { projectId },
-      select: {
-        id:              true,
-        name:            true,
-        slug:            true,
-        serviceType:     true,
-        internalPort:    true,
-        healthPath:      true,
-        staticOutputDir: true,
-        spaFallback:     true,
-        isPrimary:       true,
-        isEnabled:       true,
-      },
-    }),
-    db.domain.findFirst({
-      where:   { projectId, status: "ACTIVE", isPrimary: true },
-      select:  { hostname: true },
-      orderBy: { isPrimary: "desc" },
-    }),
-  ]);
-
-  if (!project) return null;
-
-  return {
-    projectId,
-    projectSlug: project.slug,
-    domain:      domain?.hostname ?? config?.primaryDomain ?? project.liveUrl?.replace(/^https?:\/\//, "").replace(/\/.*/, "") ?? null,
-    services:    services as PlannerService[],
-    deployConfig: config ? {
-      port:             config.port,
-      routeMode:        config.routeMode,
-      apiPrefix:        config.apiPrefix,
-      staticOutputDir:  config.staticOutputDir,
-      publicStaticPath: (config as { publicStaticPath?: string | null }).publicStaticPath ?? null,
-      healthPath:       config.healthPath,
-      primaryDomain:    (config as { primaryDomain?: string | null }).primaryDomain ?? null,
-    } : null,
-  };
-}
+const buildPlannerInput = (projectId: string): Promise<PlannerInput | null> =>
+  loadPlannerInput(projectId);
 
 // ── 1. Generate route map ─────────────────────────────────────────────────────
 
