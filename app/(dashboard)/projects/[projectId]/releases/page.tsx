@@ -17,8 +17,10 @@ import {
 import { db }                          from "@/lib/db";
 import { listProjectPromotions }       from "@/lib/releases/release-promotion-service";
 import { requireProjectPermission }    from "@/lib/auth/project-membership";
-import { GoLiveReadinessPanel }        from "@/components/projects/go-live-readiness-panel";
-import { ReleaseComparisonCard }       from "@/components/projects/release-comparison-card";
+import { GoLiveReadinessPanel }            from "@/components/projects/go-live-readiness-panel";
+import { ReleaseComparisonCard }           from "@/components/projects/release-comparison-card";
+import { SardarMigrationRunbookPanel }     from "@/components/projects/sardar-migration-runbook-panel";
+import { isSardarProject }                 from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
 export const metadata: Metadata = { title: "Releases" };
@@ -63,6 +65,9 @@ export default async function ReleasesPage({ params }: Props) {
     select: { id: true, name: true, slug: true },
   });
   if (!project) notFound();
+
+  // Sprint 50: Sardar runbook compact card
+  const isSardar = isSardarProject(project.name) || isSardarProject(project.slug ?? "");
 
   // Sprint 49: Server-side go-live status for blocker banner (non-fatal)
   let goLiveBlocked = false;
@@ -121,6 +126,11 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 50: Sardar migration runbook compact card ── */}
+          {isSardar && (
+            <SardarMigrationRunbookPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 49: Go-Live Readiness ── */}
           <GoLiveReadinessPanel projectId={projectId} />

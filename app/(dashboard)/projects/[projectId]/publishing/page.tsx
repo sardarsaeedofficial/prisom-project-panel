@@ -42,6 +42,8 @@ import Link                         from "next/link";
 import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
 import { hasBackupConfig }          from "@/lib/routing/nginx-route-apply";
+import { SardarMigrationRunbookPanel } from "@/components/projects/sardar-migration-runbook-panel";
+import { isSardarProject }             from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -117,6 +119,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
     select: { id: true, name: true, liveUrl: true, slug: true },
   });
   if (!project) notFound();
+
+  // Sprint 50: Sardar runbook compact card
+  const isSardar = isSardarProject(project.name) || isSardarProject(project.slug ?? "");
 
   const [deployments, dbDeployConfig, allDomains, services, syncSettings] = await Promise.all([
     getProjectDeployments(projectId),
@@ -282,6 +287,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 50: Sardar migration runbook compact card ── */}
+          {isSardar && (
+            <SardarMigrationRunbookPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 49: Go-live readiness banner ── */}
           {goLiveReadinessStatus && (
