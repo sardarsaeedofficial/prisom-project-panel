@@ -343,6 +343,54 @@ function buildEnvReadiness(r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+function buildDomainReadiness(r: EnrichedMigrationReport): string {
+  // Use APP_URL from requiredSecrets as the likely domain hint
+  const appUrlSecret = r.requiredSecrets.find(
+    (s) => s.name === "APP_URL" || s.name === "NEXT_PUBLIC_APP_URL" || s.name === "NEXTAUTH_URL",
+  );
+
+  const lines: string[] = [`## Domain / SSL / Routing Readiness\n`];
+
+  lines.push(`> Configure your domain, DNS, and SSL before routing traffic to production.`);
+  lines.push(`> Never use \`projects.doorstepmanchester.uk\` as a project domain.`);
+  lines.push("");
+
+  if (appUrlSecret) {
+    lines.push(`**Expected domain source:** \`${appUrlSecret.name}\` env var (enter production URL there).`);
+    lines.push("");
+  }
+
+  lines.push(`### DNS Setup`);
+  lines.push(`- [ ] Choose a production domain`);
+  lines.push(`- [ ] Add an A record: \`yourdomain.com\` → \`178.105.105.59\``);
+  lines.push(`- [ ] Wait for DNS propagation (up to 24h)`);
+  lines.push(`- [ ] Verify in Domains → Domain Readiness that A record shows "match"`);
+  lines.push("");
+
+  lines.push(`### SSL Certificate`);
+  lines.push(`- [ ] Issue SSL certificate after DNS is live`);
+  lines.push(`- [ ] Run: \`sudo certbot --nginx -d yourdomain.com\``);
+  lines.push(`- [ ] Confirm SSL shows "valid" in Domain Readiness`);
+  lines.push(`- [ ] Set a calendar reminder to renew before expiry`);
+  lines.push("");
+
+  lines.push(`### Nginx Routing`);
+  lines.push(`- [ ] Apply production routes in Publishing → Production Routing`);
+  lines.push(`- [ ] Confirm nginx config is managed by this project (no conflicts)`);
+  lines.push(`- [ ] Verify \`/api/*\` and \`/*\` routing works after apply`);
+  lines.push(`- [ ] Run smoke checks: \`curl -I https://yourdomain.com/\``);
+  lines.push("");
+
+  lines.push(`### Safety Reminders`);
+  lines.push(`- Never modify \`projects.doorstepmanchester.uk\` nginx config`);
+  lines.push(`- Never overwrite an existing unmanaged nginx config without reviewing it`);
+  lines.push(`- Run \`sudo nginx -t\` to validate config before reloading nginx`);
+  lines.push(`- Keep a nginx backup before applying routes`);
+  lines.push("");
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -375,6 +423,7 @@ export function generateHandoffMarkdown(
     buildDatabase(report),
     buildDatabaseReadiness(report),
     buildEnvReadiness(report),
+    buildDomainReadiness(report),
     buildServices(report),
     buildFooter(),
   ]

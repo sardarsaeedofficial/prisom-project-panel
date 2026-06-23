@@ -1563,10 +1563,17 @@ function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistI
     );
   }
 
+  // Sprint 47: Domain go-live checklist
   items.push(
-    { id: "domain-configured", label: "Domain configured and SSL issued",         required: false, note: "Add domain in the Domains section." },
-    { id: "routing-applied",   label: "Production routing applied in Publishing", required: false, note: "Publishing → Production Routing → Apply Routes." },
-    { id: "first-deploy",      label: "First multi-service deploy triggered",     required: true,  note: "Use Publishing → Services → Deploy all." },
+    { id: "domain-chosen",      label: "Production domain chosen",                  required: true,  note: "Add your production domain in Domains section — not the panel domain." },
+    { id: "dns-a-record",       label: "DNS A record points to VPS (178.105.105.59)", required: true, note: "Add an A record at your DNS provider pointing to 178.105.105.59." },
+    { id: "ssl-valid",          label: "SSL certificate issued and valid",          required: false, note: "Issue SSL with Let's Encrypt / certbot after DNS is live." },
+    { id: "nginx-ownership-ok", label: "Nginx config belongs to this project",     required: false, note: "Check Domains → Domain Readiness for nginx ownership conflicts." },
+    { id: "panel-domain-ok",    label: "Panel domain not used as project domain",  required: true,  note: "projects.doorstepmanchester.uk must not be used as a project domain." },
+    { id: "domain-readiness-checked", label: "Domain Readiness report checked",   required: false, note: "Run Domain Readiness check in Domains section before go-live." },
+    { id: "domain-configured",  label: "Domain configured and SSL issued",         required: false, note: "Add domain in the Domains section." },
+    { id: "routing-applied",    label: "Production routing applied in Publishing", required: false, note: "Publishing → Production Routing → Apply Routes." },
+    { id: "first-deploy",       label: "First multi-service deploy triggered",     required: true,  note: "Use Publishing → Services → Deploy all." },
     { id: "health-ok",         label: "API health check returns 200",             required: false, note: "/api/healthz should return { ok: true }." },
     { id: "frontend-loads",    label: "Frontend loads at /",                      required: false },
     { id: "login-works",       label: "Login / auth flow works",                  required: false },

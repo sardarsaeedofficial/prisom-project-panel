@@ -5,7 +5,8 @@ import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { db } from "@/lib/db";
 import { DomainManager, type DomainRow } from "@/components/projects/domain-manager";
 import { ProjectDomainCenter }            from "@/components/projects/project-domain-center";
-import { runDomainHealthReport }           from "@/lib/domains/domain-health-runner";
+import { DomainReadinessPanel }           from "@/components/projects/domain-readiness-panel";
+import { runDomainHealthReport }          from "@/lib/domains/domain-health-runner";
 
 export const metadata: Metadata = { title: "Domains" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,8 @@ export default async function ProjectDomainsPage({ params }: Props) {
     }),
   ]);
 
+  const primaryDomain = rawDomains.find((d) => d.isPrimary)?.hostname ?? rawDomains[0]?.hostname ?? null;
+
   const domains: DomainRow[] = rawDomains.map((d) => ({
     id:              d.id,
     hostname:        d.hostname,
@@ -70,6 +73,9 @@ export default async function ProjectDomainsPage({ params }: Props) {
         />
 
         <div className="space-y-8 max-w-2xl">
+          {/* Sprint 47: Domain Readiness */}
+          <DomainReadinessPanel projectId={projectId} primaryDomain={primaryDomain} />
+
           {/* Sprint 29: Domain + SSL Health Center */}
           <ProjectDomainCenter projectId={projectId} initialReport={initialReport} />
 

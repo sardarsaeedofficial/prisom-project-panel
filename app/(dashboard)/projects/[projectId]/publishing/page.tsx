@@ -177,6 +177,28 @@ export default async function ProjectPublishingPage({ params }: Props) {
   let initialNginx      = null;
   let routingHasBackup  = false;
 
+  // Sprint 47: Domain readiness check (non-fatal)
+  let domainReadinessStatus:  "ready" | "warning" | "blocked" | null = null;
+  let domainReadinessDomain:  string | null = null;
+  let domainReadinessBlockers: string[] = [];
+  try {
+    const primaryDomain = await db.domain.findFirst({
+      where:   { projectId, isPrimary: true },
+      select:  { hostname: true },
+    });
+    if (primaryDomain?.hostname) {
+      const { generateDomainReadinessReport } = await import("@/lib/domains/domain-readiness-service");
+      const domainReport = await generateDomainReadinessReport({
+        projectId,
+        domain:      primaryDomain.hostname,
+        projectSlug: project.slug,
+      });
+      domainReadinessStatus  = domainReport.status;
+      domainReadinessDomain  = domainReport.domain;
+      domainReadinessBlockers = domainReport.blockers.slice(0, 3);
+    }
+  } catch { /* non-fatal */ }
+
   // Sprint 46: Env readiness check (non-fatal)
   let envReadinessStatus:  "ready" | "warning" | "blocked" | null = null;
   let envReadinessBlocked: string[] = [];
@@ -234,6 +256,47 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 47: Domain readiness banner ── */}
+          {domainReadinessStatus && domainReadinessStatus !== "ready" && (
+            <div className={`rounded-xl border px-4 py-3 flex items-start gap-3 ${
+              domainReadinessStatus === "blocked"
+                ? "border-red-200 bg-red-50 dark:bg-red-950/20"
+                : "border-amber-200 bg-amber-50 dark:bg-amber-950/20"
+            }`}>
+              <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${
+                domainReadinessStatus === "blocked"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-amber-600 dark:text-amber-400"
+              }`} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${
+                  domainReadinessStatus === "blocked"
+                    ? "text-red-800 dark:text-red-200"
+                    : "text-amber-800 dark:text-amber-200"
+                }`}>
+                  Domain readiness — {domainReadinessDomain}:{" "}
+                  {domainReadinessStatus === "blocked" ? "blocked" : "warnings"}
+                </p>
+                {domainReadinessBlockers.length > 0 && (
+                  <ul className={`text-xs mt-0.5 space-y-0.5 ${
+                    domainReadinessStatus === "blocked"
+                      ? "text-red-700 dark:text-red-300"
+                      : "text-amber-700 dark:text-amber-300"
+                  }`}>
+                    {domainReadinessBlockers.map((b, i) => (
+                      <li key={i}>• {b}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-xs mt-1 text-muted-foreground">
+                  <Link href={`/projects/${projectId}/domains`} className="underline hover:no-underline">
+                    Open Domain Readiness →
+                  </Link>
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ── Sprint 46: Env readiness banner ── */}
           {envReadinessStatus && envReadinessStatus !== "ready" && (
