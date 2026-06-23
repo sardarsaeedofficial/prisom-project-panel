@@ -108,6 +108,15 @@ export const JOB_TEMPLATES = {
     destructive:     false,
     retryable:       true,
   },
+  replit_migration_scan: {
+    jobType:         "replit_migration_scan",
+    scopeType:       "project",
+    title:           "Replit Migration Scan",
+    description:     "Scan the project source files and generate a full migration readiness report.",
+    requiresProject: true,
+    destructive:     false,
+    retryable:       true,
+  },
   github_auto_deploy_now: {
     jobType:               "github_auto_deploy",
     scopeType:             "project",

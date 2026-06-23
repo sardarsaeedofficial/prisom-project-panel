@@ -62,29 +62,38 @@ import {
   analyzeMigrationAction,
   createServicesFromMigrationAction,
   recordMigrationReportCopiedAction,
+  getLatestMigrationReportAction,
+  exportHandoffMarkdownAction,
+  addMissingEnvVarsAction,
   type CreateServicesResult,
 } from "@/app/actions/project-migration";
 import type {
-  ReplitMigrationReport,
   SuggestedProjectService,
   MigrationRisk,
   DetectedSecret,
 } from "@/lib/migration/replit-detection-types";
+import type {
+  EnrichedMigrationReport,
+  ExternalServiceFinding,
+  ManualStep,
+} from "@/lib/migration/replit-migration-types";
 import { PortabilityPatchPanel } from "@/components/projects/portability-patch-panel";
 import { ReplitGoLivePanel }     from "@/components/projects/replit-go-live-panel";
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 const STEPS = [
-  { id: "analyze",    label: "Analyze",     requiresReport: false },
-  { id: "detection",  label: "Detection",   requiresReport: true  },
-  { id: "fixes",      label: "Fix Issues",  requiresReport: true  },
-  { id: "services",   label: "Services",    requiresReport: true  },
-  { id: "secrets",    label: "Secrets",     requiresReport: true  },
-  { id: "database",   label: "Database",    requiresReport: true  },
-  { id: "media",      label: "Media",       requiresReport: true  },
-  { id: "checklist",  label: "Checklist",   requiresReport: true  },
-  { id: "golive",     label: "Go Live",     requiresReport: false },
+  { id: "analyze",    label: "Analyze",       requiresReport: false },
+  { id: "detection",  label: "Detection",     requiresReport: true  },
+  { id: "fixes",      label: "Fix Issues",    requiresReport: true  },
+  { id: "services",   label: "Services",      requiresReport: true  },
+  { id: "secrets",    label: "Secrets",       requiresReport: true  },
+  { id: "database",   label: "Database",      requiresReport: true  },
+  { id: "media",      label: "Media",         requiresReport: true  },
+  { id: "external",   label: "Ext. Services", requiresReport: true  },
+  { id: "manual",     label: "Manual Steps",  requiresReport: true  },
+  { id: "checklist",  label: "Checklist",     requiresReport: true  },
+  { id: "golive",     label: "Go Live",       requiresReport: false },
 ] as const;
 
 type StepId = (typeof STEPS)[number]["id"];
@@ -250,7 +259,7 @@ function ServiceEditor({
 function StepNav({ current, onGo, report }: {
   current: StepId;
   onGo: (step: StepId) => void;
-  report: ReplitMigrationReport | null;
+  report: EnrichedMigrationReport | null;
 }) {
   const idx          = STEPS.findIndex((s) => s.id === current);
   const wizardSteps  = STEPS.filter((s) => s.id !== "golive");
@@ -310,12 +319,15 @@ interface ReplitMigrationAssistantProps {
 
 export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistantProps) {
   const [step,      setStep]      = useState<StepId>("analyze");
-  const [report,    setReport]    = useState<ReplitMigrationReport | null>(null);
+  const [report,    setReport]    = useState<EnrichedMigrationReport | null>(null);
   const [error,     setError]     = useState<string | null>(null);
   const [analyzing, startAnalyze] = useTransition();
   const [creating,  startCreate]  = useTransition();
   const [createResult, setCreateResult] = useState<CreateServicesResult | null>(null);
   const [copied,    setCopied]    = useState(false);
+  const [exporting, startExport]  = useTransition();
+  const [addingEnvVars, startAddEnvVars] = useTransition();
+  const [addEnvResult, setAddEnvResult] = useState<{ added: number; skipped: number } | null>(null);
 
   // Editable services (user can tweak before creating)
   const [editableServices, setEditableServices] = useState<SuggestedProjectService[]>([]);
@@ -362,6 +374,33 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
       setTimeout(() => setCopied(false), 2000);
       void recordMigrationReportCopiedAction(projectId);
     }).catch(() => null);
+  }
+
+  function exportHandoff() {
+    startExport(async () => {
+      const res = await exportHandoffMarkdownAction(projectId);
+      if (res.ok) {
+        // Trigger browser download
+        const blob = new Blob([res.data.markdown], { type: "text/markdown" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = res.data.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+    });
+  }
+
+  function addAllEnvVars() {
+    if (!report) return;
+    const keys = report.requiredSecrets.map((s) => s.name);
+    startAddEnvVars(async () => {
+      const res = await addMissingEnvVarsAction(projectId, keys);
+      if (res.ok) setAddEnvResult(res.data);
+    });
   }
 
   function toggleCheck(id: string) {
@@ -724,7 +763,7 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
         <div className="text-center py-8 text-muted-foreground">
           <Image className="h-8 w-8 mx-auto mb-2 opacity-40" />
           <p>No media storage detected. No media migration needed.</p>
-          <Button className="mt-4" onClick={() => setStep("checklist")}>Final checklist <ChevronRight className="h-4 w-4 ml-1" /></Button>
+          <Button className="mt-4" onClick={() => setStep("external")}>External Services <ChevronRight className="h-4 w-4 ml-1" /></Button>
         </div>
       );
     }
@@ -767,8 +806,8 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
           </div>
         )}
 
-        <Button onClick={() => setStep("checklist")} className="w-full">
-          Final checklist <ChevronRight className="h-4 w-4 ml-1" />
+        <Button onClick={() => setStep("external")} className="w-full">
+          External Services <ChevronRight className="h-4 w-4 ml-1" />
         </Button>
       </div>
     );
@@ -848,6 +887,163 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
     return <ReplitGoLivePanel projectId={projectId} />;
   }
 
+  // ── External Services step ─────────────────────────────────────────────────
+
+  function renderExternal() {
+    if (!report) return null;
+    const services = (report as EnrichedMigrationReport).externalServices ?? [];
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-semibold">External Services</h3>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Third-party integrations detected in your codebase. Configure these before deploying.
+          </p>
+        </div>
+
+        {services.length === 0 ? (
+          <Card>
+            <CardContent className="py-6 text-center">
+              <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+              <p className="text-sm font-medium">No external services detected</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Your project has no known third-party integrations requiring configuration.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {services.map((svc: ExternalServiceFinding) => (
+              <Card key={svc.provider} className={svc.critical ? "border-amber-300/50" : undefined}>
+                <CardContent className="py-3 px-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{svc.label}</span>
+                      {svc.critical && <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-950/20">Critical</Badge>}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{svc.action}</p>
+                  {svc.envKeys.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {svc.envKeys.map((k) => (
+                        <code key={k} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{k}</code>
+                      ))}
+                    </div>
+                  )}
+                  {svc.webhookPath && (
+                    <p className="text-xs text-muted-foreground">
+                      Webhook path: <code className="font-mono bg-muted px-1 py-0.5 rounded">{svc.webhookPath}</code>
+                    </p>
+                  )}
+                  {svc.callbackPath && (
+                    <p className="text-xs text-muted-foreground">
+                      OAuth callback: <code className="font-mono bg-muted px-1 py-0.5 rounded">{svc.callbackPath}</code>
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        <Button onClick={() => setStep("manual")} className="w-full">
+          <ChevronRight className="h-4 w-4 mr-1.5" />Manual Steps →
+        </Button>
+      </div>
+    );
+  }
+
+  // ── Manual Steps step ──────────────────────────────────────────────────────
+
+  function renderManual() {
+    if (!report) return null;
+    const steps = (report as EnrichedMigrationReport).manualSteps ?? [];
+    const requiredEnvKeys = report.requiredSecrets.filter((s) => s.required).map((s) => s.name);
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <h3 className="font-semibold">Manual Steps</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {steps.filter((s: ManualStep) => s.severity === "required").length} required step(s) must be completed before deployment.
+            </p>
+          </div>
+          {requiredEnvKeys.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={addingEnvVars || !!addEnvResult}
+              onClick={addAllEnvVars}
+            >
+              {addingEnvVars
+                ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Adding...</>
+                : addEnvResult
+                ? <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-500" />{addEnvResult.added} added</>
+                : <><Plus className="h-3.5 w-3.5 mr-1.5" />Add {requiredEnvKeys.length} env vars</>
+              }
+            </Button>
+          )}
+        </div>
+
+        {steps.length === 0 ? (
+          <Card>
+            <CardContent className="py-6 text-center">
+              <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
+              <p className="text-sm font-medium">No manual steps required</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {steps.map((s: ManualStep, i: number) => (
+              <Card key={s.id} className={s.severity === "required" ? "border-amber-300/50" : undefined}>
+                <CardContent className="py-3 px-4 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-muted-foreground">{i + 1}</span>
+                    <span className="font-medium text-sm">{s.title}</span>
+                    {s.severity === "required" && (
+                      <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-950/20">Required</Badge>
+                    )}
+                    {s.severity === "recommended" && (
+                      <Badge variant="secondary" className="text-xs">Recommended</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{s.description}</p>
+                  {s.envKeys && s.envKeys.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {s.envKeys.map((k) => (
+                        <code key={k} className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">{k}</code>
+                      ))}
+                    </div>
+                  )}
+                  {s.command && (
+                    <pre className="text-xs font-mono bg-muted/60 rounded px-2 py-1.5 overflow-x-auto">{s.command}</pre>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exporting}
+            onClick={exportHandoff}
+          >
+            {exporting
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Exporting...</>
+              : <><FileText className="h-3.5 w-3.5 mr-1.5" />Download Handoff (.md)</>
+            }
+          </Button>
+          <Button onClick={() => setStep("checklist")} className="flex-1">
+            <ChevronRight className="h-4 w-4 mr-1.5" />Checklist →
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   function renderStep() {
@@ -858,17 +1054,56 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
       case "services":  return renderServices();
       case "secrets":   return renderSecrets();
       case "database":  return renderDatabase();
-      case "media":     return renderMedia();
+      case "external":  return renderExternal();
+      case "manual":    return renderManual();
       case "checklist": return renderChecklist();
       case "golive":    return renderGoLive();
       default:          return null;
     }
   }
 
+  // ── Overall readiness banner ─────────────────────────────────────────────────
+
+  const readinessStatus = (report as EnrichedMigrationReport | null)?.readinessStatus;
+
   return (
     <div className="space-y-4">
       {/* Step nav */}
       <StepNav current={step} onGo={setStep} report={report} />
+
+      {/* ── Sprint 41: Overall status banner (shown when report exists) ── */}
+      {report && step !== "analyze" && (
+        <Card className={
+          readinessStatus === "blocked"
+            ? "border-red-300/60 bg-red-50/30 dark:bg-red-950/10"
+            : readinessStatus === "warnings"
+            ? "border-amber-300/50 bg-amber-50/30 dark:bg-amber-950/10"
+            : "border-emerald-300/50 bg-emerald-50/30 dark:bg-emerald-950/10"
+        }>
+          <CardContent className="py-2.5 px-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {readinessStatus === "blocked"
+                ? <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                : readinessStatus === "warnings"
+                ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+              }
+              <span className="text-sm font-medium">
+                {readinessStatus === "blocked"
+                  ? `${report.risks.filter((r) => r.severity === "blocker").length} blocker(s) — resolve before deploying`
+                  : readinessStatus === "warnings"
+                  ? `${report.risks.filter((r) => r.severity === "warning").length} warning(s) — review before deploying`
+                  : "Ready to migrate"
+                }
+              </span>
+            </div>
+            <Button size="sm" variant="ghost" className="shrink-0 h-7 text-xs" onClick={exportHandoff} disabled={exporting}>
+              {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />}
+              Export
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Go-Live entry card — shown on the landing (analyze) step ── */}
       {step === "analyze" && (
@@ -919,7 +1154,7 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
 
 type ChecklistItem = { id: string; label: string; note?: string; required?: boolean };
 
-function buildFinalChecklist(report: ReplitMigrationReport | null): ChecklistItem[] {
+function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistItem[] {
   const items: ChecklistItem[] = [
     { id: "code-imported",     label: "Code imported into project workspace",    required: true  },
     { id: "services-created",  label: "Services configured in Services section", required: true  },
@@ -963,7 +1198,7 @@ function buildFinalChecklist(report: ReplitMigrationReport | null): ChecklistIte
 
 // ── Build copyable report text ────────────────────────────────────────────────
 
-function buildReportText(report: ReplitMigrationReport): string {
+function buildReportText(report: EnrichedMigrationReport): string {
   const lines: string[] = [
     "# Replit Migration Report",
     `Generated: ${new Date(report.analyzedAt).toLocaleString()}`,

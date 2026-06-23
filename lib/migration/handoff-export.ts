@@ -1,0 +1,204 @@
+/**
+ * lib/migration/handoff-export.ts
+ *
+ * Sprint 41: Generate a Markdown handoff document from an enriched migration
+ * report. Suitable for download, copy-paste, or sharing with a new developer.
+ *
+ * Safety rules:
+ *  - No secret values included — only key names (DetectedSecret.name)
+ *  - All content is plain Markdown (no HTML)
+ */
+
+import type { EnrichedMigrationReport } from "./replit-migration-types";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function severityIcon(severity: string): string {
+  switch (severity) {
+    case "blocker":     return "🔴";
+    case "warning":     return "🟡";
+    case "required":    return "⚠️";
+    case "recommended": return "📌";
+    default:            return "ℹ️";
+  }
+}
+
+function table(headers: string[], rows: string[][]): string {
+  const sep  = headers.map((h) => "-".repeat(Math.max(h.length, 3)));
+  const head = `| ${headers.join(" | ")} |`;
+  const div  = `| ${sep.join(" | ")} |`;
+  const body = rows.map((r) => `| ${r.join(" | ")} |`).join("\n");
+  return [head, div, body].join("\n");
+}
+
+// ── Section builders ──────────────────────────────────────────────────────────
+
+function buildHeader(r: EnrichedMigrationReport): string {
+  const status =
+    r.readinessStatus === "ready"
+      ? "✅ **Ready to migrate**"
+      : r.readinessStatus === "warnings"
+      ? "⚠️ **Ready with warnings**"
+      : "🔴 **Blocked — resolve issues before deploying**";
+
+  return `# Migration Handoff — \`${r.projectSlug ?? "project"}\`
+
+> Generated: ${new Date(r.analyzedAt).toUTCString()}
+
+**Status:** ${status}
+
+**Summary:** ${r.filesScanned} files scanned • ${r.risks.length} issue(s) • ${r.manualSteps.length} manual step(s)
+`;
+}
+
+function buildBlockers(r: EnrichedMigrationReport): string {
+  const blockers = r.risks.filter((ri) => ri.severity === "blocker");
+  if (blockers.length === 0) return "";
+
+  const items = blockers
+    .map(
+      (b) =>
+        `### 🔴 ${b.title}\n\n${b.details}\n\n**Fix:** ${b.suggestedFix}` +
+        (b.filesInvolved.length > 0
+          ? `\n\n**Files:** ${b.filesInvolved.map((f) => `\`${f}\``).join(", ")}`
+          : ""),
+    )
+    .join("\n\n---\n\n");
+
+  return `## Blockers (${blockers.length})\n\n${items}\n`;
+}
+
+function buildWarnings(r: EnrichedMigrationReport): string {
+  const warnings = r.risks.filter((ri) => ri.severity === "warning");
+  if (warnings.length === 0) return "";
+
+  const items = warnings
+    .map((w) => `- ${severityIcon(w.severity)} **${w.title}**: ${w.suggestedFix}`)
+    .join("\n");
+
+  return `## Warnings\n\n${items}\n`;
+}
+
+function buildEnvVars(r: EnrichedMigrationReport): string {
+  if (r.requiredSecrets.length === 0) return "";
+
+  const rows = r.requiredSecrets.map((s) => [
+    `\`${s.name}\``,
+    s.required ? "Required" : "Optional",
+    s.category,
+    s.notes ?? "",
+  ]);
+
+  return `## Environment Variables\n\n${table(["Key", "Required", "Category", "Notes"], rows)}\n`;
+}
+
+function buildExternalServices(r: EnrichedMigrationReport): string {
+  if (r.externalServices.length === 0) return "";
+
+  const items = r.externalServices
+    .map((f) => {
+      const parts = [`### ${f.critical ? "⚠️" : "📦"} ${f.label}`];
+      if (f.envKeys.length > 0) {
+        parts.push(`**Env keys needed:**\n${f.envKeys.map((k) => `- \`${k}\``).join("\n")}`);
+      }
+      if (f.webhookPath) parts.push(`**Webhook path:** \`${f.webhookPath}\``);
+      if (f.callbackPath) parts.push(`**OAuth callback:** \`${f.callbackPath}\``);
+      parts.push(`**Action:** ${f.action}`);
+      return parts.join("\n\n");
+    })
+    .join("\n\n---\n\n");
+
+  return `## External Services\n\n${items}\n`;
+}
+
+function buildManualSteps(r: EnrichedMigrationReport): string {
+  if (r.manualSteps.length === 0) return "";
+
+  const items = r.manualSteps
+    .map((step, i) => {
+      const icon  = severityIcon(step.severity);
+      const lines = [`### Step ${i + 1}: ${icon} ${step.title}\n\n${step.description}`];
+      if (step.envKeys && step.envKeys.length > 0) {
+        lines.push(`**Env vars to set:**\n${step.envKeys.map((k) => `- \`${k}\``).join("\n")}`);
+      }
+      if (step.command) {
+        lines.push(`**Command:**\n\`\`\`sh\n${step.command}\n\`\`\``);
+      }
+      if (step.files && step.files.length > 0) {
+        lines.push(`**Related files:** ${step.files.map((f) => `\`${f}\``).join(", ")}`);
+      }
+      return lines.join("\n\n");
+    })
+    .join("\n\n---\n\n");
+
+  return `## Manual Steps (${r.manualSteps.length})\n\n${items}\n`;
+}
+
+function buildDatabase(r: EnrichedMigrationReport): string {
+  if (!r.database || r.database.type === "none") return "";
+
+  const lines = [
+    `## Database`,
+    ``,
+    `- **Type:** ${r.database.type}`,
+    `- **ORM:** ${r.database.orm ?? "none"}`,
+  ];
+
+  if (r.database.configFile) {
+    lines.push(`- **Config file:** \`${r.database.configFile}\``);
+  }
+  if (r.database.migrationsDir) {
+    lines.push(`- **Migrations dir:** \`${r.database.migrationsDir}\``);
+  }
+
+  if (r.dbPlan) {
+    lines.push(``, `**Migration plan:**`);
+    r.dbPlan.steps.forEach((s, i) => lines.push(`${i + 1}. ${s}`));
+    if (r.dbPlan.notes) lines.push(``, `> ${r.dbPlan.notes}`);
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function buildServices(r: EnrichedMigrationReport): string {
+  if (r.suggestedServices.length === 0) return "";
+
+  const rows = r.suggestedServices.map((s) => [
+    s.name,
+    s.serviceType ?? "node",
+    s.buildCommand ?? "",
+    s.startCommand ?? "",
+    s.internalPort ? String(s.internalPort) : "",
+  ]);
+
+  return `## Suggested Services\n\n${table(["Name", "Type", "Build", "Start", "Port"], rows)}\n`;
+}
+
+function buildFooter(): string {
+  return `---
+
+*Generated by Prisorm Migration Wizard. No secret values are included in this document.*
+`;
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+/**
+ * Generates a Markdown handoff document from an enriched migration report.
+ * Safe to share — no secret values are included.
+ */
+export function generateHandoffMarkdown(report: EnrichedMigrationReport): string {
+  return [
+    buildHeader(report),
+    buildBlockers(report),
+    buildWarnings(report),
+    buildEnvVars(report),
+    buildExternalServices(report),
+    buildManualSteps(report),
+    buildDatabase(report),
+    buildServices(report),
+    buildFooter(),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}

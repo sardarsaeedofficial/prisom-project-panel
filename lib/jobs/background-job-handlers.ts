@@ -324,3 +324,84 @@ registerJobHandler("github_auto_deploy", async (_jobId, metadata) => {
     throw err;
   }
 });
+
+// replit_migration_scan — scan project source and persist migration report
+registerJobHandler("replit_migration_scan", async (_jobId, metadata) => {
+  const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+  if (!projectId) throw new Error("replit_migration_scan handler requires projectId in metadata");
+
+  const { db } = await import("@/lib/db");
+  const project = await db.project.findUnique({
+    where:  { id: projectId },
+    select: { slug: true, name: true },
+  });
+  if (!project) throw new Error("Project not found");
+
+  // Run the analyzer
+  const { analyzeReplitProject } = await import("@/lib/migration/replit-project-analyzer");
+  const report = await analyzeReplitProject(project.slug);
+  if (!report) throw new Error("Analysis returned no data");
+
+  // Run external service detection
+  const { detectExternalServices } = await import("@/lib/migration/external-service-detector");
+  const externalServices = detectExternalServices(report);
+
+  // Generate manual steps
+  const { generateManualSteps } = await import("@/lib/migration/manual-steps-generator");
+  const manualSteps = generateManualSteps(report, externalServices);
+
+  const blockers        = report.risks.filter((r) => r.severity === "blocker").length;
+  const readinessStatus = blockers > 0 ? "blocked" : report.risks.some((r) => r.severity === "warning") ? "warnings" : "ready";
+  const status          = readinessStatus === "blocked" ? "blocked" : readinessStatus === "warnings" ? "draft" : "ready";
+
+  const enriched = { ...report, projectSlug: project.slug, externalServices, manualSteps, applyActions: [], readinessStatus };
+
+  // Persist report
+  await db.projectMigrationReport.create({
+    data: {
+      projectId,
+      sourceType: "replit",
+      status,
+      reportJson: enriched as object,
+    },
+  });
+
+  // Notify on blockers or ready
+  try {
+    const { notifyProjectAdmins } = await import("@/lib/notifications/notification-service");
+    if (blockers > 0) {
+      await notifyProjectAdmins(projectId, {
+        title:      "Migration scan: blockers found",
+        body:       `${blockers} blocker(s) must be resolved before deployment.`,
+        severity:   "warning",
+        category:   "deployment",
+        sourceType: "migration_report",
+        href:       `/projects/${projectId}/migration`,
+      });
+    } else {
+      await notifyProjectAdmins(projectId, {
+        title:      "Migration scan complete",
+        body:       `${project.name} looks ready for migration (${report.filesScanned} files scanned).`,
+        severity:   "success",
+        category:   "deployment",
+        sourceType: "migration_report",
+        href:       `/projects/${projectId}/migration`,
+      });
+    }
+  } catch { /* non-fatal */ }
+
+  // Write audit event
+  try {
+    const { writeProjectAuditEvent } = await import("@/lib/audit/project-audit");
+    await writeProjectAuditEvent({
+      projectId,
+      category: "publishing",
+      action:   "project.migration.scan_completed",
+      summary:  `Migration scan completed: ${report.filesScanned} files, ${blockers} blockers`,
+      result:   blockers > 0 ? "failed" : "success",
+      metadata: { filesScanned: report.filesScanned, blockers, status },
+    });
+  } catch { /* non-fatal */ }
+
+  return `Migration scan done: ${report.filesScanned} files, ${report.risks.length} issues, status=${status}`;
+});

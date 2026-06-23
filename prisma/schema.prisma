@@ -429,6 +429,9 @@ model Project {
   // Sprint 40: GitHub auto-sync settings
   githubSyncSettings  ProjectGitHubSyncSettings?
 
+  // Sprint 41: migration reports
+  migrationReports    ProjectMigrationReport[]
+
   // Slug unique within a workspace
   @@unique([workspaceId, slug])
   @@index([workspaceId])
@@ -1763,4 +1766,30 @@ model ProjectGitHubSyncSettings {
   updatedAt DateTime @updatedAt
 
   @@index([projectId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MIGRATION REPORT  (Sprint 41: Replit import wizard persistence)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProjectMigrationReport {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// "replit" | "github" | "zip" | "manual"
+  sourceType String @default("replit")
+
+  /// "draft" | "ready" | "blocked" | "applied"
+  status     String @default("draft")
+
+  /// Full enriched migration report as JSON (no secrets)
+  reportJson Json
+
+  createdByUserId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, createdAt])
 }
