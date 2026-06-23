@@ -65,8 +65,14 @@ import {
   getLatestMigrationReportAction,
   exportHandoffMarkdownAction,
   addMissingEnvVarsAction,
+  generateApplyPlanAction,
+  applyMigrationPlanAction,
   type CreateServicesResult,
 } from "@/app/actions/project-migration";
+import type {
+  MigrationApplyPlan,
+  MigrationApplyResult,
+} from "@/lib/migration/migration-apply-types";
 import type {
   SuggestedProjectService,
   MigrationRisk,
@@ -92,6 +98,7 @@ const STEPS = [
   { id: "media",      label: "Media",         requiresReport: true  },
   { id: "external",   label: "Ext. Services", requiresReport: true  },
   { id: "manual",     label: "Manual Steps",  requiresReport: true  },
+  { id: "apply",      label: "Apply Settings",requiresReport: true  },
   { id: "checklist",  label: "Checklist",     requiresReport: true  },
   { id: "golive",     label: "Go Live",       requiresReport: false },
 ] as const;
@@ -328,6 +335,15 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
   const [exporting, startExport]  = useTransition();
   const [addingEnvVars, startAddEnvVars] = useTransition();
   const [addEnvResult, setAddEnvResult] = useState<{ added: number; skipped: number } | null>(null);
+
+  // Apply settings step
+  const [applyPlan,    setApplyPlan]    = useState<MigrationApplyPlan | null>(null);
+  const [applyPlanErr, setApplyPlanErr] = useState<string | null>(null);
+  const [loadingPlan,  startLoadPlan]   = useTransition();
+  const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set());
+  const [applyConfirm, setApplyConfirm] = useState("");
+  const [applying,     startApply]      = useTransition();
+  const [applyResult,  setApplyResult]  = useState<MigrationApplyResult | null>(null);
 
   // Editable services (user can tweak before creating)
   const [editableServices, setEditableServices] = useState<SuggestedProjectService[]>([]);
@@ -1036,8 +1052,326 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
               : <><FileText className="h-3.5 w-3.5 mr-1.5" />Download Handoff (.md)</>
             }
           </Button>
-          <Button onClick={() => setStep("checklist")} className="flex-1">
-            <ChevronRight className="h-4 w-4 mr-1.5" />Checklist →
+          <Button onClick={() => {
+            setApplyPlan(null);
+            setApplyPlanErr(null);
+            setApplyResult(null);
+            setSelectedIds(new Set());
+            setApplyConfirm("");
+            startLoadPlan(async () => {
+              const res = await generateApplyPlanAction(projectId);
+              if (res.ok) {
+                setApplyPlan(res.data);
+                // Pre-select: all non-alreadyApplied, non-requiresConfirmation changes
+                const preselect = new Set(
+                  res.data.changes
+                    .filter((c) => !c.alreadyApplied)
+                    .map((c) => c.id),
+                );
+                setSelectedIds(preselect);
+              } else {
+                setApplyPlanErr(res.error);
+              }
+            });
+            setStep("apply");
+          }} className="flex-1">
+            <Zap className="h-4 w-4 mr-1.5" />Apply Settings →
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Apply Settings step ───────────────────────────────────────────────────
+
+  function renderApply() {
+    if (!report) return null;
+
+    const groups: Array<{ key: string; label: string }> = [
+      { key: "commands", label: "Commands & Health" },
+      { key: "services", label: "Services" },
+      { key: "env",      label: "Environment Variables" },
+      { key: "backup",   label: "Backup" },
+    ];
+
+    const needsConfirmation =
+      applyPlan?.changes.some(
+        (c) => selectedIds.has(c.id) && c.requiresConfirmation && !c.alreadyApplied,
+      ) ?? false;
+
+    function toggleId(id: string) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.has(id) ? next.delete(id) : next.add(id);
+        return next;
+      });
+    }
+
+    function selectAll() {
+      if (!applyPlan) return;
+      setSelectedIds(new Set(applyPlan.changes.filter((c) => !c.alreadyApplied).map((c) => c.id)));
+    }
+
+    function selectNone() {
+      setSelectedIds(new Set());
+    }
+
+    function runApply() {
+      if (!applyPlan) return;
+      startApply(async () => {
+        const res = await applyMigrationPlanAction({
+          projectId,
+          changeIds:        [...selectedIds],
+          confirmationText: applyConfirm || undefined,
+        });
+        if (res.ok) {
+          setApplyResult(res.data);
+        } else {
+          setApplyPlanErr(res.error);
+        }
+      });
+    }
+
+    if (loadingPlan) {
+      return (
+        <div className="text-center py-12 space-y-3">
+          <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary" />
+          <p className="text-sm text-muted-foreground">Generating apply plan…</p>
+        </div>
+      );
+    }
+
+    if (applyPlanErr && !applyPlan) {
+      return (
+        <div className="space-y-4">
+          <div className="rounded-md border border-red-200/60 bg-red-50/40 dark:bg-red-950/10 px-4 py-3 text-sm text-red-700 dark:text-red-400 flex items-start gap-2">
+            <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            {applyPlanErr}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setStep("manual")}>
+            ← Back
+          </Button>
+        </div>
+      );
+    }
+
+    if (!applyPlan) return null;
+
+    // Result view
+    if (applyResult) {
+      return (
+        <div className="space-y-4">
+          <div className={`rounded-md border px-4 py-3 flex items-start gap-2 text-sm ${
+            applyResult.ok
+              ? "border-emerald-200/60 bg-emerald-50/40 dark:bg-emerald-950/10 text-emerald-800 dark:text-emerald-300"
+              : "border-amber-200/60 bg-amber-50/40 dark:bg-amber-950/10 text-amber-800 dark:text-amber-300"
+          }`}>
+            {applyResult.ok
+              ? <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500" />
+              : <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+            }
+            <div>
+              <p className="font-medium">
+                {applyResult.ok ? "Settings applied" : "Applied with errors"}
+              </p>
+              <p className="text-xs mt-0.5 opacity-80">
+                {applyResult.appliedCount} applied · {applyResult.skippedCount} skipped · {applyResult.errorCount} failed
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            {applyResult.results.map((r) => (
+              <div key={r.id} className="flex items-start gap-2 text-sm">
+                {r.ok
+                  ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                  : <XCircle    className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                }
+                <span className={r.ok ? "" : "text-red-600 dark:text-red-400"}>{r.summary}</span>
+              </div>
+            ))}
+          </div>
+
+          {applyPlanErr && (
+            <div className="rounded-md border border-red-200/60 bg-red-50/40 px-3 py-2 text-sm text-red-700">
+              {applyPlanErr}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => {
+              setApplyResult(null);
+              setApplyPlanErr(null);
+              setApplyConfirm("");
+              startLoadPlan(async () => {
+                const res = await generateApplyPlanAction(projectId);
+                if (res.ok) {
+                  setApplyPlan(res.data);
+                  setSelectedIds(new Set(res.data.changes.filter((c) => !c.alreadyApplied).map((c) => c.id)));
+                } else {
+                  setApplyPlanErr(res.error);
+                }
+              });
+            }}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />Refresh Plan
+            </Button>
+            <Button onClick={() => setStep("checklist")} className="flex-1">
+              <ChevronRight className="h-4 w-4 mr-1.5" />Checklist →
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {/* Status bar */}
+        <div className={`rounded-md border px-3 py-2 flex items-center gap-2 text-sm ${
+          applyPlan.status === "blocked"
+            ? "border-red-200/60 bg-red-50/40 dark:bg-red-950/10"
+            : applyPlan.status === "warning"
+            ? "border-amber-200/60 bg-amber-50/40 dark:bg-amber-950/10"
+            : "border-emerald-200/60 bg-emerald-50/40 dark:bg-emerald-950/10"
+        }`}>
+          {applyPlan.status === "blocked"
+            ? <XCircle       className="h-4 w-4 text-red-500 shrink-0" />
+            : applyPlan.status === "warning"
+            ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+            : <CheckCircle2  className="h-4 w-4 text-emerald-500 shrink-0" />
+          }
+          <span>
+            {applyPlan.status === "blocked"
+              ? `${applyPlan.blockers.length} blocker(s) present — review before applying`
+              : applyPlan.status === "warning"
+              ? `${applyPlan.warnings.length} warning(s) — you can still apply`
+              : "Plan ready"
+            }
+          </span>
+          {!applyPlan.hasDeploymentConfig && (
+            <span className="ml-auto text-xs text-amber-600">No deployment config — commands will be skipped</span>
+          )}
+        </div>
+
+        {/* Select all / none */}
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={selectAll} className="text-primary underline underline-offset-2 hover:no-underline">All</button>
+          <span className="text-muted-foreground">·</span>
+          <button onClick={selectNone} className="text-primary underline underline-offset-2 hover:no-underline">None</button>
+          <span className="ml-auto text-muted-foreground">{selectedIds.size} selected</span>
+        </div>
+
+        {/* Changes grouped */}
+        {groups.map(({ key, label }) => {
+          const items = applyPlan.changes.filter((c) => c.group === key);
+          if (items.length === 0) return null;
+          return (
+            <div key={key} className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</p>
+              {items.map((change) => {
+                const checked = selectedIds.has(change.id);
+                return (
+                  <div
+                    key={change.id}
+                    className={`rounded-md border px-3 py-2.5 space-y-1 ${
+                      change.alreadyApplied
+                        ? "border-emerald-200/40 bg-emerald-50/20 dark:bg-emerald-950/10 opacity-60"
+                        : change.requiresConfirmation
+                        ? "border-amber-300/50 bg-amber-50/20 dark:bg-amber-950/10"
+                        : "border-border bg-card"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {change.alreadyApplied ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleId(change.id)}
+                          className="mt-0.5 h-4 w-4 rounded accent-primary shrink-0"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-medium">{change.label}</span>
+                          {change.alreadyApplied && (
+                            <Badge variant="outline" className="text-xs border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/20">
+                              Already applied
+                            </Badge>
+                          )}
+                          {change.requiresConfirmation && !change.alreadyApplied && (
+                            <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-950/20">
+                              Overwrites existing
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{change.description}</p>
+                        {(change.before || change.after) && (
+                          <div className="flex items-center gap-1 text-xs font-mono flex-wrap">
+                            {change.before && (
+                              <span className="text-red-600 dark:text-red-400 bg-red-50/60 dark:bg-red-950/20 px-1 rounded">
+                                {change.before}
+                              </span>
+                            )}
+                            {change.before && change.after && <span className="text-muted-foreground">→</span>}
+                            {change.after && (
+                              <span className="text-emerald-700 dark:text-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/20 px-1 rounded">
+                                {change.after}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+
+        {/* APPLY confirmation input */}
+        {needsConfirmation && (
+          <div className="rounded-md border border-amber-300/60 bg-amber-50/30 dark:bg-amber-950/10 px-4 py-3 space-y-2">
+            <div className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <p>
+                One or more selected changes will <strong>overwrite existing settings</strong>.
+                Type <code className="font-mono font-bold">APPLY</code> to confirm.
+              </p>
+            </div>
+            <input
+              type="text"
+              value={applyConfirm}
+              onChange={(e) => setApplyConfirm(e.target.value)}
+              placeholder="Type APPLY to confirm"
+              className="w-full rounded-md border bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        )}
+
+        {applyPlanErr && (
+          <div className="rounded-md border border-red-200/60 bg-red-50/40 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+            {applyPlanErr}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setStep("manual")}>
+            ← Back
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={applying || selectedIds.size === 0 || (needsConfirmation && applyConfirm !== "APPLY")}
+            onClick={runApply}
+          >
+            {applying
+              ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Applying…</>
+              : <><Zap className="h-4 w-4 mr-1.5" />Apply {selectedIds.size} change{selectedIds.size !== 1 ? "s" : ""}</>
+            }
+          </Button>
+          <Button variant="outline" onClick={() => setStep("checklist")}>
+            Skip <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         </div>
       </div>
@@ -1056,6 +1390,7 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
       case "database":  return renderDatabase();
       case "external":  return renderExternal();
       case "manual":    return renderManual();
+      case "apply":     return renderApply();
       case "checklist": return renderChecklist();
       case "golive":    return renderGoLive();
       default:          return null;

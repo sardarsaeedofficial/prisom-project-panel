@@ -18,7 +18,8 @@ export type JobType =
   | "release_preflight"
   | "github_sync"
   | "github_auto_deploy"
-  | "replit_migration_scan";
+  | "replit_migration_scan"
+  | "replit_migration_apply";
 
 export const JOB_TYPES: JobType[] = [
   "alert_check",
@@ -32,6 +33,7 @@ export const JOB_TYPES: JobType[] = [
   "github_sync",
   "github_auto_deploy",
   "replit_migration_scan",
+  "replit_migration_apply",
 ];
 
 export const JOB_TYPE_LABELS: Record<JobType, string> = {
@@ -43,9 +45,10 @@ export const JOB_TYPE_LABELS: Record<JobType, string> = {
   go_live_check:      "Go-Live Check",
   operation_sync:     "Operation Sync",
   release_preflight:  "Release Preflight",
-  github_sync:            "GitHub Sync",
-  github_auto_deploy:     "GitHub Auto-Deploy",
-  replit_migration_scan:  "Replit Migration Scan",
+  github_sync:             "GitHub Sync",
+  github_auto_deploy:      "GitHub Auto-Deploy",
+  replit_migration_scan:   "Replit Migration Scan",
+  replit_migration_apply:  "Replit Migration Apply",
 };
 
 // ── Job status ────────────────────────────────────────────────────────────────

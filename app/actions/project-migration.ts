@@ -416,7 +416,87 @@ export async function addMissingEnvVarsAction(
   return { ok: true, data: { added, skipped } };
 }
 
-// ── 8. Record migration report copied ────────────────────────────────────────
+// ── 8. Generate apply plan ────────────────────────────────────────────────────
+
+export async function generateApplyPlanAction(
+  projectId: string,
+): Promise<ActionResult<import("@/lib/migration/migration-apply-types").MigrationApplyPlan>> {
+  const auth = await requireProjectPermission(projectId, "deploy.trigger");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  const [project, config, services, envVars, domains] = await Promise.all([
+    db.project.findUnique({
+      where:  { id: projectId },
+      select: { slug: true, liveUrl: true },
+    }),
+    db.projectDeploymentConfig.findUnique({
+      where:  { projectId },
+      select: { installCommand: true, buildCommand: true, startCommand: true, healthPath: true },
+    }),
+    db.projectService.findMany({ where: { projectId }, select: { slug: true } }),
+    db.projectEnvVar.findMany({ where: { projectId, environment: "production" }, select: { name: true } }),
+    db.domain.findFirst({
+      where:   { projectId, status: "ACTIVE", isPrimary: true },
+      select:  { hostname: true },
+      orderBy: { isPrimary: "desc" },
+    }),
+  ]);
+
+  if (!project) return { ok: false, error: "Project not found." };
+
+  const row = await db.projectMigrationReport.findFirst({
+    where:   { projectId },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) {
+    return { ok: false, error: "No migration report found. Run analysis first." };
+  }
+
+  const report = row.reportJson as EnrichedMigrationReport;
+
+  const { generateMigrationApplyPlan } = await import("@/lib/migration/migration-apply-planner");
+  const plan = generateMigrationApplyPlan(report, {
+    projectId,
+    deploymentConfig: config,
+    existingServiceSlugs: services.map((s) => s.slug),
+    existingEnvVarNames:  envVars.map((v) => v.name),
+    activeDomainHostname: domains?.hostname ?? null,
+    liveUrl:              project.liveUrl   ?? null,
+  });
+
+  return { ok: true, data: plan };
+}
+
+// ── 9. Apply selected migration changes ───────────────────────────────────────
+
+export async function applyMigrationPlanAction(input: {
+  projectId:         string;
+  changeIds:         string[];
+  confirmationText?: string;
+}): Promise<ActionResult<import("@/lib/migration/migration-apply-types").MigrationApplyResult>> {
+  const auth = await requireProjectPermission(input.projectId, "deploy.trigger");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  if (!input.changeIds || input.changeIds.length === 0) {
+    return { ok: false, error: "No changes selected." };
+  }
+
+  const { applyMigrationPlan } = await import("@/lib/migration/migration-apply-runner");
+  const result = await applyMigrationPlan({
+    projectId:         input.projectId,
+    changeIds:         input.changeIds,
+    confirmationText:  input.confirmationText,
+    actorUserId:       auth.userId,
+  });
+
+  if (!result.ok && result.error) {
+    return { ok: false, error: result.error };
+  }
+
+  return { ok: true, data: result };
+}
+
+// ── 10. Record migration report copied ───────────────────────────────────────
 
 export async function recordMigrationReportCopiedAction(
   projectId: string,
