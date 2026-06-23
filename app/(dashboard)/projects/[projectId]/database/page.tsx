@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { AddDatabaseForm } from "@/components/workspace/add-database-form";
 import { DbConnectionTestPanel } from "@/components/projects/db-connection-test-panel";
 import { DatabaseExplorerPanel } from "@/components/projects/database-explorer-panel";
+import { DatabaseReadinessPanel } from "@/components/projects/database-readiness-panel";
 import {
   getProjectDatabases,
   getProjectEnvironments,
@@ -97,6 +98,9 @@ export default async function ProjectDatabasePage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+          {/* ── Sprint 45: Database Migration Readiness ── */}
+          <DatabaseReadinessPanel projectId={projectId} />
+
           {/* ── Live connection test ── */}
           <DbConnectionTestPanel
             projectId={projectId}

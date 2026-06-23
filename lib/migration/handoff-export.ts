@@ -160,6 +160,78 @@ function buildDatabase(r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+function buildDatabaseReadiness(r: EnrichedMigrationReport): string {
+  if (!r.database || r.database.type === "none" || r.database.type === "unknown") return "";
+
+  const lines: string[] = [
+    `## Database Migration Readiness`,
+    ``,
+    `- **ORM/Tool:** ${r.database.orm && r.database.orm !== "none" ? r.database.orm : "unknown"}`,
+    `- **Provider:** ${r.database.type}`,
+  ];
+
+  if (r.database.configFile)    lines.push(`- **Config:** \`${r.database.configFile}\``);
+  if (r.database.migrationsDir) lines.push(`- **Migrations dir:** \`${r.database.migrationsDir}\``);
+
+  // Required env var names only — never values
+  const dbEnvKeys = [
+    "DATABASE_URL", "DIRECT_URL", "SHADOW_DATABASE_URL",
+    "POSTGRES_URL", "POSTGRES_PRISMA_URL", "POSTGRES_URL_NON_POOLING",
+    "MONGODB_URI", "SUPABASE_URL",
+  ];
+  const detectedDbSecrets = r.requiredSecrets.filter((s) => dbEnvKeys.includes(s.name));
+  if (detectedDbSecrets.length > 0) {
+    lines.push(``, `**Required env vars (names only — no values stored):**`);
+    detectedDbSecrets.forEach((s) =>
+      lines.push(`- \`${s.name}\` — ${s.required ? "required" : "optional"}`)
+    );
+  }
+
+  const orm = r.database.orm;
+  if (orm === "prisma") {
+    lines.push(
+      ``,
+      `**Commands to run (in order):**`,
+      `\`\`\`sh`,
+      `# 1. Check which migrations are pending (safe, read-only)`,
+      `pnpm prisma migrate status`,
+      ``,
+      `# 2. Apply pending migrations to production`,
+      `# Create a database backup BEFORE running this`,
+      `pnpm prisma migrate deploy`,
+      `\`\`\``,
+    );
+  } else if (orm === "drizzle") {
+    lines.push(
+      ``,
+      `**Commands to run (in order):**`,
+      `\`\`\`sh`,
+      `# 1. Check schema consistency (safe, read-only)`,
+      `pnpm drizzle-kit check`,
+      ``,
+      `# 2. Push schema changes to database`,
+      `# Create a database backup BEFORE running this`,
+      `pnpm drizzle-kit push`,
+      `\`\`\``,
+    );
+  }
+
+  lines.push(
+    ``,
+    `**Manual steps:**`,
+    `1. Create a database backup before any migration run.`,
+    `2. Add DATABASE_URL to the Secrets Vault if not already configured.`,
+    `3. Run a connection test via the Database page before first deploy.`,
+    `4. Review migration output carefully — check for unexpected schema changes.`,
+    ``,
+    `> Always back up your database before running migrations in production.`,
+    ``,
+    `> Never run \`prisma migrate reset\`, \`drizzle-kit push --force\`, \`DROP TABLE\`, or \`TRUNCATE\` on production data.`,
+  );
+
+  return lines.join("\n") + "\n";
+}
+
 function buildServices(r: EnrichedMigrationReport): string {
   if (r.suggestedServices.length === 0) return "";
 
@@ -255,6 +327,7 @@ export function generateHandoffMarkdown(
       ? buildRemainingManualSteps(report, appliedTargets)
       : buildManualSteps(report),
     buildDatabase(report),
+    buildDatabaseReadiness(report),
     buildServices(report),
     buildFooter(),
   ]

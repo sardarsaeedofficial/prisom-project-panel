@@ -1512,7 +1512,17 @@ function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistI
   ];
 
   if (report?.database && report.database.type !== "none" && report.database.type !== "unknown") {
-    items.push({ id: "db-migrated", label: "Database schema pushed/migrated", required: true,
+    items.push({ id: "db-tool-detected",   label: "Database ORM/tool detected in project", required: false,
+      note: report.database.orm && report.database.orm !== "none" ? `Detected: ${report.database.orm}.` : "Check Database → Readiness to confirm." });
+    items.push({ id: "db-url-configured",  label: "DATABASE_URL added to Secrets Vault",   required: true,
+      note: "Add the production DATABASE_URL from your database provider." });
+    items.push({ id: "db-connection-test", label: "Database connection test passed",        required: false,
+      note: "Run the connection test in Database → Readiness to confirm connectivity." });
+    items.push({ id: "db-migrations-reviewed", label: "Pending migrations reviewed",       required: false,
+      note: report.database.orm === "prisma" ? "Run `prisma migrate status` to review." : report.database.orm === "drizzle" ? "Run `drizzle-kit check` to review." : "Review your schema setup scripts." });
+    items.push({ id: "db-backup-exists",   label: "Database backup created before migration", required: false,
+      note: "Use Backups → Create Snapshot before running any schema changes." });
+    items.push({ id: "db-migrated",        label: "Database schema pushed/migrated",       required: true,
       note: report.database.orm === "drizzle" ? "Run drizzle-kit push." : report.database.orm === "prisma" ? "Run prisma migrate deploy." : "Run your schema setup script." });
   }
 
