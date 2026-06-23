@@ -193,6 +193,79 @@ function detectConflicts(
   }
 }
 
+// ── Service classification ────────────────────────────────────────────────────
+//
+// Services can have serviceType="node" even if they are static frontends
+// (e.g. a Vite/React build served by a static file server, or a service whose
+// serviceType wasn't set during Replit migration). Use multiple signals to
+// classify correctly so that Sardar-style ecommerce projects get API+static
+// routing rather than falling back to fullstack_node proxy.
+
+type ServiceClass = "api" | "static_frontend";
+
+function classifyService(svc: PlannerService): ServiceClass {
+  // Explicit static serviceType is always static
+  if (svc.serviceType === "static") return "static_frontend";
+
+  const nameLower  = svc.name.toLowerCase();
+  const slugLower  = svc.slug.toLowerCase();
+  const combined   = `${nameLower} ${slugLower}`;
+  const outDir     = (svc.staticOutputDir ?? "").toLowerCase();
+
+  // SPA fallback is a strong static signal
+  if (svc.spaFallback) return "static_frontend";
+
+  // Static output directories that end with common build output patterns
+  // e.g. artifacts/sardar-security/dist/public, dist/public, build, out
+  const staticDirPatterns = [
+    /\/dist\/public$/,
+    /\/dist$/,
+    /\/build$/,
+    /\/out$/,
+    /\/public$/,
+    /\/www$/,
+    /\/static$/,
+  ];
+  if (outDir && staticDirPatterns.some((re) => re.test(outDir))) return "static_frontend";
+
+  // Name / slug keywords indicating a static frontend
+  const staticKeywords = [
+    "frontend",
+    "static",
+    "vite",
+    "react",
+    "nextjs",
+    "web-app",
+    "webapp",
+    "spa",
+    "client",
+    "ui",
+    "dist",
+  ];
+  // API keywords — if a name matches BOTH, API wins
+  const apiKeywords = [
+    "api",
+    "backend",
+    "server",
+    "express",
+    "fastify",
+    "hapi",
+    "koa",
+  ];
+
+  const hasStaticKw = staticKeywords.some((k) => combined.includes(k));
+  const hasApiKw    = apiKeywords.some((k) => combined.includes(k));
+
+  if (hasStaticKw && !hasApiKw) return "static_frontend";
+
+  // Health paths containing /api suggest an API service
+  const healthPath = (svc.healthPath ?? "").toLowerCase();
+  if (healthPath.includes("/api")) return "api";
+
+  // Default: a node service with a port is an API
+  return "api";
+}
+
 // ── Main planner ──────────────────────────────────────────────────────────────
 
 export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
@@ -212,35 +285,57 @@ export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
     );
   }
 
-  // 2. Derive route mode
+  // 2. Derive route mode + prefix
   const routeMode = deployConfig?.routeMode ?? "fullstack_node";
   const apiPrefix = (deployConfig?.apiPrefix ?? "/api").replace(/\/+$/, "");
 
-  // 3. Active enabled services
+  // 3. Active enabled services — classified by heuristic
   const enabledServices = services.filter((s) => s.isEnabled);
 
-  const nodeServices   = enabledServices.filter((s) => s.serviceType === "node");
-  const staticServices = enabledServices.filter((s) => s.serviceType === "static");
+  const classifiedServices = enabledServices.map((svc) => ({
+    svc,
+    cls: classifyService(svc),
+  }));
 
-  const primaryApi    = nodeServices.find((s) => s.isPrimary) ?? nodeServices[0] ?? null;
+  const apiServices    = classifiedServices.filter((x) => x.cls === "api").map((x) => x.svc);
+  const staticServices = classifiedServices.filter((x) => x.cls === "static_frontend").map((x) => x.svc);
+
+  // Legacy-typed services (for backwards compat — nodeServices still used below)
+  const nodeServices   = enabledServices.filter((s) => s.serviceType === "node");
+
+  const primaryApi    = apiServices.find((s) => s.isPrimary) ?? apiServices[0] ?? null;
   const primaryStatic = staticServices.find((s) => s.isPrimary) ?? staticServices[0] ?? null;
 
-  // 4. Build rules based on route mode
-  if (routeMode === "static_plus_api" || (nodeServices.length > 0 && staticServices.length > 0)) {
-    // Multi-service: API + static
-    if (nodeServices.length === 0) {
-      warnings.push("No Node.js API service found — only static routing will be configured.");
+  // Determine whether to use multi-service (API + static) routing.
+  // NEVER fall back to fullstack_node when we can detect a static frontend.
+  const hasStaticOutput =
+    !!(deployConfig?.staticOutputDir) ||
+    !!(deployConfig?.publicStaticPath) ||
+    staticServices.length > 0;
+
+  const useMultiService =
+    routeMode === "static_plus_api" ||
+    (apiServices.length > 0 && hasStaticOutput) ||
+    (staticServices.length > 0 && apiServices.length > 0);
+
+  const useStaticOnly =
+    routeMode === "static_only" ||
+    (staticServices.length > 0 && apiServices.length === 0 && nodeServices.length === 0);
+
+  // 4. Build rules
+  if (useMultiService) {
+    if (apiServices.length === 0) {
+      warnings.push("No API service detected — only static routing will be configured.");
     }
-    if (staticServices.length === 0 && !deployConfig?.staticOutputDir && !deployConfig?.publicStaticPath) {
+    if (!hasStaticOutput) {
       warnings.push("No static service or static output path found.");
     }
 
-    // API rule first (higher priority)
+    // API rule (priority 1)
     if (primaryApi) {
       const rule = buildApiRule(primaryApi, apiPrefix, warnings);
       if (rule) rules.push(rule);
     } else if (deployConfig && routeMode === "static_plus_api") {
-      // Use deployment config port for API
       const rule = buildApiRule(
         {
           id:              "deploy_config",
@@ -260,12 +355,11 @@ export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
       if (rule) rules.push(rule);
     }
 
-    // Static catch-all (lower priority)
+    // Static catch-all (priority 99)
     const staticPath = resolveStaticPath(deployConfig, primaryStatic);
     rules.push(buildStaticRule(primaryStatic, staticPath, warnings));
 
-  } else if (routeMode === "static_only" || (staticServices.length > 0 && nodeServices.length === 0)) {
-    // Static only
+  } else if (useStaticOnly) {
     const staticPath = resolveStaticPath(deployConfig, primaryStatic);
     rules.push(buildStaticRule(primaryStatic, staticPath, warnings));
 
@@ -274,7 +368,7 @@ export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
     }
 
   } else if (routeMode === "api_only" || routeMode === "fullstack_node") {
-    // Fullstack / API only
+    // Fullstack / API only — no static frontend detected
     const port   = primaryApi?.internalPort ?? deployConfig?.port ?? null;
     const health = primaryApi?.healthPath ?? deployConfig?.healthPath ?? "/api/healthz";
 
@@ -285,12 +379,10 @@ export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
     }
 
   } else {
-    // Fallback: try to infer from available services
-    if (nodeServices.length > 0) {
-      if (primaryApi) {
-        const rule = buildApiRule(primaryApi, apiPrefix, warnings);
-        if (rule) rules.push(rule);
-      }
+    // Fallback: infer from whatever is available
+    if (apiServices.length > 0 && primaryApi) {
+      const rule = buildApiRule(primaryApi, apiPrefix, warnings);
+      if (rule) rules.push(rule);
     }
     if (staticServices.length > 0) {
       const staticPath = resolveStaticPath(deployConfig, primaryStatic);
@@ -304,10 +396,10 @@ export function generateProjectRouteMap(input: PlannerInput): ProjectRouteMap {
     }
   }
 
-  // 5. Check if any additional API services need routes (beyond primary)
-  for (const svc of nodeServices.filter((s) => s !== primaryApi)) {
+  // 5. Warn about additional API services not included in the route map
+  for (const svc of apiServices.filter((s) => s !== primaryApi)) {
     warnings.push(
-      `Additional service "${svc.name}" (port ${svc.internalPort ?? "unset"}) is not included in route map. Add a manual route rule if needed.`,
+      `Additional service "${svc.name}" (port ${svc.internalPort ?? "unset"}) is not included in the route map. Add a manual route rule if needed.`,
     );
   }
 

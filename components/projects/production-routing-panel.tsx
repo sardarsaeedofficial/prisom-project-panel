@@ -6,21 +6,21 @@
  * Sprint 44: Production Routing Panel for /publishing page.
  *
  * Shows:
- *   - Current domain
- *   - Recommended route map
- *   - Nginx preview button
- *   - Validate button
- *   - Apply (requires "APPLY ROUTES")
- *   - Rollback button
- *   - Route health checks
+ *   - Current domain + recommended route map
+ *   - Generate Plan, Preview Config, Validate, Route Health buttons
+ *   - Apply (requires "APPLY ROUTES" confirmation text)
+ *   - Rollback button (if backup exists)
  *   - Help text for Replit-style ecommerce apps
+ *
+ * Uses direct async handlers (not useTransition) to avoid the
+ * "startTransition cannot be called during server rendering" error
+ * that occurs under React 18 SSR when useTransition receives async callbacks.
  */
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronDown,
   ChevronUp,
   ExternalLink,
   FileCode2,
@@ -57,13 +57,16 @@ import type { ProjectRouteMap, ProjectRouteHealthReport } from "@/lib/routing/pr
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export type ProductionRoutingPanelProps = {
-  projectId:          string;
-  /** Pre-loaded server-side route map (may be null if no services) */
-  initialRouteMap?:   ProjectRouteMap | null;
-  initialNginx?:      string | null;
-  hasBackup?:         boolean;
-  domain?:            string | null;
+  projectId:         string;
+  initialRouteMap?:  ProjectRouteMap | null;
+  initialNginx?:     string | null;
+  hasBackup?:        boolean;
+  domain?:           string | null;
 };
+
+// ── Active action discriminant ────────────────────────────────────────────────
+
+type ActiveAction = "plan" | "preview" | "validate" | "health" | "apply" | "rollback";
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -79,129 +82,165 @@ export function ProductionRoutingPanel({
   const [hasBackup,     setHasBackup]     = useState(initialHasBackup ?? false);
   const [error,         setError]         = useState<string | null>(null);
   const [successMsg,    setSuccessMsg]    = useState<string | null>(null);
-  const [applyConfirm,  setApplyConfirm]  = useState("");
   const [nginxOutput,   setNginxOutput]   = useState<string | null>(null);
   const [healthReport,  setHealthReport]  = useState<ProjectRouteHealthReport | null>(null);
   const [showHelp,      setShowHelp]      = useState(false);
   const [showRollback,  setShowRollback]  = useState(false);
+  const [applyConfirm,  setApplyConfirm]  = useState("");
+  const [activeAction,  setActiveAction]  = useState<ActiveAction | null>(null);
 
-  const [loadingPlan,   startLoadPlan]   = useTransition();
-  const [loadingNginx,  startLoadNginx]  = useTransition();
-  const [validating,    startValidate]   = useTransition();
-  const [applying,      startApply]      = useTransition();
-  const [rollingBack,   startRollback]   = useTransition();
-  const [checkingHealth, startHealth]    = useTransition();
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  function clearMessages() {
+  function resetMessages() {
     setError(null);
     setSuccessMsg(null);
     setNginxOutput(null);
   }
 
-  // ── Refresh plan ────────────────────────────────────────────────────────────
+  // ── Generate Plan ──────────────────────────────────────────────────────────
 
-  function refreshPlan() {
-    clearMessages();
-    startLoadPlan(async () => {
+  async function handleGeneratePlan() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("plan");
+    try {
       const res = await generateProjectRouteMapAction(projectId);
-      if (res.ok) {
-        setRouteMap(res.data.routeMap ?? null);
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Failed to generate route plan.");
+        return;
       }
-    });
+      setRouteMap(res.data.routeMap ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  // ── Preview nginx ───────────────────────────────────────────────────────────
+  // ── Preview Config ─────────────────────────────────────────────────────────
 
-  function previewNginx() {
-    clearMessages();
-    startLoadNginx(async () => {
+  async function handlePreviewConfig() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("preview");
+    try {
       const res = await previewProjectNginxConfigAction(projectId);
-      if (res.ok) {
-        setRouteMap(res.data.routeMap ?? null);
-        setNginxPreview(res.data.nginxPreview ?? null);
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Failed to generate nginx preview.");
+        return;
       }
-    });
+      setRouteMap(res.data.routeMap ?? null);
+      setNginxPreview(res.data.nginxPreview ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  // ── Validate ────────────────────────────────────────────────────────────────
+  // ── Validate ───────────────────────────────────────────────────────────────
 
-  function validate() {
-    clearMessages();
-    startValidate(async () => {
+  async function handleValidate() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("validate");
+    try {
       const res = await validateProjectRouteMapAction(projectId);
-      if (res.ok) {
-        const d = res.data;
-        setRouteMap(d.routeMap ?? null);
-        setNginxPreview(d.nginxPreview ?? null);
-        setNginxOutput(d.nginxOutput ?? null);
-        if (d.ok) {
-          setSuccessMsg("nginx -t passed — route config is valid.");
-        } else {
-          setError(d.error ?? "Validation failed.");
-        }
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Validation failed.");
+        return;
       }
-    });
+      const d = res.data;
+      setRouteMap(d.routeMap ?? null);
+      setNginxPreview(d.nginxPreview ?? null);
+      setNginxOutput(d.nginxOutput ?? null);
+      if (d.ok) {
+        setSuccessMsg("nginx -t passed — route config is valid.");
+      } else {
+        setError(d.error ?? "Validation failed.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  // ── Apply ───────────────────────────────────────────────────────────────────
+  // ── Apply ──────────────────────────────────────────────────────────────────
 
-  function apply() {
-    clearMessages();
-    startApply(async () => {
+  async function handleApply() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("apply");
+    try {
       const res = await applyProjectRouteMapAction({ projectId, confirmationText: applyConfirm });
-      if (res.ok) {
-        setSuccessMsg("Route config applied and nginx reloaded.");
-        setHasBackup(true);
-        setRouteMap(res.data.routeMap ?? null);
-        setNginxPreview(res.data.nginxPreview ?? null);
-        setNginxOutput(res.data.nginxOutput ?? null);
-        setApplyConfirm("");
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Apply failed.");
+        return;
       }
-    });
+      setSuccessMsg("Route config applied and nginx reloaded.");
+      setHasBackup(true);
+      setRouteMap(res.data.routeMap ?? null);
+      setNginxPreview(res.data.nginxPreview ?? null);
+      setNginxOutput(res.data.nginxOutput ?? null);
+      setApplyConfirm("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  // ── Rollback ────────────────────────────────────────────────────────────────
+  // ── Rollback ───────────────────────────────────────────────────────────────
 
-  function rollback() {
-    clearMessages();
-    startRollback(async () => {
+  async function handleRollback() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("rollback");
+    try {
       const res = await rollbackProjectRouteConfigAction(projectId);
-      if (res.ok) {
-        setSuccessMsg("Route config rolled back to previous version.");
-        setNginxOutput(res.data.nginxOutput ?? null);
-        setShowRollback(false);
-        setHasBackup(false);
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Rollback failed.");
+        return;
       }
-    });
+      setSuccessMsg("Route config rolled back to previous version.");
+      setNginxOutput(res.data.nginxOutput ?? null);
+      setShowRollback(false);
+      setHasBackup(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  // ── Health check ────────────────────────────────────────────────────────────
+  // ── Route Health ───────────────────────────────────────────────────────────
 
-  function checkHealth() {
-    clearMessages();
-    startHealth(async () => {
+  async function handleCheckHealth() {
+    if (activeAction) return;
+    resetMessages();
+    setActiveAction("health");
+    try {
       const res = await checkProjectRouteHealthAction(projectId);
-      if (res.ok) {
-        setHealthReport(res.data);
-      } else {
-        setError(res.error);
+      if (!res.ok) {
+        setError(res.error ?? "Health check failed.");
+        return;
       }
-    });
+      setHealthReport(res.data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally {
+      setActiveAction(null);
+    }
   }
 
-  const isAnyLoading = loadingPlan || loadingNginx || validating || applying || rollingBack || checkingHealth;
+  // ── Derived state ──────────────────────────────────────────────────────────
+
+  const busy        = activeAction !== null;
+  const hasBlockers = (routeMap?.blockers?.length ?? 0) > 0;
   const needsConfirm = applyConfirm !== "APPLY ROUTES";
-  const hasBlockers  = (routeMap?.blockers?.length ?? 0) > 0;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <Card>
@@ -221,21 +260,23 @@ export function ProductionRoutingPanel({
             className="text-muted-foreground hover:text-foreground shrink-0 mt-0.5"
             title="Help"
           >
-            {showHelp ? <ChevronUp className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+            {showHelp
+              ? <ChevronUp className="h-4 w-4" />
+              : <Info className="h-4 w-4" />
+            }
           </button>
         </div>
 
-        {/* Help text */}
         {showHelp && (
           <div className="mt-3 rounded-md border bg-muted/30 px-4 py-3 text-sm text-muted-foreground space-y-2">
             <p>
-              <strong>For Replit-style ecommerce apps:</strong> route <code className="font-mono text-xs">/api/*</code> to
-              your Node API service and route <code className="font-mono text-xs">/*</code> to the built
-              static frontend with SPA fallback.
+              <strong>For Replit-style ecommerce apps:</strong> route{" "}
+              <code className="font-mono text-xs">/api/*</code> to your Node API service and route{" "}
+              <code className="font-mono text-xs">/*</code> to the built static frontend with SPA fallback.
             </p>
             <p>
-              <strong>DNS</strong> must already point to this VPS before routing will work.
-              <strong> SSL</strong> must be provisioned from the Domains tab.
+              <strong>DNS</strong> must already point to this VPS before routing will work.{" "}
+              <strong>SSL</strong> must be provisioned from the Domains tab.
               Routing does not copy secrets or database data.
             </p>
           </div>
@@ -260,17 +301,19 @@ export function ProductionRoutingPanel({
           </div>
         )}
 
-        {/* Status messages */}
+        {/* Success message */}
         {successMsg && (
-          <div className="flex items-start gap-2 text-sm text-emerald-700 dark:text-emerald-400 rounded-md border border-emerald-200/60 bg-emerald-50/40 dark:bg-emerald-950/10 px-3 py-2">
+          <div className="flex items-start gap-2 text-sm text-emerald-700 dark:text-emerald-400 rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/10 px-4 py-3">
             <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
             {successMsg}
           </div>
         )}
+
+        {/* Error message */}
         {error && (
-          <div className="flex items-start gap-2 text-sm text-red-700 dark:text-red-400 rounded-md border border-red-200/60 bg-red-50/40 dark:bg-red-950/10 px-3 py-2">
+          <div className="flex items-start gap-2 text-sm text-red-700 dark:text-red-400 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/10 px-4 py-3">
             <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span className="whitespace-pre-wrap">{error}</span>
+            <span className="whitespace-pre-wrap break-words">{error}</span>
           </div>
         )}
 
@@ -279,72 +322,54 @@ export function ProductionRoutingPanel({
           <ProjectRoutePreview
             routeMap={routeMap}
             nginxPreview={nginxPreview ?? undefined}
-            onRefresh={refreshPlan}
-            isLoading={loadingPlan}
+            onRefresh={handleGeneratePlan}
+            isLoading={activeAction === "plan"}
           />
         ) : (
           <div className="rounded-md border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
             <Zap className="h-6 w-6 mx-auto mb-2 opacity-30" />
-            <p>Generate a route plan to see how requests will be routed.</p>
+            <p>Click <strong>Generate Plan</strong> to see how requests will be routed.</p>
           </div>
         )}
 
         {/* Action buttons */}
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshPlan}
-            disabled={isAnyLoading}
-          >
-            {loadingPlan
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+          <Button variant="outline" size="sm" onClick={handleGeneratePlan} disabled={busy}>
+            {activeAction === "plan"
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Generating…</>
+              : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />Generate Plan</>
             }
-            Generate Plan
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={handlePreviewConfig} disabled={busy}>
+            {activeAction === "preview"
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Generating Preview…</>
+              : <><FileCode2 className="h-3.5 w-3.5 mr-1.5" />Preview Config</>
+            }
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={handleValidate} disabled={busy}>
+            {activeAction === "validate"
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Validating…</>
+              : <><Shield className="h-3.5 w-3.5 mr-1.5" />Validate</>
+            }
           </Button>
 
           <Button
             variant="outline"
             size="sm"
-            onClick={previewNginx}
-            disabled={isAnyLoading}
+            onClick={handleCheckHealth}
+            disabled={busy || !domain}
+            title={!domain ? "No domain configured" : undefined}
           >
-            {loadingNginx
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <FileCode2 className="h-3.5 w-3.5 mr-1.5" />
+            {activeAction === "health"
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Checking…</>
+              : <><Heart className="h-3.5 w-3.5 mr-1.5" />Route Health</>
             }
-            Preview Config
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={validate}
-            disabled={isAnyLoading || !routeMap}
-          >
-            {validating
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <Shield className="h-3.5 w-3.5 mr-1.5" />
-            }
-            Validate
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={checkHealth}
-            disabled={isAnyLoading || !routeMap || !domain}
-          >
-            {checkingHealth
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <Heart className="h-3.5 w-3.5 mr-1.5" />
-            }
-            Route Health
           </Button>
         </div>
 
-        {/* nginx output */}
+        {/* nginx -t output */}
         {nginxOutput && (
           <pre className="text-xs font-mono bg-muted/40 border rounded px-3 py-2 overflow-x-auto max-h-32 whitespace-pre">
             {nginxOutput}
@@ -353,7 +378,7 @@ export function ProductionRoutingPanel({
 
         {/* Health report */}
         {healthReport && (
-          <div className="rounded-md border bg-card space-y-0 overflow-hidden">
+          <div className="rounded-md border bg-card overflow-hidden">
             <div className="flex items-center gap-2 px-3 py-2 border-b bg-muted/20">
               <Heart className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Route Health</span>
@@ -369,13 +394,9 @@ export function ProductionRoutingPanel({
                   : <XCircle      className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
                 }
                 <div className="flex-1 min-w-0">
-                  <p className={check.ok ? "text-foreground" : "text-red-600 dark:text-red-400"}>
-                    {check.label}
-                  </p>
+                  <p className={check.ok ? "text-foreground" : "text-red-600 dark:text-red-400"}>{check.label}</p>
                   <p className="text-xs text-muted-foreground truncate">{check.url}</p>
-                  {check.error && (
-                    <p className="text-xs text-red-500 mt-0.5">{check.error}</p>
-                  )}
+                  {check.error && <p className="text-xs text-red-500 mt-0.5">{check.error}</p>}
                 </div>
                 <div className="shrink-0 text-right">
                   {check.statusCode && (
@@ -407,7 +428,7 @@ export function ProductionRoutingPanel({
           )}
 
           <p className="text-xs text-muted-foreground">
-            Writes the nginx config, runs <code className="font-mono">nginx -t</code>, then reloads nginx.
+            Writes the nginx config, runs <code className="font-mono">nginx&nbsp;-t</code>, then reloads nginx.
             Type <code className="font-mono font-bold">APPLY ROUTES</code> to confirm.
           </p>
 
@@ -416,18 +437,18 @@ export function ProductionRoutingPanel({
             value={applyConfirm}
             onChange={(e) => setApplyConfirm(e.target.value)}
             placeholder="Type APPLY ROUTES to confirm"
-            disabled={isAnyLoading}
+            disabled={busy}
             className="w-full rounded-md border bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
 
           <div className="flex gap-2">
             <Button
               size="sm"
-              disabled={isAnyLoading || needsConfirm || hasBlockers || !routeMap}
-              onClick={apply}
+              disabled={busy || needsConfirm || hasBlockers || !routeMap}
+              onClick={handleApply}
               className="flex-1"
             >
-              {applying
+              {activeAction === "apply"
                 ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Applying…</>
                 : <><Zap className="h-4 w-4 mr-1.5" />Apply Routes</>
               }
@@ -438,7 +459,7 @@ export function ProductionRoutingPanel({
                 variant="outline"
                 size="sm"
                 onClick={() => setShowRollback((v) => !v)}
-                disabled={isAnyLoading}
+                disabled={busy}
               >
                 <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
                 Rollback
@@ -454,25 +475,19 @@ export function ProductionRoutingPanel({
                 <p>Roll back to the previous nginx config for this domain?</p>
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={rollback}
-                  disabled={rollingBack}
-                >
-                  {rollingBack
+                <Button variant="destructive" size="sm" onClick={handleRollback} disabled={busy}>
+                  {activeAction === "rollback"
                     ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Rolling back…</>
                     : <><RotateCcw className="h-3.5 w-3.5 mr-1.5" />Confirm Rollback</>
                   }
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setShowRollback(false)}>
+                <Button variant="outline" size="sm" onClick={() => setShowRollback(false)} disabled={busy}>
                   Cancel
                 </Button>
               </div>
             </div>
           )}
         </div>
-
       </CardContent>
     </Card>
   );

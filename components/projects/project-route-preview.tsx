@@ -19,10 +19,6 @@ import {
   Zap,
 } from "lucide-react";
 import { Badge }  from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
 import type { ProjectRouteMap, ProjectRouteRule } from "@/lib/routing/project-route-types";
 
 // ── Rule row ──────────────────────────────────────────────────────────────────
