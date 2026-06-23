@@ -36,8 +36,12 @@ import { DeploymentHistoryPanel } from "@/components/projects/deployment-history
 import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
+import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import Link                         from "next/link";
+import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
+import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
+import { hasBackupConfig }          from "@/lib/routing/nginx-route-apply";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -114,7 +118,7 @@ export default async function ProjectPublishingPage({ params }: Props) {
   });
   if (!project) notFound();
 
-  const [deployments, dbDeployConfig, allDomains, serviceCount, syncSettings] = await Promise.all([
+  const [deployments, dbDeployConfig, allDomains, services, syncSettings] = await Promise.all([
     getProjectDeployments(projectId),
     db.projectDeploymentConfig.findUnique({ where: { projectId } }),
     db.domain.findMany({
@@ -122,14 +126,23 @@ export default async function ProjectPublishingPage({ params }: Props) {
       select:  { hostname: true, isPrimary: true, status: true, sslStatus: true },
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     }),
-    // Sprint 23: detect multi-service mode
-    db.projectService.count({ where: { projectId } }),
+    // Sprint 23: detect multi-service mode (full list for route planner)
+    db.projectService.findMany({
+      where:  { projectId },
+      select: {
+        id: true, name: true, slug: true, serviceType: true,
+        internalPort: true, healthPath: true, staticOutputDir: true,
+        spaFallback: true, isPrimary: true, isEnabled: true,
+      },
+    }),
     // Sprint 40: GitHub auto-sync status (non-fatal)
     db.projectGitHubSyncSettings.findUnique({
       where:  { projectId },
       select: { lastSyncStatus: true, lastSyncMessage: true, lastSyncedAt: true },
     }).catch(() => null),
   ]);
+
+  const serviceCount = services.length;
 
   // A project is in multi-service mode if it has any ProjectService rows
   const isMultiService = serviceCount > 0;
@@ -152,6 +165,44 @@ export default async function ProjectPublishingPage({ params }: Props) {
   const successDeploy = deployments.find(
     (d) => d.status === DeploymentStatus.SUCCESS && d.url,
   );
+
+  // Sprint 44: Pre-compute route map server-side (non-fatal)
+  const activeDomain = allDomains.find((d) => d.status === "ACTIVE" && d.isPrimary)
+    ?? allDomains.find((d) => d.status === "ACTIVE")
+    ?? null;
+  const routingDomain = activeDomain?.hostname ?? (dbDeployConfig as unknown as { primaryDomain?: string } | null)?.primaryDomain ?? null;
+
+  let initialRouteMap   = null;
+  let initialNginx      = null;
+  let routingHasBackup  = false;
+
+  if (dbDeployConfig && (serviceCount > 0 || routingDomain)) {
+    try {
+      const rm = generateProjectRouteMap({
+        projectId,
+        projectSlug: project.slug,
+        domain:      routingDomain,
+        services:    services as Parameters<typeof generateProjectRouteMap>[0]["services"],
+        deployConfig: {
+          port:            dbDeployConfig.port,
+          routeMode:       dbDeployConfig.routeMode,
+          apiPrefix:       dbDeployConfig.apiPrefix,
+          staticOutputDir: dbDeployConfig.staticOutputDir,
+          publicStaticPath: (dbDeployConfig as unknown as { publicStaticPath?: string | null }).publicStaticPath ?? null,
+          healthPath:      dbDeployConfig.healthPath,
+          primaryDomain:   (dbDeployConfig as unknown as { primaryDomain?: string | null }).primaryDomain ?? null,
+        },
+      });
+      initialRouteMap = rm;
+
+      const ng = generateNginxFromRouteMap(rm);
+      if (ng.ok) initialNginx = ng.config;
+
+      if (routingDomain) {
+        routingHasBackup = await hasBackupConfig(routingDomain).catch(() => false);
+      }
+    } catch { /* non-fatal — panel loads without initial data */ }
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -389,6 +440,17 @@ export default async function ProjectPublishingPage({ params }: Props) {
                 <ProjectServicesPanel projectId={projectId} />
               </CardContent>
             </Card>
+          )}
+
+          {/* ── Sprint 44: Production Routing ── */}
+          {!hasDeployConfig && dbDeployConfig && (
+            <ProductionRoutingPanel
+              projectId={projectId}
+              initialRouteMap={initialRouteMap}
+              initialNginx={initialNginx}
+              hasBackup={routingHasBackup}
+              domain={routingDomain}
+            />
           )}
 
           {/* ── Sprint 39: Release promotion workflow ── */}

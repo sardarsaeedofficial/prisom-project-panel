@@ -1198,6 +1198,20 @@ export function ReplitMigrationAssistant({ projectId }: ReplitMigrationAssistant
             </div>
           )}
 
+          {/* Sprint 44: routing recommendation after apply */}
+          {applyResult.ok && report?.suggestedServices.some((s) => s.serviceType === "node") && (
+            <div className="rounded-md border border-blue-200/60 bg-blue-50/30 dark:bg-blue-950/10 px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+                <Globe className="h-4 w-4 shrink-0" />
+                Next: Configure Production Routing
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Your app has API and static services. Set up <code className="font-mono">/api/*</code> and <code className="font-mono">/*</code> routing
+                in Publishing → Production Routing before going live.
+              </p>
+            </div>
+          )}
+
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => {
               setApplyResult(null);
@@ -1520,12 +1534,25 @@ function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistI
     items.push({ id: "uploads-migrated", label: "Local uploads migrated to VPS storage or object storage", required: false });
   }
 
+  // Sprint 44: routing readiness (for multi-service apps with API + frontend)
+  const hasApiService    = report?.suggestedServices.some((s) => s.serviceType === "node");
+  const hasStaticService = report?.suggestedServices.some((s) => s.serviceType === "static");
+  if (hasApiService && hasStaticService) {
+    items.push(
+      { id: "api-route",      label: "API route /api/* configured",               required: true,  note: "Set up in Publishing → Production Routing." },
+      { id: "static-route",   label: "Static frontend catch-all /* configured",   required: true,  note: "Configure in Publishing → Production Routing." },
+      { id: "spa-fallback",   label: "SPA fallback enabled on static service",    required: false, note: "Allows deep-link navigation in React/Vite apps." },
+      { id: "api-health",     label: "API health path /api/healthz configured",   required: false, note: "Used by the platform to monitor your API service." },
+    );
+  }
+
   items.push(
-    { id: "domain-configured", label: "Domain configured and SSL issued",   required: false, note: "Add domain in the Domains section." },
-    { id: "first-deploy",      label: "First multi-service deploy triggered", required: true,  note: "Use Publishing → Services → Deploy all." },
-    { id: "health-ok",         label: "API health check returns 200",        required: false, note: "/api/healthz should return { ok: true }." },
-    { id: "frontend-loads",    label: "Frontend loads at /",                 required: false },
-    { id: "login-works",       label: "Login / auth flow works",             required: false },
+    { id: "domain-configured", label: "Domain configured and SSL issued",         required: false, note: "Add domain in the Domains section." },
+    { id: "routing-applied",   label: "Production routing applied in Publishing", required: false, note: "Publishing → Production Routing → Apply Routes." },
+    { id: "first-deploy",      label: "First multi-service deploy triggered",     required: true,  note: "Use Publishing → Services → Deploy all." },
+    { id: "health-ok",         label: "API health check returns 200",             required: false, note: "/api/healthz should return { ok: true }." },
+    { id: "frontend-loads",    label: "Frontend loads at /",                      required: false },
+    { id: "login-works",       label: "Login / auth flow works",                  required: false },
   );
 
   return items;
