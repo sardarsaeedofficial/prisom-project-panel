@@ -17,6 +17,8 @@ import {
 import { db }                          from "@/lib/db";
 import { listProjectPromotions }       from "@/lib/releases/release-promotion-service";
 import { requireProjectPermission }    from "@/lib/auth/project-membership";
+import { GoLiveReadinessPanel }        from "@/components/projects/go-live-readiness-panel";
+import { ReleaseComparisonCard }       from "@/components/projects/release-comparison-card";
 
 export const dynamic  = "force-dynamic";
 export const metadata: Metadata = { title: "Releases" };
@@ -61,6 +63,18 @@ export default async function ReleasesPage({ params }: Props) {
     select: { id: true, name: true, slug: true },
   });
   if (!project) notFound();
+
+  // Sprint 49: Server-side go-live status for blocker banner (non-fatal)
+  let goLiveBlocked = false;
+  let goLiveBlockerCount = 0;
+  try {
+    const { generateGoLiveReadinessReport } = await import("@/lib/go-live/go-live-readiness-service");
+    const glReport = await generateGoLiveReadinessReport(projectId);
+    if (glReport.status === "blocked") {
+      goLiveBlocked      = true;
+      goLiveBlockerCount = glReport.blockers.length;
+    }
+  } catch { /* non-fatal */ }
 
   const [promotions, deployments] = await Promise.all([
     listProjectPromotions(projectId, 20),
@@ -107,6 +121,28 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 49: Go-Live Readiness ── */}
+          <GoLiveReadinessPanel projectId={projectId} />
+
+          {/* ── Sprint 49: Blocker banner ── */}
+          {goLiveBlocked && (
+            <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/20 px-4 py-3 flex items-start gap-3">
+              <XCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                  Go-live readiness: {goLiveBlockerCount} blocker{goLiveBlockerCount > 1 ? "s" : ""} detected
+                </p>
+                <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
+                  Fix all blockers in the Go-Live Readiness panel above before promoting to production.
+                  Promoting with blockers may break production.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Sprint 49: Release Comparison ── */}
+          <ReleaseComparisonCard projectId={projectId} />
 
           {/* ── Promotions ── */}
           <Card>

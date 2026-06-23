@@ -430,6 +430,60 @@ function buildGitHubReadiness(_r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+// ── Sprint 49: Go-live readiness ──────────────────────────────────────────────
+
+function buildGoLiveReadiness(_r: EnrichedMigrationReport): string {
+  const lines: string[] = [`## Go-Live Readiness\n`];
+
+  lines.push(`> Complete all required checks before promoting to production.`);
+  lines.push(`> Promotion requires typing \`PROMOTE\`. Rollback requires typing \`ROLLBACK\`.`);
+  lines.push(`> Rollback reverts the release but does not undo database migrations.`);
+  lines.push("");
+
+  lines.push(`### Required Checks Before Promoting`);
+  lines.push(`- [ ] Env readiness passed — all required env vars configured`);
+  lines.push(`- [ ] Database readiness reviewed — connection test passed`);
+  lines.push(`- [ ] Domain readiness passed — DNS, SSL, nginx config safe`);
+  lines.push(`- [ ] Backup created before promotion`);
+  lines.push(`- [ ] Release preflight passed (Releases → Go-Live Readiness panel)`);
+  lines.push(`- [ ] Go-Live Readiness panel shows no blockers`);
+  lines.push("");
+
+  lines.push(`### Recommended Before Go-Live`);
+  lines.push(`- [ ] Routing configuration applied in Publishing`);
+  lines.push(`- [ ] GitHub auto-sync setup reviewed`);
+  lines.push(`- [ ] Rollback plan reviewed — know which release to roll back to`);
+  lines.push(`- [ ] Monitoring/alerting confirmed (PM2, nginx logs)`);
+  lines.push("");
+
+  lines.push(`### After Promotion`);
+  lines.push(`- [ ] Run smoke checks: Releases → Run Smoke Checks`);
+  lines.push(`  - Domain root (HTTPS, should return 2xx/3xx)`);
+  lines.push(`  - Internal health endpoint (\`/api/healthz\`)`);
+  lines.push(`  - Public health endpoint`);
+  lines.push(`  - SSL (confirm cert active from DB)`);
+  lines.push(`- [ ] Verify login / auth flow works`);
+  lines.push(`- [ ] Verify key user journeys`);
+  lines.push("");
+
+  lines.push(`### Promotion Instructions`);
+  lines.push(`1. Open **Releases** in the panel`);
+  lines.push(`2. Run Go-Live Readiness check — fix all blockers`);
+  lines.push(`3. Review the Release Comparison card (Current Live vs Candidate)`);
+  lines.push(`4. Click **Approve & Promote** and type \`PROMOTE\` to confirm`);
+  lines.push(`5. Wait for promotion to complete before running smoke checks`);
+  lines.push("");
+
+  lines.push(`### Rollback Warning`);
+  lines.push(`⚠️  Rollback reverts the deployment to the rollback target.`);
+  lines.push(`   It does **not** roll back database migrations.`);
+  lines.push(`   If your promotion included a DB migration, restore from backup instead.`);
+  lines.push(`   Rollback confirmation requires typing \`ROLLBACK\`.`);
+  lines.push("");
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -464,6 +518,7 @@ export function generateHandoffMarkdown(
     buildEnvReadiness(report),
     buildDomainReadiness(report),
     buildGitHubReadiness(report),
+    buildGoLiveReadiness(report),
     buildServices(report),
     buildFooter(),
   ]

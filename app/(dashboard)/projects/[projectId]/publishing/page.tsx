@@ -199,6 +199,20 @@ export default async function ProjectPublishingPage({ params }: Props) {
     }
   } catch { /* non-fatal */ }
 
+  // Sprint 49: Go-live readiness check (non-fatal, compact banner only)
+  let goLiveReadinessStatus: "warning" | "blocked" | null = null;
+  let goLiveBlockerCount = 0;
+  try {
+    const { generateGoLiveReadinessReport } = await import("@/lib/go-live/go-live-readiness-service");
+    const glReport = await generateGoLiveReadinessReport(projectId);
+    if (glReport.status === "blocked") {
+      goLiveReadinessStatus = "blocked";
+      goLiveBlockerCount    = glReport.blockers.length;
+    } else if (glReport.status === "warning") {
+      goLiveReadinessStatus = "warning";
+    }
+  } catch { /* non-fatal */ }
+
   // Sprint 48: GitHub readiness check (non-fatal)
   let githubReadinessStatus:   "warning" | "blocked" | null = null;
   let githubReadinessBlockers: string[] = [];
@@ -268,6 +282,38 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 49: Go-live readiness banner ── */}
+          {goLiveReadinessStatus && (
+            <div className={`rounded-xl border px-4 py-3 flex items-start gap-3 ${
+              goLiveReadinessStatus === "blocked"
+                ? "border-red-200 bg-red-50 dark:bg-red-950/20"
+                : "border-amber-200 bg-amber-50 dark:bg-amber-950/20"
+            }`}>
+              <AlertTriangle className={`h-4 w-4 shrink-0 mt-0.5 ${
+                goLiveReadinessStatus === "blocked"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-amber-600 dark:text-amber-400"
+              }`} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${
+                  goLiveReadinessStatus === "blocked"
+                    ? "text-red-800 dark:text-red-200"
+                    : "text-amber-800 dark:text-amber-200"
+                }`}>
+                  Go-live readiness:{" "}
+                  {goLiveReadinessStatus === "blocked"
+                    ? `${goLiveBlockerCount} blocker${goLiveBlockerCount > 1 ? "s" : ""} detected`
+                    : "warnings — review before promoting"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  <Link href={`/projects/${projectId}/releases`} className="underline hover:no-underline">
+                    Open Go-Live Readiness →
+                  </Link>
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* ── Sprint 48: GitHub readiness banner ── */}
           {githubReadinessStatus && (

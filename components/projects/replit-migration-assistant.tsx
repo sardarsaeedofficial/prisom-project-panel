@@ -1580,10 +1580,24 @@ function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistI
     { id: "github-push-event",        label: "Push event enabled in GitHub webhook",           required: false, note: "GitHub → Webhooks → Which events: Just the push event." },
     { id: "github-first-delivery",    label: "First webhook delivery received",                required: false, note: "Push a commit to verify GitHub Readiness shows a recent delivery." },
     { id: "github-auto-deploy-review", label: "Auto-deploy setting reviewed before enabling",  required: true,  note: "Auto-deploy fires on every push — confirm env/domain/database readiness first." },
-    { id: "first-deploy",             label: "First multi-service deploy triggered",           required: true,  note: "Use Publishing → Services → Deploy all." },
-    { id: "health-ok",         label: "API health check returns 200",             required: false, note: "/api/healthz should return { ok: true }." },
-    { id: "frontend-loads",    label: "Frontend loads at /",                      required: false },
-    { id: "login-works",       label: "Login / auth flow works",                  required: false },
+    { id: "first-deploy",             label: "First multi-service deploy triggered",                   required: true,  note: "Use Publishing → Services → Deploy all." },
+    { id: "health-ok",                label: "API health check returns 200",                          required: false, note: "/api/healthz should return { ok: true }." },
+    { id: "frontend-loads",           label: "Frontend loads at /",                                   required: false },
+    { id: "login-works",              label: "Login / auth flow works",                               required: false },
+  );
+
+  // Sprint 49: Final go-live readiness checklist
+  items.push(
+    { id: "golive-env-readiness",     label: "Env readiness passed (no missing required vars)",       required: true,  note: "Check Secrets → Env Readiness. All required vars must be configured." },
+    { id: "golive-db-readiness",      label: "Database readiness reviewed",                          required: true,  note: "Check Database → Readiness. Connection test should pass or be manually verified." },
+    { id: "golive-domain-readiness",  label: "Domain readiness passed",                              required: true,  note: "DNS A record pointing to VPS, SSL issued, nginx config safe." },
+    { id: "golive-routing-readiness", label: "Routing configuration applied",                        required: false, note: "Publishing → Production Routing → Apply Routes." },
+    { id: "golive-github-reviewed",   label: "GitHub auto-sync setup reviewed",                      required: false, note: "GitHub → Auto-Sync Readiness. Webhook and secret configured if using auto-sync." },
+    { id: "golive-backup-done",       label: "Backup created before promotion",                      required: true,  note: "Create a backup in the Backups section before promoting to production." },
+    { id: "golive-preflight-passed",  label: "Release preflight checks passed",                      required: true,  note: "Releases → Run Preflight. All required checks must pass or be reviewed." },
+    { id: "golive-readiness-panel",   label: "Go-Live Readiness panel checked",                      required: true,  note: "Releases → Go-Live Readiness. Fix all blockers before promoting." },
+    { id: "golive-smoke-passed",      label: "Smoke checks passed after promotion",                  required: false, note: "Releases → Run Smoke Checks. Check domain root, API health, and SSL." },
+    { id: "golive-rollback-reviewed", label: "Rollback plan reviewed",                               required: true,  note: "Know how to roll back if needed. Rollback does not undo database migrations." },
   );
 
   return items;
