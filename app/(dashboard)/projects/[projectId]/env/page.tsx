@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ProjectSecretsVault } from "@/components/projects/project-secrets-vault";
+import { EnvReadinessPanel } from "@/components/projects/env-readiness-panel";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Secrets Vault" };
@@ -27,6 +28,10 @@ export default async function ProjectSecretsPage({ params }: Props) {
           title="Secrets Vault"
           description="Manage encrypted secrets and environment variables. Values are encrypted at rest and never exposed in logs, backups, or exports."
         />
+        {/* Sprint 46: Environment Readiness */}
+        <div className="space-y-6 max-w-3xl mb-6">
+          <EnvReadinessPanel projectId={projectId} />
+        </div>
         <ProjectSecretsVault projectId={projectId} />
       </DashboardShell>
     </div>

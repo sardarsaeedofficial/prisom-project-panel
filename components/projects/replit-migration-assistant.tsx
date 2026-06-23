@@ -1505,10 +1505,17 @@ type ChecklistItem = { id: string; label: string; note?: string; required?: bool
 
 function buildFinalChecklist(report: EnrichedMigrationReport | null): ChecklistItem[] {
   const items: ChecklistItem[] = [
-    { id: "code-imported",     label: "Code imported into project workspace",    required: true  },
-    { id: "services-created",  label: "Services configured in Services section", required: true  },
-    { id: "secrets-added",     label: "Required secrets added to Secrets Vault", required: true,  note: "Add DATABASE_URL, APP_URL, and all other required keys." },
-    { id: "backup-created",    label: "Backup created before first deploy",      required: false, note: "Recommended in case you need to restore." },
+    { id: "code-imported",      label: "Code imported into project workspace",    required: true  },
+    { id: "services-created",   label: "Services configured in Services section", required: true  },
+    { id: "env-scan-run",       label: "Env Readiness report generated",          required: false, note: "Run Env Readiness scan in Secrets Vault to detect missing vars." },
+    { id: "env-vars-detected",  label: "Required env vars detected",              required: false, note: "Check Secrets Vault → Env Readiness for detected vars." },
+    { id: "placeholders-created", label: "Missing env placeholders created",      required: false, note: "Use Env Readiness → Create Missing Placeholders." },
+    { id: "real-secrets-entered", label: "Real production secret values entered", required: true,  note: "Replace all placeholders with actual production values in Secrets Vault." },
+    { id: "no-placeholders",    label: "No placeholder env values remain",        required: true,  note: "Check Env Readiness — all required vars must show Configured." },
+    { id: "stripe-key-checked", label: "Stripe live/test key status reviewed",    required: false, note: "Production must use sk_live_* and pk_live_* keys, not sk_test_*." },
+    { id: "app-url-set",        label: "APP_URL points to production domain",     required: true,  note: "APP_URL and NEXT_PUBLIC_APP_URL must use https://yourdomain.com." },
+    { id: "secrets-added",      label: "All required secrets added to Secrets Vault", required: true, note: "Add DATABASE_URL, APP_URL, and all other required keys." },
+    { id: "backup-created",     label: "Backup created before first deploy",      required: false, note: "Recommended in case you need to restore." },
   ];
 
   if (report?.database && report.database.type !== "none" && report.database.type !== "unknown") {

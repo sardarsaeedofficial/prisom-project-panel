@@ -177,6 +177,21 @@ export default async function ProjectPublishingPage({ params }: Props) {
   let initialNginx      = null;
   let routingHasBackup  = false;
 
+  // Sprint 46: Env readiness check (non-fatal)
+  let envReadinessStatus:  "ready" | "warning" | "blocked" | null = null;
+  let envReadinessBlocked: string[] = [];
+  try {
+    const { generateEnvReadinessReport } = await import("@/lib/env/env-readiness-detector");
+    const envReport = await generateEnvReadinessReport(projectId);
+    if (envReport && envReport.findings.length > 0) {
+      envReadinessStatus  = envReport.status;
+      envReadinessBlocked = envReport.findings
+        .filter((f) => f.severity === "required" && (f.status === "missing" || f.status === "placeholder" || f.status === "empty"))
+        .map((f) => f.name)
+        .slice(0, 8);
+    }
+  } catch { /* non-fatal */ }
+
   if (dbDeployConfig && (serviceCount > 0 || routingDomain)) {
     try {
       const rm = generateProjectRouteMap({
@@ -219,6 +234,52 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 46: Env readiness banner ── */}
+          {envReadinessStatus && envReadinessStatus !== "ready" && (
+            <div className={`rounded-xl border px-4 py-3 flex items-start gap-3 ${
+              envReadinessStatus === "blocked"
+                ? "border-red-200 bg-red-50 dark:bg-red-950/20"
+                : "border-amber-200 bg-amber-50 dark:bg-amber-950/20"
+            }`}>
+              {envReadinessStatus === "blocked"
+                ? <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                : <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              }
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${
+                  envReadinessStatus === "blocked"
+                    ? "text-red-800 dark:text-red-200"
+                    : "text-amber-800 dark:text-amber-200"
+                }`}>
+                  Secrets readiness:{" "}
+                  {envReadinessStatus === "blocked" ? "blocked — missing required env vars" : "warnings — some values need attention"}
+                </p>
+                {envReadinessBlocked.length > 0 && (
+                  <p className={`text-xs mt-0.5 ${
+                    envReadinessStatus === "blocked"
+                      ? "text-red-700 dark:text-red-300"
+                      : "text-amber-700 dark:text-amber-300"
+                  }`}>
+                    Missing required vars: {envReadinessBlocked.map((n) => (
+                      <code key={n} className="mx-0.5 font-mono">{n}</code>
+                    ))}.{" "}
+                    <Link href={`/projects/${projectId}/env`} className="underline hover:no-underline">
+                      Open Secrets Vault →
+                    </Link>
+                  </p>
+                )}
+                {envReadinessBlocked.length === 0 && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                    Check placeholder or suspicious values.{" "}
+                    <Link href={`/projects/${projectId}/env`} className="underline hover:no-underline">
+                      Open Secrets Vault →
+                    </Link>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── Sprint 45: DB warning — shown if DB env is not tested ── */}
           {dbDeployConfig && (

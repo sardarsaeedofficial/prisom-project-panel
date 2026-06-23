@@ -297,6 +297,52 @@ function buildFooter(): string {
 `;
 }
 
+function buildEnvReadiness(r: EnrichedMigrationReport): string {
+  const secrets = r.requiredSecrets ?? [];
+  if (secrets.length === 0) return "";
+
+  const lines: string[] = [`## Secrets / Env Readiness\n`];
+  lines.push(`> All required env vars must be set in the Secrets Vault before deploying to production.`);
+  lines.push(`> Never commit real values to version control.`);
+  lines.push("");
+
+  // Group by category
+  const byCategory: Record<string, typeof secrets> = {};
+  for (const s of secrets) {
+    const cat = s.category ?? "other";
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(s);
+  }
+
+  const categoryOrder = ["database", "payments", "email", "media", "auth", "app", "replit-specific", "other"];
+  const sortedCats = [
+    ...categoryOrder.filter((c) => byCategory[c]),
+    ...Object.keys(byCategory).filter((c) => !categoryOrder.includes(c)),
+  ];
+
+  for (const cat of sortedCats) {
+    const items = byCategory[cat];
+    if (!items?.length) continue;
+    lines.push(`### ${cat.charAt(0).toUpperCase() + cat.slice(1).replace(/-/g, " ")}`);
+    for (const s of items) {
+      const note = s.notes ? ` — ${s.notes}` : s.replitReplacement ? ` — Replit replacement: ${s.replitReplacement}` : "";
+      lines.push(`- [ ] \`${s.name}\`${note}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(`### Pre-Deploy Checklist\n`);
+  lines.push(`- [ ] All required env vars entered in Secrets Vault`);
+  lines.push(`- [ ] No placeholder values remain (e.g., \`<required:...>\`, \`CHANGE_ME\`, \`your-*\`)`);
+  lines.push(`- [ ] Stripe live keys used in production (not \`sk_test_*\` / \`pk_test_*\`)`);
+  lines.push(`- [ ] APP_URL points to production domain (\`https://yourdomain.com\`)`);
+  lines.push(`- [ ] NEXTAUTH_URL / AUTH_URL matches production domain`);
+  lines.push(`- [ ] No Replit-specific vars remain (e.g., REPL_OWNER, REPLIT_DB_URL)`);
+  lines.push("");
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -328,6 +374,7 @@ export function generateHandoffMarkdown(
       : buildManualSteps(report),
     buildDatabase(report),
     buildDatabaseReadiness(report),
+    buildEnvReadiness(report),
     buildServices(report),
     buildFooter(),
   ]

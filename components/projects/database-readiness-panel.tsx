@@ -13,6 +13,7 @@
  */
 
 import { useState }          from "react";
+import Link                  from "next/link";
 import { Badge }             from "@/components/ui/badge";
 import { Button }            from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -437,9 +438,26 @@ export function DatabaseReadinessPanel({ projectId }: Props) {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Go to <strong>Secrets</strong> to add or update env vars.
-                </p>
+                {/* Sprint 46: Link to Secrets Vault when DATABASE_URL missing */}
+                {report.envFindings.some(
+                  (f) => f.name === "DATABASE_URL" && !f.valueConfigured,
+                ) ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    DATABASE_URL is not set.{" "}
+                    <Link href={`/projects/${projectId}/env`} className="underline hover:no-underline font-medium">
+                      Add it in Secrets Vault →
+                    </Link>
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Go to{" "}
+                    <Link href={`/projects/${projectId}/env`} className="underline hover:no-underline">
+                      Secrets Vault
+                    </Link>{" "}
+                    to add or update env vars.
+                  </p>
+                )}
               </div>
             )}
 

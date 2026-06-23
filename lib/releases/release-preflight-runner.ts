@@ -151,6 +151,53 @@ async function checkEnvVarsConfigured(
   return pass("env_config", "Environment variables", `${envCount} environment variable(s) configured.`);
 }
 
+async function checkEnvReadiness(
+  projectId: string,
+): Promise<ReleaseReadinessCheck> {
+  try {
+    const { generateEnvReadinessReport } = await import("@/lib/env/env-readiness-detector");
+    const report = await generateEnvReadinessReport(projectId);
+
+    if (!report || report.findings.length === 0) {
+      return pass("env_readiness", "Secrets readiness", "No env readiness data — skipping.", `/projects/${projectId}/env`);
+    }
+
+    if (report.status === "blocked") {
+      const names = report.findings
+        .filter((f) => f.severity === "required" && (f.status === "missing" || f.status === "placeholder" || f.status === "empty"))
+        .map((f) => f.name)
+        .slice(0, 5)
+        .join(", ");
+      return fail(
+        "env_readiness",
+        "Secrets readiness",
+        `Missing required env vars: ${names || "see Secrets Vault"}.`,
+        `/projects/${projectId}/env`,
+      );
+    }
+
+    if (report.status === "warning") {
+      const count = report.summary.placeholders + report.summary.suspicious;
+      return warn(
+        "env_readiness",
+        "Secrets readiness",
+        `${count} env var(s) need attention (placeholder or suspicious values).`,
+        `/projects/${projectId}/env`,
+      );
+    }
+
+    return pass(
+      "env_readiness",
+      "Secrets readiness",
+      `${report.summary.configured}/${report.summary.total} env vars configured and ready.`,
+      `/projects/${projectId}/env`,
+    );
+  } catch {
+    // Non-fatal — return warning if check fails
+    return warn("env_readiness", "Secrets readiness", "Could not check env var readiness.", `/projects/${projectId}/env`);
+  }
+}
+
 async function checkRecentBackup(
   projectId: string,
 ): Promise<ReleaseReadinessCheck> {
@@ -264,6 +311,7 @@ export async function runReleasePreflight(
     depCheck,
     dirCheck,
     envCheck,
+    envReadinessCheck,
     domainCheck,
     sslCheck,
     backupCheck,
@@ -274,6 +322,7 @@ export async function runReleasePreflight(
     checkDeploymentSucceeded(projectId, deploymentId),
     checkReleaseDirectoryExists(slug, deploymentRef),
     checkEnvVarsConfigured(projectId),
+    checkEnvReadiness(projectId),
     checkProductionDomain(projectId),
     checkSslActive(projectId),
     checkRecentBackup(projectId),
@@ -297,6 +346,7 @@ export async function runReleasePreflight(
     domainCheck,
     sslCheck,
     envCheck,
+    envReadinessCheck,
     backupCheck,
     rollbackResult.check,
     opCheck,
