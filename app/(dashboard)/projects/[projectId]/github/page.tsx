@@ -28,6 +28,7 @@ import { RepairInstallationIdButton } from "@/components/github/repair-installat
 import { GithubLocalGitPanel }       from "@/components/projects/github-local-git-panel";
 import { ProjectGitPanel }           from "@/components/projects/project-git-panel";
 import { ProjectGitHubSyncPanel }    from "@/components/projects/project-github-sync-panel";
+import { GitHubReadinessPanel }      from "@/components/projects/github-readiness-panel";
 import { db } from "@/lib/db";
 import { getProjectGitHubData } from "@/lib/data/github";
 import { unlinkGitHubRepositoryAction } from "@/app/actions/github";
@@ -173,6 +174,11 @@ export default async function ProjectGithubPage({ params }: Props) {
           title="GitHub"
           description="Manage your repository connection and view commit history."
         />
+
+        {/* Sprint 48 — GitHub Auto-Sync Readiness */}
+        <div className="space-y-6 max-w-3xl mb-6">
+          <GitHubReadinessPanel projectId={projectId} />
+        </div>
 
         {showLocalPanel ? (
           /* ── Local git workflow panel for uploaded / blank projects ── */

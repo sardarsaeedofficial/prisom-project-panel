@@ -113,12 +113,12 @@ export async function POST(request: NextRequest) {
 
   // ── Signature verification ────────────────────────────────────────────────
   if (!verifyGitHubWebhookSignature(rawBody, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    return NextResponse.json({ ok: false, error: "Invalid GitHub signature." }, { status: 401 });
   }
 
   if (!event) {
     return NextResponse.json(
-      { error: "Missing x-github-event header" },
+      { ok: false, error: "Missing x-github-event header." },
       { status: 400 }
     );
   }
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
       status: "error",
       message: "Invalid JSON payload",
     });
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
   }
 
   // ── Event routing ─────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ export async function POST(request: NextRequest) {
           message: `Event type "${event}" is not handled`,
         });
         return NextResponse.json(
-          { received: true, event, delivery, action: "ignored" },
+          { ok: true, accepted: false, event, delivery, reason: `Event type "${event}" is not handled.` },
           { status: 202 }
         );
       }
@@ -195,12 +195,7 @@ export async function POST(request: NextRequest) {
     });
     // Return 200 so GitHub does not retry — we already logged the error
     return NextResponse.json(
-      {
-        received: true,
-        event,
-        delivery,
-        warning: "Processing error — check server logs",
-      },
+      { ok: true, accepted: false, event, delivery, reason: "Processing error — check server logs." },
       { status: 200 }
     );
   }

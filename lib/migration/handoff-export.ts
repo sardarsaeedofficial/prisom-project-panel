@@ -391,6 +391,45 @@ function buildDomainReadiness(r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+function buildGitHubReadiness(_r: EnrichedMigrationReport): string {
+  const lines: string[] = [`## GitHub Auto-Sync Readiness\n`];
+
+  lines.push(`> Configure GitHub webhooks and auto-sync before enabling auto-deploy in production.`);
+  lines.push(`> Never expose or log the webhook secret value.`);
+  lines.push("");
+
+  lines.push(`### Repository Setup`);
+  lines.push(`- [ ] GitHub repository connected to this project (GitHub section)`);
+  lines.push(`- [ ] Default branch confirmed (should match your production branch)`);
+  lines.push("");
+
+  lines.push(`### Webhook Configuration`);
+  lines.push(`- [ ] Copy the webhook URL from GitHub → Auto-Sync Readiness panel`);
+  lines.push(`- [ ] In GitHub repository → Settings → Webhooks → Add webhook:`);
+  lines.push(`  - Payload URL: \`https://your-domain/api/webhooks/github\``);
+  lines.push(`  - Content type: \`application/json\``);
+  lines.push(`  - Secret: value from \`GITHUB_WEBHOOK_SECRET\` on your server`);
+  lines.push(`  - Events: Just the push event`);
+  lines.push(`  - Active: enabled`);
+  lines.push(`- [ ] Add \`GITHUB_WEBHOOK_SECRET\` to your server \`.env\` file`);
+  lines.push(`- [ ] Restart the panel service to pick up the new env var`);
+  lines.push("");
+
+  lines.push(`### Verification`);
+  lines.push(`- [ ] Push a commit and confirm a delivery appears in GitHub → Readiness`);
+  lines.push(`- [ ] Run Webhook Setup Test — all checks should pass`);
+  lines.push("");
+
+  lines.push(`### Auto-Deploy Safety`);
+  lines.push(`- [ ] Review env var, domain, and database readiness BEFORE enabling auto-deploy`);
+  lines.push(`- [ ] Auto-pull is safe once env is clean and the worktree is not dirty`);
+  lines.push(`- [ ] Auto-deploy triggers a full deploy on every push — confirm this is intended`);
+  lines.push(`- [ ] Keep a recent backup / snapshot before first auto-deploy`);
+  lines.push("");
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -424,6 +463,7 @@ export function generateHandoffMarkdown(
     buildDatabaseReadiness(report),
     buildEnvReadiness(report),
     buildDomainReadiness(report),
+    buildGitHubReadiness(report),
     buildServices(report),
     buildFooter(),
   ]
