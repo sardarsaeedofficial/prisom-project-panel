@@ -19,6 +19,9 @@ import { db }                                from "@/lib/db";
 import { requireProjectPermission }          from "@/lib/auth/project-membership";
 import { writeProjectAuditEvent }            from "@/lib/audit/project-audit";
 import { getAuditRequestContext }            from "@/lib/audit/request-context";
+import { generateRoutingDiagnostics }        from "@/lib/routing/routing-diagnostics-service";
+import { buildRouteRollbackPreview }         from "@/lib/routing/route-rollback-preview";
+import type { RoutingDiagnosticsReport, RouteRollbackPreview } from "@/lib/routing/routing-diagnostics-types";
 import { generateProjectRouteMap }           from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap }         from "@/lib/routing/nginx-route-generator";
 import {
@@ -41,6 +44,62 @@ import type { PlannerInput }                 from "@/lib/routing/project-route-p
 type ActionResult<T = void> =
   | { ok: true;  data: T }
   | { ok: false; error: string; code?: string };
+
+// ── 0. Routing diagnostics ────────────────────────────────────────────────────
+
+export async function generateRoutingDiagnosticsAction(
+  projectId: string,
+): Promise<ActionResult<RoutingDiagnosticsReport>> {
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  const report = await generateRoutingDiagnostics(projectId);
+
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: auth.userId,
+    actorRole:   auth.role,
+    action:      "routing.diagnostics_generated",
+    category:    "publishing",
+    result:      report.status === "blocked" ? "failed" : "success",
+    summary:     `Routing diagnostics generated — status: ${report.status}, blockers: ${report.blockers.length}`,
+    metadata:    { domain: report.domain, status: report.status, blockerCount: report.blockers.length },
+    ...ctx,
+  }).catch(() => null);
+
+  return { ok: true, data: report };
+}
+
+// ── 0b. Rollback preview ──────────────────────────────────────────────────────
+
+export async function getRouteRollbackPreviewAction(
+  projectId: string,
+): Promise<ActionResult<RouteRollbackPreview>> {
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  const input = await buildPlannerInput(projectId);
+  if (!input) return { ok: false, error: "Project not found." };
+
+  const domain  = input.domain ?? "";
+  const preview = await buildRouteRollbackPreview(domain);
+
+  const ctx = await getAuditRequestContext();
+  void writeProjectAuditEvent({
+    projectId,
+    actorUserId: auth.userId,
+    actorRole:   auth.role,
+    action:      "routing.rollback_preview_generated",
+    category:    "rollback",
+    result:      "success",
+    summary:     `Rollback preview generated for ${domain || "unknown domain"} — hasBackup: ${preview.hasBackup}`,
+    metadata:    { domain, hasBackup: preview.hasBackup },
+    ...ctx,
+  }).catch(() => null);
+
+  return { ok: true, data: preview };
+}
 
 // ── Loader: delegated to shared lib/routing/planner-loader.ts ─────────────────
 
@@ -94,7 +153,7 @@ export async function previewProjectNginxConfigAction(
     action:      "routing.preview_generated",
     category:    "publishing",
     result:      genResult.ok ? "success" : "failed",
-    summary:     `Nginx route preview generated for ${routeMap.domain || "unknown domain"}`,
+    summary:     `Nginx route config preview generated for ${routeMap.domain || "unknown domain"}`,
     ...ctx,
   }).catch(() => null);
 
@@ -142,10 +201,10 @@ export async function validateProjectRouteMapAction(
     projectId,
     actorUserId: auth.userId,
     actorRole:   auth.role,
-    action:      testResult.ok ? "routing.preview_generated" : "routing.validation_failed",
+    action:      testResult.ok ? "routing.dry_run_validated" : "routing.dry_run_validated",
     category:    "publishing",
     result:      testResult.ok ? "success" : "failed",
-    summary:     `Route map validation: ${testResult.ok ? "passed" : "failed"} for ${routeMap.domain || "unknown domain"}`,
+    summary:     `Route map dry-run validation: ${testResult.ok ? "passed" : "failed"} for ${routeMap.domain || "unknown domain"}`,
     metadata:    { domain: routeMap.domain, nginxOutput: testResult.output.slice(0, 500) },
     ...ctx,
   }).catch(() => null);
@@ -203,7 +262,7 @@ export async function applyProjectRouteMapAction(input: {
     projectId,
     actorUserId: auth.userId,
     actorRole:   auth.role,
-    action:      applyResult.ok ? "routing.applied" : "routing.validation_failed",
+    action:      applyResult.ok ? "routing.apply_succeeded" : "routing.apply_failed",
     category:    "publishing",
     result:      applyResult.ok ? "success" : "failed",
     summary:     applyResult.ok
@@ -284,8 +343,8 @@ export async function rollbackProjectRouteConfigAction(
     projectId,
     actorUserId: auth.userId,
     actorRole:   auth.role,
-    action:      rollbackResult.ok ? "routing.rollback" : "routing.validation_failed",
-    category:    "publishing",
+    action:      rollbackResult.ok ? "routing.rollback_preview_generated" : "routing.apply_failed",
+    category:    "rollback",
     result:      rollbackResult.ok ? "success" : "failed",
     summary:     rollbackResult.ok
       ? `Nginx route config rolled back for ${domain}`
@@ -333,7 +392,7 @@ export async function checkProjectRouteHealthAction(
     projectId,
     actorUserId: auth.userId,
     actorRole:   auth.role,
-    action:      "routing.health_check",
+    action:      "routing.health_checked",
     category:    "publishing",
     result:      healthReport.allOk ? "success" : "failed",
     summary:     `Route health: ${healthReport.checks.filter((c) => c.ok).length}/${healthReport.checks.length} checks passed for ${domain}`,
