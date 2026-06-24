@@ -4,6 +4,7 @@ import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell"
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ProjectBackupsPanel } from "@/components/projects/project-backups-panel";
 import { ProjectBackupSchedulePanel } from "@/components/projects/project-backup-schedule-panel";
+import { DisasterRecoveryPanel } from "@/components/projects/disaster-recovery-panel";
 import { getProjectById } from "@/lib/data/projects";
 import { getOrCreateBackupSchedule } from "@/lib/backups/backup-schedule-service";
 
@@ -41,6 +42,13 @@ export default async function ProjectBackupsPage({ params }: Props) {
 
         {/* Existing manual backups panel */}
         <ProjectBackupsPanel projectId={projectId} />
+
+        <hr className="border-border my-8" />
+
+        {/* Sprint 60: Disaster Recovery Drill */}
+        <div className="max-w-3xl">
+          <DisasterRecoveryPanel projectId={projectId} />
+        </div>
       </DashboardShell>
     </div>
   );

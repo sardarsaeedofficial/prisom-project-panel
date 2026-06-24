@@ -8,6 +8,8 @@ import { WorkspaceNav }                    from "@/components/projects/workspace
 import { ReplitMigrationAssistant }           from "@/components/projects/replit-migration-assistant";
 import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
+import { Database }                           from "lucide-react";
+import Link                                   from "next/link";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
@@ -47,6 +49,23 @@ export default async function ProjectMigrationPage({ params }: Props) {
 
           {/* Sprint 58: Debug failed migration/routing */}
           <DebugSummaryPanel projectId={projectId} compact context="routing" />
+
+          {/* Sprint 60: Backup / Restore Drill — run before cutover */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Database className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Run Backup / Restore Drill Before Cutover</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Complete a staging restore drill to prove your backup is recoverable before production cutover.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/backups`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Backups →
+            </Link>
+          </div>
 
           {/* Sprint 55: Production Cutover — compact reference card */}
           <ProductionCutoverPanel projectId={projectId} compact />

@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch,
+  RotateCcw, ChevronLeft, GitBranch, Database,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -132,6 +132,23 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 60: Disaster Recovery compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Database className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Backup / Restore Drill</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Run a full restore drill before production cutover to confirm your backups are recoverable.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/backups`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Backups →
+            </Link>
+          </div>
 
           {/* ── Sprint 58: Debug failed dry-run/cutover ── */}
           <DebugSummaryPanel projectId={projectId} compact context="dry_run" />

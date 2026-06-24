@@ -776,6 +776,86 @@ function buildPermissionsSection(): string {
   return lines.join("\n");
 }
 
+// ── Sprint 60: Disaster Recovery & Restore Drill section ─────────────────────
+
+function buildDisasterRecoverySection(): string {
+  const DRILL_SLUG   = "sardar-security-restore-drill";
+  const DRILL_DOMAIN = "restore-sardar-security-project.doorstepmanchester.uk";
+
+  const lines: string[] = [
+    "## Disaster Recovery & Restore Drill",
+    "",
+    "> Complete a staging restore drill before production cutover to confirm your backup is recoverable.",
+    "> No live restore is triggered automatically — all actions require explicit confirmation.",
+    "",
+    "### Backup Status Checklist",
+    "",
+    "- [ ] At least one ready backup exists (Backups page)",
+    "- [ ] Latest backup is within 7 days of go-live",
+    "- [ ] Backup archive file is present on disk (non-zero size)",
+    "- [ ] SHA-256 checksum recorded",
+    "- [ ] Scheduled backup configured and enabled",
+    "- [ ] Backup retention set to at least 3",
+    "",
+    "### Restore Drill Plan",
+    "",
+    `**Staging restore target:** \`${DRILL_SLUG}\` — \`${DRILL_DOMAIN}\``,
+    "",
+    "Complete the following steps before production cutover:",
+    "",
+    "1. **Select latest backup** — from the Backups page",
+    "2. **Verify backup integrity** — type `VERIFY BACKUP` to confirm archive is intact",
+    `3. **Create drill project** — use slug \`${DRILL_SLUG}\` (not the live project)`,
+    "4. **Restore source files** — restore into drill project (confirm: `RESTORE TO STAGING`)",
+    "5. **Add test env values** — use safe staging/sandbox values only (never copy production secrets)",
+    "6. **Run deployment dry run** — confirm source builds in drill project",
+    "7. **Run build dry run** — confirm build command succeeds",
+    "8. **Configure staging route** — preview route for drill domain only, no production nginx changes",
+    `9. **Run smoke checks** — \`curl -I https://${DRILL_DOMAIN}/\``,
+    "10. **Compare output** — check key pages against the live project",
+    "11. **Mark drill complete** — type `MARK DRILL COMPLETE` in the Backups → DR Drill panel",
+    "",
+    "### Release Rollback Plan",
+    "",
+    "- [ ] At least 2 successful deployments exist (rollback requires a prior release)",
+    "- [ ] Rollback confirmation: type `ROLLBACK` in Releases page",
+    "- [ ] Previous deployment ref recorded before cutover",
+    "",
+    "> **Note:** Application rollback does NOT rollback database schema or data.",
+    "",
+    "### Route Rollback Plan",
+    "",
+    "1. `sudo cp /etc/nginx/sites-available/<project>.bak /etc/nginx/sites-available/<project>`",
+    "2. `sudo nginx -t`",
+    "3. If test passes: `sudo nginx -s reload`",
+    "4. Verify domain resolves correctly",
+    "",
+    "> Always take an nginx config backup before applying new routes.",
+    "",
+    "### ⚠️  Database Rollback Warning",
+    "",
+    "> **CRITICAL: Application rollback does NOT automatically rollback database schema or data.**",
+    "> Database changes may be irreversible without a separate DB-level backup.",
+    "",
+    "- Take a DB dump before any migration: `pg_dump <db> > backup_before_migration.sql`",
+    "- Keep the dump outside the project directory",
+    "- To restore DB: `psql <db> < backup_before_migration.sql`",
+    "- Test DB restore on staging before applying to production",
+    "",
+    "### Monitoring After Restore",
+    "",
+    "```bash",
+    "curl -I https://projects.doorstepmanchester.uk/login",
+    "curl -I https://sardar-security-project.doorstepmanchester.uk/",
+    "curl -I https://sardar-security-project.doorstepmanchester.uk/api/healthz",
+    "```",
+    "",
+    "Expected: all return HTTP 200.",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 /**
  * Generates a Markdown handoff document from an enriched migration report.
  * Safe to share — no secret values are included.
@@ -807,6 +887,7 @@ export function generateHandoffMarkdown(
     buildProductionCutover(report),
     buildSourceIntakeSummary(report),
     buildPermissionsSection(),
+    buildDisasterRecoverySection(),
     buildServices(report),
     buildFooter(),
   ]

@@ -300,6 +300,23 @@ export default async function ProjectPublishingPage({ params }: Props) {
           {/* ── Sprint 58: Debug failed build/deploy ── */}
           <DebugSummaryPanel projectId={projectId} compact context="deploy" />
 
+          {/* ── Sprint 60: Disaster Recovery compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <ExternalLink className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Backup / Restore Drill</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Confirm your backup is intact and run a staging restore drill before applying production routes.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/backups`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Backups →
+            </Link>
+          </div>
+
           {/* ── Sprint 55: Production Cutover compact card ── */}
           {dbDeployConfig && (
             <ProductionCutoverPanel projectId={projectId} compact />
