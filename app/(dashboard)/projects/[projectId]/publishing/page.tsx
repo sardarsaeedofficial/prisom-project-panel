@@ -43,6 +43,7 @@ import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
 import { hasBackupConfig }          from "@/lib/routing/nginx-route-apply";
 import { SardarMigrationRunbookPanel } from "@/components/projects/sardar-migration-runbook-panel";
+import { StagingImportPanel }          from "@/components/projects/staging-import-panel";
 import { isSardarProject }             from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -287,6 +288,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 51: Staging import compact card ── */}
+          {isSardar && (
+            <StagingImportPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 50: Sardar migration runbook compact card ── */}
           {isSardar && (

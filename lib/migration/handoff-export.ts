@@ -484,6 +484,71 @@ function buildGoLiveReadiness(_r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+// ── Sprint 51: Staging import section ────────────────────────────────────────
+
+function buildStagingImportHandoffSection(_r: EnrichedMigrationReport): string {
+  const STAGING_SLUG   = "sardar-security-staging";
+  const STAGING_DOMAIN = "staging-sardar-security-project.doorstepmanchester.uk";
+
+  const lines: string[] = [`## Staging Import Plan\n`];
+
+  lines.push(`> Staging import is a prerequisite for production cutover.`);
+  lines.push(`> Complete all staging steps and validate before making any DNS or routing changes.`);
+  lines.push(``);
+
+  lines.push(`| Field | Value |`);
+  lines.push(`|-------|-------|`);
+  lines.push(`| Staging slug | \`${STAGING_SLUG}\` |`);
+  lines.push(`| Staging domain | \`${STAGING_DOMAIN}\` |`);
+  lines.push(``);
+
+  lines.push(`### Staging Service Checklist`);
+  lines.push(``);
+  lines.push(`- [ ] Configure API service — root: artifacts/api-server`);
+  lines.push(`  \`pnpm --filter @workspace/api-server run build\``);
+  lines.push(`  \`node --enable-source-maps artifacts/api-server/dist/index.mjs\``);
+  lines.push(`- [ ] Configure static frontend — root: artifacts/sardar-security`);
+  lines.push(`  \`pnpm --filter @workspace/sardar-security run build\``);
+  lines.push(`  Output: artifacts/sardar-security/dist/public`);
+  lines.push(`- [ ] SPA fallback enabled on frontend service`);
+  lines.push(``);
+
+  lines.push(`### Staging Env Checklist`);
+  lines.push(``);
+  lines.push(`> Key names only. Add staging/test values manually — never copy production secrets.`);
+  lines.push(``);
+  lines.push(`- [ ] DATABASE_URL — staging/test Neon database (separate from production)`);
+  lines.push(`- [ ] SESSION_SECRET — new random value for staging`);
+  lines.push(`- [ ] STRIPE_SECRET_KEY — sk_test_... (test key only)`);
+  lines.push(`- [ ] STRIPE_PUBLISHABLE_KEY — pk_test_... (test key only)`);
+  lines.push(`- [ ] STRIPE_WEBHOOK_SECRET — staging webhook secret`);
+  lines.push(`- [ ] CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET`);
+  lines.push(`- [ ] APP_URL — https://${STAGING_DOMAIN}`);
+  lines.push(`- [ ] Email provider env (RESEND_API_KEY, SMTP_* etc.)`);
+  lines.push(``);
+
+  lines.push(`### Staging DB Checklist`);
+  lines.push(``);
+  lines.push(`- [ ] Staging DATABASE_URL points to separate database`);
+  lines.push(`- [ ] Run: \`pnpm --filter @workspace/db exec drizzle-kit push\``);
+  lines.push(`  > ⚠️  Never run schema push against production database.`);
+  lines.push(`- [ ] Verify schema pushed correctly`);
+  lines.push(``);
+
+  lines.push(`### Staging Smoke Checks`);
+  lines.push(``);
+  lines.push(`- [ ] https://${STAGING_DOMAIN}/ returns 200`);
+  lines.push(`- [ ] https://${STAGING_DOMAIN}/api/healthz returns { ok: true }`);
+  lines.push(`- [ ] SPA fallback: deep link returns 200`);
+  lines.push(`- [ ] SSL valid at https://${STAGING_DOMAIN}`);
+  lines.push(``);
+
+  lines.push(`> Only proceed to production cutover after staging smoke checks pass.`);
+  lines.push(``);
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -519,6 +584,7 @@ export function generateHandoffMarkdown(
     buildDomainReadiness(report),
     buildGitHubReadiness(report),
     buildGoLiveReadiness(report),
+    buildStagingImportHandoffSection(report),
     buildServices(report),
     buildFooter(),
   ]

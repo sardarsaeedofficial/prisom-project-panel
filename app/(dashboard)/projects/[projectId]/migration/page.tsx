@@ -7,6 +7,7 @@ import {
 import { WorkspaceNav }                    from "@/components/projects/workspace-nav";
 import { ReplitMigrationAssistant }        from "@/components/projects/replit-migration-assistant";
 import { SardarMigrationRunbookPanel }     from "@/components/projects/sardar-migration-runbook-panel";
+import { StagingImportPanel }              from "@/components/projects/staging-import-panel";
 import { db }                              from "@/lib/db";
 import { isSardarProject }                 from "@/lib/migration/sardar-migration-types";
 
@@ -36,17 +37,21 @@ export default async function ProjectMigrationPage({ params }: Props) {
           description="Analyze Replit-style projects and prepare them for VPS deployment with Prisom."
         />
         <div className="max-w-3xl space-y-6">
-          {/* Sprint 50: Sardar runbook — shown prominently if Sardar project, or as optional */}
+          {/* Sprint 50: Sardar runbook + Sprint 51: Staging import — shown prominently for Sardar projects */}
           {isSardar ? (
-            <SardarMigrationRunbookPanel projectId={projectId} />
+            <>
+              <StagingImportPanel projectId={projectId} />
+              <SardarMigrationRunbookPanel projectId={projectId} />
+            </>
           ) : (
             <details className="group">
               <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground list-none flex items-center gap-1.5 py-1">
                 <span className="text-xs border rounded px-2 py-0.5 group-open:bg-muted">
-                  + Ecommerce migration runbook (Sardar Security Supplies)
+                  + Ecommerce migration (Sardar Security Supplies)
                 </span>
               </summary>
-              <div className="mt-2">
+              <div className="mt-2 space-y-4">
+                <StagingImportPanel projectId={projectId} />
                 <SardarMigrationRunbookPanel projectId={projectId} />
               </div>
             </details>

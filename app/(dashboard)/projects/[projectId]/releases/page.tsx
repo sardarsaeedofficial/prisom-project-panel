@@ -20,6 +20,7 @@ import { requireProjectPermission }    from "@/lib/auth/project-membership";
 import { GoLiveReadinessPanel }            from "@/components/projects/go-live-readiness-panel";
 import { ReleaseComparisonCard }           from "@/components/projects/release-comparison-card";
 import { SardarMigrationRunbookPanel }     from "@/components/projects/sardar-migration-runbook-panel";
+import { StagingImportPanel }              from "@/components/projects/staging-import-panel";
 import { isSardarProject }                 from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -126,6 +127,11 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 51: Staging import compact card ── */}
+          {isSardar && (
+            <StagingImportPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 50: Sardar migration runbook compact card ── */}
           {isSardar && (

@@ -187,7 +187,7 @@ function buildServiceConfigStage(projectId: string): SardarMigrationChecklistIte
 
 async function buildEnvConfigStage(projectId: string): Promise<SardarMigrationChecklistItem[]> {
   // Load env readiness (non-fatal)
-  type EnvReportShape = { status: string; findings: Array<{ key: string; status: string; severity: string }> };
+  type EnvReportShape = { status: string; findings: Array<{ name: string; status: string; severity: string }> };
   let envReport: EnvReportShape | null = null;
   try {
     const { generateEnvReadinessReport } = await import("@/lib/env/env-readiness-detector");
@@ -200,7 +200,7 @@ async function buildEnvConfigStage(projectId: string): Promise<SardarMigrationCh
   const items: SardarMigrationChecklistItem[] = [];
 
   for (const key of REQUIRED_ENV_KEYS) {
-    const finding = envReport?.findings.find((f) => f.key === key);
+    const finding = envReport?.findings.find((f) => f.name === key);
     const isOk = finding?.status === "configured";
     const isMissing = !finding || finding.status === "missing" || finding.status === "empty";
     const isPlaceholder = finding?.status === "placeholder";
@@ -217,10 +217,10 @@ async function buildEnvConfigStage(projectId: string): Promise<SardarMigrationCh
   }
 
   // Email provider — at least one of the EMAIL_ENV_KEYS should be present
-  const emailKey = envReport?.findings.find((f) => EMAIL_ENV_KEYS.includes(f.key) && f.status === "configured");
+  const emailKey = envReport?.findings.find((f) => EMAIL_ENV_KEYS.includes(f.name) && f.status === "configured");
   items.push(
     emailKey
-      ? pass("env-email", "env_config", "Email provider env configured", `Email transport configured via ${emailKey.key}.`, false)
+      ? pass("env-email", "env_config", "Email provider env configured", `Email transport configured via ${emailKey.name}.`, false)
       : warn("env-email", "env_config", "Email provider env not configured", "At least one of: SMTP_HOST, RESEND_API_KEY, SENDGRID_API_KEY should be configured for password reset and order emails.", false,
           { fixHref: `/projects/${projectId}/env` })
   );
