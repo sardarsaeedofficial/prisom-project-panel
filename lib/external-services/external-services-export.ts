@@ -1,0 +1,164 @@
+/**
+ * lib/external-services/external-services-export.ts
+ *
+ * Sprint 54: Export external services readiness as Markdown.
+ *
+ * Safety rules:
+ *  - no secret values included
+ *  - all webhook URLs are plain text (no credentials)
+ *  - report is read-only documentation
+ */
+
+import type {
+  ExternalServiceReadinessReport,
+  ExternalServiceCheck,
+  ExternalServiceProvider,
+} from "./external-services-types";
+
+const PROVIDER_LABEL: Record<ExternalServiceProvider, string> = {
+  stripe:     "Stripe",
+  cloudinary: "Cloudinary",
+  email:      "Email",
+  webhook:    "Webhook URLs",
+  manual:     "App URL / General",
+};
+
+const PROVIDER_ORDER: ExternalServiceProvider[] = [
+  "stripe", "cloudinary", "email", "manual", "webhook",
+];
+
+function statusEmoji(status: ExternalServiceCheck["status"]): string {
+  if (status === "pass")    return "✅";
+  if (status === "warning") return "⚠️";
+  if (status === "fail")    return "❌";
+  return "📋";
+}
+
+export function exportExternalServicesReadiness(
+  report:      ExternalServiceReadinessReport,
+  projectName: string,
+): string {
+  const lines: string[] = [];
+  const genDate = new Date(report.generatedAt).toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+
+  lines.push(`# EXTERNAL_SERVICES_READINESS`);
+  lines.push(``);
+  lines.push(`**Project:** ${projectName}`);
+  lines.push(`**Generated:** ${genDate}`);
+  lines.push(`**Status:** ${report.status.toUpperCase()}`);
+  lines.push(``);
+  lines.push(`---`);
+  lines.push(``);
+
+  // Summary table
+  lines.push(`## Summary`);
+  lines.push(``);
+  lines.push(`| Metric   | Count |`);
+  lines.push(`|----------|-------|`);
+  lines.push(`| Total    | ${report.summary.total} |`);
+  lines.push(`| Passed   | ${report.summary.passed} |`);
+  lines.push(`| Warnings | ${report.summary.warnings} |`);
+  lines.push(`| Failed   | ${report.summary.failed} |`);
+  lines.push(`| Manual   | ${report.summary.manual} |`);
+  lines.push(``);
+
+  // Blockers
+  if (report.blockers.length > 0) {
+    lines.push(`## ❌ Blockers — Resolve Before Going Live`);
+    lines.push(``);
+    for (const b of report.blockers) {
+      lines.push(`- ${b}`);
+    }
+    lines.push(``);
+  }
+
+  // Warnings
+  if (report.warnings.length > 0) {
+    lines.push(`## ⚠️ Warnings`);
+    lines.push(``);
+    for (const w of report.warnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push(``);
+  }
+
+  // Provider sections
+  for (const provider of PROVIDER_ORDER) {
+    const provChecks = report.checks.filter((c) => c.provider === provider);
+    if (provChecks.length === 0) continue;
+
+    lines.push(`## ${PROVIDER_LABEL[provider]}`);
+    lines.push(``);
+
+    for (const c of provChecks) {
+      lines.push(`${statusEmoji(c.status)} **${c.label}**`);
+      lines.push(`   ${c.message}`);
+      if (c.command) {
+        lines.push(`   \`${c.command}\``);
+      }
+      if (c.evidence && c.evidence.length > 0) {
+        for (const e of c.evidence) {
+          lines.push(`   - ${e}`);
+        }
+      }
+      lines.push(``);
+    }
+  }
+
+  // Staging notes
+  lines.push(`## Staging Notes`);
+  lines.push(``);
+  lines.push(`- Use Stripe **test keys** (\`sk_test_*\` / \`pk_test_*\`) in staging — never live keys`);
+  lines.push(`- Register staging webhook URL in Stripe test dashboard:`);
+  lines.push(`  \`https://staging-sardar-security-project.doorstepmanchester.uk/api/webhooks/stripe\``);
+  lines.push(`- Use a test Cloudinary account or test upload preset in staging if possible`);
+  lines.push(`- Use a test email address or sandbox mode for email providers in staging`);
+  lines.push(`- Set APP_URL to the staging domain in staging environment`);
+  lines.push(``);
+
+  // Production notes
+  lines.push(`## Production Notes`);
+  lines.push(``);
+  lines.push(`- Use Stripe **live keys** in production — verify no test keys are present`);
+  lines.push(`- Register production webhook URL in Stripe live dashboard`);
+  lines.push(`- Verify Cloudinary CDN and folder structure before go-live`);
+  lines.push(`- Verify sender domain SPF/DKIM/DMARC records are configured`);
+  lines.push(`- Set APP_URL to production domain (must match exactly, including https://)`);
+  lines.push(`- Run smoke checks after deploy to verify all services work end-to-end`);
+  lines.push(``);
+
+  // Next steps
+  if (report.nextSteps.length > 0) {
+    lines.push(`## Next Steps`);
+    lines.push(``);
+    for (const step of report.nextSteps) {
+      lines.push(`- [ ] ${step}`);
+    }
+    lines.push(``);
+  }
+
+  // Manual checklist
+  const manualChecks = report.checks.filter((c) => c.status === "manual");
+  if (manualChecks.length > 0) {
+    lines.push(`## Manual Checklist`);
+    lines.push(``);
+    for (const c of manualChecks) {
+      lines.push(`- [ ] **${c.label}** — ${c.message}`);
+      if (c.evidence) {
+        for (const e of c.evidence) {
+          lines.push(`  - ${e}`);
+        }
+      }
+    }
+    lines.push(``);
+  }
+
+  lines.push(`---`);
+  lines.push(`*Generated by Prisom Project Panel — Sprint 54 External Services Readiness.*`);
+  lines.push(`*No secret values are included in this report.*`);
+
+  return lines.join("\n");
+}

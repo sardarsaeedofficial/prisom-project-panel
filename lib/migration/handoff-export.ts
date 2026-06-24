@@ -484,6 +484,61 @@ function buildGoLiveReadiness(_r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+// ── Sprint 54: External services readiness section ───────────────────────────
+
+function buildExternalServicesReadiness(_r: EnrichedMigrationReport): string {
+  const PROD_WEBHOOK    = "https://sardar-security-project.doorstepmanchester.uk/api/webhooks/stripe";
+  const STAGING_WEBHOOK = "https://staging-sardar-security-project.doorstepmanchester.uk/api/webhooks/stripe";
+
+  const lines: string[] = [`## External Services Readiness\n`];
+
+  lines.push(`> Configure Stripe, Cloudinary, and email before going live.`);
+  lines.push(`> Check External Services Readiness in the Env page for live status.`);
+  lines.push(`> No secret values are shown here — only key names.`);
+  lines.push(``);
+
+  lines.push(`### Stripe`);
+  lines.push(``);
+  lines.push(`- [ ] \`STRIPE_SECRET_KEY\` — use \`sk_test_*\` in staging, \`sk_live_*\` in production`);
+  lines.push(`- [ ] \`STRIPE_PUBLISHABLE_KEY\` — use \`pk_test_*\` in staging, \`pk_live_*\` in production`);
+  lines.push(`- [ ] \`STRIPE_WEBHOOK_SECRET\` — from Stripe Dashboard → Webhooks`);
+  lines.push(`- [ ] Register production webhook: \`${PROD_WEBHOOK}\``);
+  lines.push(`- [ ] Register staging webhook: \`${STAGING_WEBHOOK}\``);
+  lines.push(`- [ ] Test a checkout using card \`4242 4242 4242 4242\` in staging`);
+  lines.push(`- [ ] Verify webhook fires and order is created after test payment`);
+  lines.push(`- [ ] Verify payment appears in Stripe test dashboard`);
+  lines.push(``);
+
+  lines.push(`### Cloudinary`);
+  lines.push(``);
+  lines.push(`- [ ] \`CLOUDINARY_CLOUD_NAME\` — from Cloudinary Dashboard → Settings`);
+  lines.push(`- [ ] \`CLOUDINARY_API_KEY\` — from Cloudinary Dashboard → API Keys`);
+  lines.push(`- [ ] \`CLOUDINARY_API_SECRET\` — from Cloudinary Dashboard → API Keys`);
+  lines.push(`- [ ] Upload a test product image via the admin panel`);
+  lines.push(`- [ ] Confirm image appears in Cloudinary dashboard`);
+  lines.push(`- [ ] Confirm image appears correctly on the storefront`);
+  lines.push(`- [ ] Replace or copy old Replit-hosted images to Cloudinary`);
+  lines.push(``);
+
+  lines.push(`### Email`);
+  lines.push(``);
+  lines.push(`- [ ] Email provider configured: one of \`RESEND_API_KEY\`, \`SENDGRID_API_KEY\`, or \`SMTP_*\` vars`);
+  lines.push(`- [ ] Sender address configured (\`SMTP_FROM\`, \`MAIL_FROM\`, or \`EMAIL_FROM\`)`);
+  lines.push(`- [ ] Sender domain SPF/DKIM/DMARC records verified`);
+  lines.push(`- [ ] Password reset email tested in staging`);
+  lines.push(`- [ ] Order confirmation email tested in staging`);
+  lines.push(``);
+
+  lines.push(`### APP_URL`);
+  lines.push(``);
+  lines.push(`- [ ] \`APP_URL\` set to production domain (\`https://yourdomain.com\`)`);
+  lines.push(`- [ ] No \`localhost\` value in \`APP_URL\` in production`);
+  lines.push(`- [ ] \`APP_URL\` matches the configured domain in the panel`);
+  lines.push(``);
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Sprint 51: Staging import section ────────────────────────────────────────
 
 function buildStagingImportHandoffSection(_r: EnrichedMigrationReport): string {
@@ -584,6 +639,7 @@ export function generateHandoffMarkdown(
     buildDomainReadiness(report),
     buildGitHubReadiness(report),
     buildGoLiveReadiness(report),
+    buildExternalServicesReadiness(report),
     buildStagingImportHandoffSection(report),
     buildServices(report),
     buildFooter(),

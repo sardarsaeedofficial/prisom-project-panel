@@ -19,10 +19,11 @@ import { listProjectPromotions }       from "@/lib/releases/release-promotion-se
 import { requireProjectPermission }    from "@/lib/auth/project-membership";
 import { GoLiveReadinessPanel }            from "@/components/projects/go-live-readiness-panel";
 import { ReleaseComparisonCard }           from "@/components/projects/release-comparison-card";
-import { SardarMigrationRunbookPanel }     from "@/components/projects/sardar-migration-runbook-panel";
-import { StagingImportPanel }              from "@/components/projects/staging-import-panel";
-import { DeploymentDryRunPanel }           from "@/components/projects/deployment-dry-run-panel";
-import { isSardarProject }                 from "@/lib/migration/sardar-migration-types";
+import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
+import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
+import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
+import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
+import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
 export const metadata: Metadata = { title: "Releases" };
@@ -128,6 +129,9 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 54: External Services compact card ── */}
+          <ExternalServicesReadinessPanel projectId={projectId} compact />
 
           {/* ── Sprint 53: Deployment dry-run compact card ── */}
           <DeploymentDryRunPanel projectId={projectId} compact />

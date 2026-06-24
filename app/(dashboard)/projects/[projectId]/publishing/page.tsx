@@ -42,10 +42,11 @@ import Link                         from "next/link";
 import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
 import { hasBackupConfig }          from "@/lib/routing/nginx-route-apply";
-import { SardarMigrationRunbookPanel }  from "@/components/projects/sardar-migration-runbook-panel";
-import { StagingImportPanel }           from "@/components/projects/staging-import-panel";
-import { DeploymentDryRunPanel }        from "@/components/projects/deployment-dry-run-panel";
-import { isSardarProject }              from "@/lib/migration/sardar-migration-types";
+import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
+import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
+import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
+import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
+import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
 export const dynamic = "force-dynamic";
@@ -289,6 +290,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 54: External Services compact card ── */}
+          {dbDeployConfig && (
+            <ExternalServicesReadinessPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 53: Deployment dry-run compact card ── */}
           {dbDeployConfig && (
