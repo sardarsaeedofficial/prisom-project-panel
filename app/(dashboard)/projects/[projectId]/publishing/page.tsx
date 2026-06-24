@@ -48,6 +48,7 @@ import { DeploymentDryRunPanel }              from "@/components/projects/deploy
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
+import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -295,6 +296,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
 
           {/* ── Sprint 57: Source Intake compact card ── */}
           <SourceIntakePanel projectId={projectId} compact />
+
+          {/* ── Sprint 58: Debug failed build/deploy ── */}
+          <DebugSummaryPanel projectId={projectId} compact context="deploy" />
 
           {/* ── Sprint 55: Production Cutover compact card ── */}
           {dbDeployConfig && (

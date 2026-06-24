@@ -4,6 +4,7 @@ import { db }           from "@/lib/db";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ProjectLogsCenter } from "@/components/projects/project-logs-center";
 import { discoverLogSources } from "@/lib/logs/project-log-sources";
+import { DebugSummaryPanel } from "@/components/projects/debug-summary-panel";
 
 export const metadata: Metadata = { title: "Logs" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,17 @@ export default async function ProjectLogsPage({ params, searchParams }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
+      {/* Debug summary panel — collapsible, sits above the logs viewer */}
+      <div className="flex-shrink-0 border-b px-4 py-3 bg-background/95">
+        <details>
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground select-none">
+            Debug Summary — Analyze Failures
+          </summary>
+          <div className="mt-3 max-w-3xl">
+            <DebugSummaryPanel projectId={projectId} />
+          </div>
+        </details>
+      </div>
       <div className="flex-1 overflow-hidden">
         <ProjectLogsCenter
           projectId={projectId}

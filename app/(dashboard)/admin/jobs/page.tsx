@@ -1,7 +1,7 @@
 import { requireAdmin }      from "@/lib/auth/require-admin";
 import { AdminJobsPanel }   from "@/components/admin/admin-jobs-panel";
 import Link                 from "next/link";
-import { ChevronLeft }      from "lucide-react";
+import { ChevronLeft, Bug, ExternalLink } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +28,19 @@ export default async function AdminJobsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">
             Monitor and manage scheduled background jobs across the platform.
           </p>
+        </div>
+
+        {/* Debug entry point — job failures can be investigated per-project */}
+        <div className="rounded-lg border bg-card px-4 py-3 flex items-start gap-2.5">
+          <Bug className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">Debug failed jobs:</span>{" "}
+            Open a project&apos;s{" "}
+            <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">Operations</span>{" "}
+            or{" "}
+            <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">Logs</span>{" "}
+            page to analyze failure output, classify errors, and export a debug bundle.
+          </div>
         </div>
 
         <AdminJobsPanel />

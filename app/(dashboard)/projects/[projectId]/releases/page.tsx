@@ -25,6 +25,7 @@ import { DeploymentDryRunPanel }              from "@/components/projects/deploy
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { GoLiveRegressionChecklist }          from "@/components/projects/go-live-regression-checklist";
+import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -131,6 +132,9 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 58: Debug failed dry-run/cutover ── */}
+          <DebugSummaryPanel projectId={projectId} compact context="dry_run" />
 
           {/* ── Sprint 56: Go-Live Regression Checklist ── */}
           <GoLiveRegressionChecklist projectId={projectId} />

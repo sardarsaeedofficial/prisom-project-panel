@@ -7,6 +7,7 @@ import {
 } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }           from "@/components/projects/workspace-nav";
 import { ProjectOperationsPanel } from "@/components/projects/project-operations-panel";
+import { DebugSummaryPanel }      from "@/components/projects/debug-summary-panel";
 
 export const metadata: Metadata = { title: "Operations" };
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export default async function ProjectOperationsPage({ params }: Props) {
           title="Operation History"
           description={`Track deploys, backups, restores, and patch operations for ${project.name}. Active operations are shown in the banner above.`}
         />
+        <DebugSummaryPanel projectId={projectId} compact context="operation" />
         <ProjectOperationsPanel projectId={projectId} />
       </DashboardShell>
     </div>
