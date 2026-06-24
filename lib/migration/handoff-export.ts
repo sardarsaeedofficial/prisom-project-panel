@@ -604,6 +604,76 @@ function buildStagingImportHandoffSection(_r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+// ── Sprint 55: Production Cutover Plan section ───────────────────────────────
+
+function buildProductionCutover(_r: EnrichedMigrationReport): string {
+  const PROD_DOMAIN    = "sardar-security-project.doorstepmanchester.uk";
+  const PROD_WEBHOOK   = `https://${PROD_DOMAIN}/api/webhooks/stripe`;
+  const STAGE_WEBHOOK  = "https://staging-sardar-security-project.doorstepmanchester.uk/api/webhooks/stripe";
+
+  const lines: string[] = [`## Production Cutover Plan\n`];
+
+  lines.push(`> Use the Production Cutover Assistant in the Releases page to generate a live cutover plan.`);
+  lines.push(`> This section is a static reference checklist. The live panel has real-time readiness signals.`);
+  lines.push(``);
+
+  lines.push(`### Pre-Cutover Checklist`);
+  lines.push(``);
+  lines.push(`- [ ] Staging import passed — staging smoke checks are green`);
+  lines.push(`- [ ] Deployment dry run passed (Publishing → Dry Run)`);
+  lines.push(`- [ ] External services readiness reviewed (Env → External Services)`);
+  lines.push(`- [ ] Production env values set (no localhost, correct domain)`);
+  lines.push(`- [ ] Database readiness confirmed — connection test passed`);
+  lines.push(`- [ ] Final backup created before cutover`);
+  lines.push(`- [ ] Go-live readiness: no blockers`);
+  lines.push(`- [ ] Rollback plan reviewed with team`);
+  lines.push(``);
+
+  lines.push(`### Cutover Steps (in order)`);
+  lines.push(``);
+  lines.push(`1. **Freeze Window** — freeze writes/orders on old system if required`);
+  lines.push(`2. **Backup** — create final database + files backup`);
+  lines.push(`3. **Database** — run DB migration manually if required (never auto-run)`);
+  lines.push(`   \`pnpm --filter @workspace/db exec drizzle-kit push\``);
+  lines.push(`   > ⚠️  Never run against production without team confirmation.`);
+  lines.push(`4. **Deploy Services** — deploy using the Publishing page (type \`PROMOTE\`)`);
+  lines.push(`5. **Apply Routes** — apply nginx routes using the Publishing → Routing panel (type \`APPLY ROUTES\`)`);
+  lines.push(`6. **Stripe Webhook** — add production endpoint in Stripe Dashboard → Webhooks:`);
+  lines.push(`   - Production: \`${PROD_WEBHOOK}\``);
+  lines.push(`   - Staging: \`${STAGE_WEBHOOK}\``);
+  lines.push(`7. **Smoke Checks** — run from Releases → Production Cutover Assistant (type \`RUN SMOKE CHECKS\`)`);
+  lines.push(`   - \`curl -I https://${PROD_DOMAIN}/\``);
+  lines.push(`   - \`curl -I https://${PROD_DOMAIN}/api/healthz\``);
+  lines.push(`8. **Manual Test Order** — place a test checkout using Stripe test card`);
+  lines.push(`9. **Monitor Logs** — monitor PM2 and nginx logs for 1 hour`);
+  lines.push(`10. **Mark Complete** — type \`MARK CUTOVER COMPLETE\` in the panel`);
+  lines.push(``);
+
+  lines.push(`### Rollback Plan`);
+  lines.push(``);
+  lines.push(`> ⚠️  Application rollback does NOT rollback database schema/data.`);
+  lines.push(`> If your cutover included a DB migration, restore from backup instead.`);
+  lines.push(``);
+  lines.push(`- App rollback: Releases → click Rollback → type \`ROLLBACK\``);
+  lines.push(`- Route rollback: Publishing → Routing → Rollback Routes → type \`ROLLBACK ROUTES\``);
+  lines.push(`- DB rollback: restore from pre-cutover dump manually`);
+  lines.push(`- Stripe webhook rollback: update/delete endpoint in Stripe Dashboard`);
+  lines.push(`- DNS rollback: update A record to previous IP (up to 48h propagation)`);
+  lines.push(``);
+
+  lines.push(`### Safety Rules`);
+  lines.push(``);
+  lines.push(`- Never apply routes automatically`);
+  lines.push(`- Never restart services from the cutover assistant`);
+  lines.push(`- Never run DB migrations automatically`);
+  lines.push(`- Never create Stripe webhooks automatically`);
+  lines.push(`- Never expose secret values`);
+  lines.push(`- Never touch Doorsteps/LocalShop (prisom-manager, prisom-backend)`);
+  lines.push(``);
+
+  return lines.join("\n") + "\n";
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -641,6 +711,7 @@ export function generateHandoffMarkdown(
     buildGoLiveReadiness(report),
     buildExternalServicesReadiness(report),
     buildStagingImportHandoffSection(report),
+    buildProductionCutover(report),
     buildServices(report),
     buildFooter(),
   ]

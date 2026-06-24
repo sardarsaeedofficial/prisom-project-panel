@@ -10,6 +10,7 @@ import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
+import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { db }                                 from "@/lib/db";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
@@ -39,6 +40,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           description="Analyze Replit-style projects and prepare them for VPS deployment with Prisom."
         />
         <div className="max-w-3xl space-y-6">
+          {/* Sprint 55: Production Cutover — compact reference card */}
+          <ProductionCutoverPanel projectId={projectId} compact />
+
           {/* Sprint 54: External Services — check Stripe/Cloudinary/Email before promotion */}
           <ExternalServicesReadinessPanel projectId={projectId} compact />
 

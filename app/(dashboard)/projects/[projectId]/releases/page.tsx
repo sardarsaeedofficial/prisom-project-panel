@@ -23,6 +23,7 @@ import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
+import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -129,6 +130,9 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 55: Production Cutover Assistant — full panel ── */}
+          <ProductionCutoverPanel projectId={projectId} />
 
           {/* ── Sprint 54: External Services compact card ── */}
           <ExternalServicesReadinessPanel projectId={projectId} compact />

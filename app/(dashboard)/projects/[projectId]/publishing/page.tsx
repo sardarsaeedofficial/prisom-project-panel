@@ -46,6 +46,7 @@ import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
+import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -290,6 +291,11 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 55: Production Cutover compact card ── */}
+          {dbDeployConfig && (
+            <ProductionCutoverPanel projectId={projectId} compact />
+          )}
 
           {/* ── Sprint 54: External Services compact card ── */}
           {dbDeployConfig && (
