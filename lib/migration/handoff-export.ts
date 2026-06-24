@@ -719,6 +719,63 @@ function buildSourceIntakeSummary(_r: EnrichedMigrationReport): string {
   return lines.join("\n");
 }
 
+// ── Sprint 59: Permissions & Access Control section ───────────────────────────
+
+function buildPermissionsSection(): string {
+  const lines: string[] = [
+    "## Permissions & Access Control",
+    "",
+    "### Permission Model Summary",
+    "",
+    "This project uses a 5-tier RBAC model:",
+    "",
+    "| Role      | Key permissions |",
+    "|-----------|-----------------|",
+    "| Owner     | Full control — team management, delete project, all secrets |",
+    "| Admin     | Same as Owner, except cannot transfer ownership |",
+    "| Developer | Code write, terminal, deploy.trigger, env names (read only) |",
+    "| Operator  | deploy.trigger, deploy.rollback, monitoring — read-only code |",
+    "| Viewer    | Read-only across all resources, no deployment or command access |",
+    "",
+    "### Dangerous Actions — Required Access",
+    "",
+    "The following actions require elevated permissions and must only be granted to trusted users:",
+    "",
+    "| Action                          | Required Permission           |",
+    "|---------------------------------|-------------------------------|",
+    "| Apply Production Routes         | deploy.trigger or project.edit |",
+    "| Mark Cutover Complete           | deploy.trigger or project.edit |",
+    "| Run Smoke Checks                | deploy.trigger or project.edit |",
+    "| Trigger Deployment              | deploy.trigger or project.edit |",
+    "| Rollback Deployment             | deploy.rollback or project.edit |",
+    "| Write Environment Variables     | env.manage or project.edit   |",
+    "| Write Secrets                   | secrets.manage or project.edit |",
+    "| Replace Project Source          | project.edit                  |",
+    "| Restore from Backup             | backup.restore                |",
+    "| Manage Team Members             | project.manageTeam            |",
+    "",
+    "### Pre-Cutover Team Review Checklist",
+    "",
+    "Before staging execution or production cutover, confirm:",
+    "",
+    "- [ ] Owner or Admin confirmed for this project",
+    "- [ ] Deploy permission limited to Operator / Developer / Admin / Owner",
+    "- [ ] Env and secret editing limited to Developer / Admin / Owner",
+    "- [ ] Route apply limited to trusted users",
+    "- [ ] Cutover completion limited to trusted users",
+    "- [ ] Backup restore limited to trusted users",
+    "- [ ] Former team members removed from the project",
+    "- [ ] Pending invite links reviewed or cancelled",
+    "- [ ] Audit log reviewed for unexpected permission denials",
+    "",
+    "> **Note:** No secrets are included in this document. Secret names and required",
+    "> env vars are listed in the Env & Secrets section. Values must be set via the",
+    "> project Env page before go-live.",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 /**
  * Generates a Markdown handoff document from an enriched migration report.
  * Safe to share — no secret values are included.
@@ -749,6 +806,7 @@ export function generateHandoffMarkdown(
     buildStagingImportHandoffSection(report),
     buildProductionCutover(report),
     buildSourceIntakeSummary(report),
+    buildPermissionsSection(),
     buildServices(report),
     buildFooter(),
   ]

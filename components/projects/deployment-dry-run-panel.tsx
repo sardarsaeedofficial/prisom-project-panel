@@ -19,6 +19,7 @@ import {
   Download, ChevronDown, ChevronRight, Play, Shield,
   Wrench, Package,
 } from "lucide-react";
+import { RequiredPermissionNote } from "@/components/projects/required-permission-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge }                                    from "@/components/ui/badge";
 import { Button }                                   from "@/components/ui/button";
@@ -437,6 +438,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
                 </p>
               </div>
             </div>
+            <RequiredPermissionNote permission="project.edit" description="Developers, Admins, and Owners can run build dry-runs." />
             <input
               type="text"
               value={buildConfirm}

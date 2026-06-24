@@ -19,6 +19,7 @@ import {
   ChevronDown, ChevronRight, RotateCcw, Globe,
   Download, Loader2, ShieldCheck, Rocket,
 } from "lucide-react";
+import { RequiredPermissionNote } from "@/components/projects/required-permission-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge }   from "@/components/ui/badge";
 import { Button }  from "@/components/ui/button";
@@ -544,6 +545,7 @@ function FullPanel({ projectId }: { projectId: string }) {
                   </div>
                 </div>
               )}
+              <RequiredPermissionNote permission="deploy.trigger or project.edit" description="Operators, Developers, Admins, and Owners can run smoke checks." />
               <div className="flex flex-col sm:flex-row gap-2">
                 <Input
                   placeholder='Type "RUN SMOKE CHECKS" to confirm'
