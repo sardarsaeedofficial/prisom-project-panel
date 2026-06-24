@@ -8,6 +8,7 @@ import { WorkspaceNav }                    from "@/components/projects/workspace
 import { ReplitMigrationAssistant }        from "@/components/projects/replit-migration-assistant";
 import { SardarMigrationRunbookPanel }     from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }              from "@/components/projects/staging-import-panel";
+import { DeploymentDryRunPanel }           from "@/components/projects/deployment-dry-run-panel";
 import { db }                              from "@/lib/db";
 import { isSardarProject }                 from "@/lib/migration/sardar-migration-types";
 
@@ -37,6 +38,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           description="Analyze Replit-style projects and prepare them for VPS deployment with Prisom."
         />
         <div className="max-w-3xl space-y-6">
+          {/* Sprint 53: Deployment dry run — run before promotion */}
+          <DeploymentDryRunPanel projectId={projectId} compact />
+
           {/* Sprint 50: Sardar runbook + Sprint 51: Staging import — shown prominently for Sardar projects */}
           {isSardar ? (
             <>
