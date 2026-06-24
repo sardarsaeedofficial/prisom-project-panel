@@ -683,6 +683,42 @@ export type HandoffOptions = {
   appliedTargets?: string[];
 };
 
+// ── Sprint 57: Source Intake Summary ──────────────────────────────────────────
+
+function buildSourceIntakeSummary(_r: EnrichedMigrationReport): string {
+  const SLUG        = "sardar-security-supplies";
+  const SOURCE_ROOT = `storage/projects/${SLUG}`;
+
+  const lines: string[] = [
+    `## Source Intake Summary`,
+    ``,
+    `> Run the **Source Intake** panel on the Import page to generate the full SOURCE_INTAKE_REPORT.md.`,
+    ``,
+    `**Expected detections for Sardar Security Supplies:**`,
+    ``,
+    `| Item | Expected Detection |`,
+    `| --- | --- |`,
+    `| Package manager | \`pnpm\` (pnpm-lock.yaml) |`,
+    `| Workspace | \`pnpm-workspace.yaml\` |`,
+    `| API service | \`artifacts/api-server\` (Express/Fastify/Hono) |`,
+    `| Static frontend | \`artifacts/sardar-security\` (Vite/React) |`,
+    `| Database | Drizzle + PostgreSQL (\`lib/db\`) |`,
+    `| Env example | \`.env.example\` at workspace root |`,
+    `| Replit markers | \`.replit\`, \`replit.nix\` if present |`,
+    ``,
+    `**Source path:** \`${SOURCE_ROOT}\``,
+    ``,
+    `**Safety reminders:**`,
+    `- Never deploy source automatically after import.`,
+    `- Run portability patches before deployment if Replit markers are detected.`,
+    `- Never run \`drizzle-kit push\` or \`prisma migrate deploy\` automatically.`,
+    `- Add all env variables to the Secrets Vault — never commit .env files.`,
+    ``,
+  ];
+
+  return lines.join("\n");
+}
+
 /**
  * Generates a Markdown handoff document from an enriched migration report.
  * Safe to share — no secret values are included.
@@ -712,6 +748,7 @@ export function generateHandoffMarkdown(
     buildExternalServicesReadiness(report),
     buildStagingImportHandoffSection(report),
     buildProductionCutover(report),
+    buildSourceIntakeSummary(report),
     buildServices(report),
     buildFooter(),
   ]

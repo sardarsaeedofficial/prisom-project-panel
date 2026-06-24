@@ -6,6 +6,7 @@ import {
 } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }                    from "@/components/projects/workspace-nav";
 import { ReplitMigrationAssistant }           from "@/components/projects/replit-migration-assistant";
+import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
@@ -40,6 +41,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           description="Analyze Replit-style projects and prepare them for VPS deployment with Prisom."
         />
         <div className="max-w-3xl space-y-6">
+          {/* Sprint 57: Source Intake — compact card above migration panels */}
+          <SourceIntakePanel projectId={projectId} compact />
+
           {/* Sprint 55: Production Cutover — compact reference card */}
           <ProductionCutoverPanel projectId={projectId} compact />
 

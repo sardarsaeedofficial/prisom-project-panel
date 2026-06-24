@@ -47,6 +47,7 @@ import { StagingImportPanel }                 from "@/components/projects/stagin
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
+import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -291,6 +292,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
+
+          {/* ── Sprint 57: Source Intake compact card ── */}
+          <SourceIntakePanel projectId={projectId} compact />
 
           {/* ── Sprint 55: Production Cutover compact card ── */}
           {dbDeployConfig && (
