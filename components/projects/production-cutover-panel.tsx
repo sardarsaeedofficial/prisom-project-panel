@@ -98,6 +98,7 @@ function StageSection({
   return (
     <div className="border rounded-lg overflow-hidden">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/40 transition-colors"
       >
@@ -230,6 +231,7 @@ function CompactPanel({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button
+              type="button"
               variant="outline" size="sm"
               onClick={generate}
               disabled={loading}
@@ -294,7 +296,7 @@ function FullPanel({ projectId }: { projectId: string }) {
   }
 
   async function runSmokeChecks() {
-    if (smokeConfirm !== "RUN SMOKE CHECKS") return;
+    if (smokeConfirm.trim() !== "RUN SMOKE CHECKS") return;
     setLoadingSmoke(true);
     setSmokeError(null);
     const result = await runProductionCutoverSmokeChecksAction({
@@ -331,7 +333,7 @@ function FullPanel({ projectId }: { projectId: string }) {
   }
 
   async function markComplete() {
-    if (completeConfirm !== "MARK CUTOVER COMPLETE") return;
+    if (completeConfirm.trim() !== "MARK CUTOVER COMPLETE") return;
     setLoadingComplete(true);
     setCompleteError(null);
     const result = await markProductionCutoverCompleteAction({
@@ -377,6 +379,7 @@ function FullPanel({ projectId }: { projectId: string }) {
             No routes, services, DNS, or DB migrations are changed automatically.
           </p>
           <Button
+            type="button"
             onClick={generatePlan}
             disabled={loadingPlan}
             className="w-full sm:w-auto"
@@ -549,9 +552,10 @@ function FullPanel({ projectId }: { projectId: string }) {
                   className="text-sm font-mono"
                 />
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={runSmokeChecks}
-                  disabled={loadingSmoke || smokeConfirm !== "RUN SMOKE CHECKS"}
+                  disabled={loadingSmoke || smokeConfirm.trim() !== "RUN SMOKE CHECKS"}
                   className="shrink-0"
                 >
                   {loadingSmoke ? (
@@ -637,9 +641,10 @@ function FullPanel({ projectId }: { projectId: string }) {
                       className="text-sm font-mono"
                     />
                     <Button
+                      type="button"
                       variant="default"
                       onClick={markComplete}
-                      disabled={loadingComplete || completeConfirm !== "MARK CUTOVER COMPLETE"}
+                      disabled={loadingComplete || completeConfirm.trim() !== "MARK CUTOVER COMPLETE"}
                       className="shrink-0"
                     >
                       {loadingComplete ? (
@@ -666,6 +671,7 @@ function FullPanel({ projectId }: { projectId: string }) {
                   </p>
                 </div>
                 <Button
+                  type="button"
                   variant="outline"
                   onClick={exportPlan}
                   disabled={loadingExport}

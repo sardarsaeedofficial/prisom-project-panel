@@ -292,6 +292,7 @@ export function ExternalServicesReadinessPanel({ projectId, compact }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             {!report ? (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleGenerate}
@@ -338,6 +339,7 @@ export function ExternalServicesReadinessPanel({ projectId, compact }: Props) {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleGenerate}
@@ -351,6 +353,7 @@ export function ExternalServicesReadinessPanel({ projectId, compact }: Props) {
             </Button>
             {report && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleExport}

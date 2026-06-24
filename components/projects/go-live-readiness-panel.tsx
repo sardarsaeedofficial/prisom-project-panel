@@ -107,6 +107,7 @@ function CategoryGroup({
   return (
     <div className={`rounded-md border ${rowColor}`}>
       <button
+        type="button"
         className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
         onClick={() => setOpen((v) => !v)}
       >
@@ -130,6 +131,7 @@ function CategoryGroup({
             <div key={c.id} className="flex items-start gap-2.5 px-3 py-2.5 bg-background">
               {c.status === "manual" ? (
                 <button
+                  type="button"
                   className="mt-0.5 shrink-0"
                   onClick={() => onManualToggle(c.id)}
                   title={manualDone.has(c.id) ? "Mark as not done" : "Mark as done"}
@@ -304,6 +306,7 @@ export function GoLiveReadinessPanel({ projectId }: { projectId: string }) {
             {report && <OverallBadge status={report.status} />}
           </div>
           <Button
+            type="button"
             size="sm"
             variant="outline"
             onClick={handleGenerate}
@@ -387,6 +390,7 @@ export function GoLiveReadinessPanel({ projectId }: { projectId: string }) {
         {report && (
           <>
             <button
+              type="button"
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setExpanded((v) => !v)}
             >
@@ -423,6 +427,7 @@ export function GoLiveReadinessPanel({ projectId }: { projectId: string }) {
               )}
             </div>
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleSmoke}
@@ -438,6 +443,7 @@ export function GoLiveReadinessPanel({ projectId }: { projectId: string }) {
           {smokeReport && (
             <>
               <button
+                type="button"
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setSmokeOpen((v) => !v)}
               >

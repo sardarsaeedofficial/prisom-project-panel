@@ -322,13 +322,13 @@ export function StagingImportPanel({
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {!plan ? (
-                <Button size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
+                <Button type="button" size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
                   {activeAction === "plan"
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : "Generate"}
                 </Button>
               ) : (
-                <Button size="sm" variant="ghost" onClick={handleGenerate} disabled={activeAction !== null}>
+                <Button type="button" size="sm" variant="ghost" onClick={handleGenerate} disabled={activeAction !== null}>
                   {activeAction === "plan"
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : <RefreshCw className="h-3.5 w-3.5" />}
@@ -374,7 +374,7 @@ export function StagingImportPanel({
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
             {plan && (
-              <Button size="sm" variant="outline" onClick={handleExport} disabled={activeAction !== null}>
+              <Button type="button" size="sm" variant="outline" onClick={handleExport} disabled={activeAction !== null}>
                 {activeAction === "export"
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Exporting…</>
                   : exported
@@ -383,7 +383,7 @@ export function StagingImportPanel({
                 }
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
+            <Button type="button" size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
               {activeAction === "plan"
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Generating…</>
                 : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />{plan ? "Re-generate" : "Generate Staging Plan"}</>
@@ -412,7 +412,7 @@ export function StagingImportPanel({
                 build validation, and smoke checks.
               </p>
             </div>
-            <Button onClick={handleGenerate} disabled={activeAction !== null}>
+            <Button type="button" onClick={handleGenerate} disabled={activeAction !== null}>
               {activeAction === "plan"
                 ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating…</>
                 : <><Play className="h-4 w-4 mr-2" />Generate Staging Plan</>
@@ -512,6 +512,7 @@ export function StagingImportPanel({
 
             <div className="flex flex-wrap gap-2">
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleChecklist}
@@ -524,6 +525,7 @@ export function StagingImportPanel({
               </Button>
 
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleSmoke}

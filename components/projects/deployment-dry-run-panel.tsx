@@ -310,6 +310,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
           <div className="flex items-center gap-2 shrink-0">
             {!plan ? (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleGeneratePlan}
@@ -354,6 +355,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleGeneratePlan}
@@ -368,6 +370,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
             {plan && (
               <>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={() => setShowBuildBox((o) => !o)}
@@ -377,6 +380,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
                   <Wrench className="h-3 w-3 mr-1" />Run Build Dry Run
                 </Button>
                 <Button
+                  type="button"
                   size="sm"
                   variant="outline"
                   onClick={handleExport}
@@ -442,6 +446,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
             />
             <div className="flex items-center gap-2">
               <Button
+                type="button"
                 size="sm"
                 onClick={handleRunBuild}
                 disabled={buildConfirm !== CONFIRM_PHRASE || loadingBuild}
@@ -453,6 +458,7 @@ export function DeploymentDryRunPanel({ projectId, compact }: Props) {
                 }
               </Button>
               <Button
+                type="button"
                 size="sm"
                 variant="ghost"
                 onClick={() => { setShowBuildBox(false); setBuildConfirm(""); setBuildError(null); }}

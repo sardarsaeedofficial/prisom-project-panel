@@ -24,6 +24,7 @@ import { StagingImportPanel }                 from "@/components/projects/stagin
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
+import { GoLiveRegressionChecklist }          from "@/components/projects/go-live-regression-checklist";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -130,6 +131,9 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* ── Sprint 56: Go-Live Regression Checklist ── */}
+          <GoLiveRegressionChecklist projectId={projectId} />
 
           {/* ── Sprint 55: Production Cutover Assistant — full panel ── */}
           <ProductionCutoverPanel projectId={projectId} />

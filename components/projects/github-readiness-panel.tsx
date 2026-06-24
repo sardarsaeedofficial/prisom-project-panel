@@ -252,6 +252,7 @@ export function GitHubReadinessPanel({ projectId }: { projectId: string }) {
           </div>
           <div className="flex items-center gap-2">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleGenerate}
@@ -453,6 +454,7 @@ export function GitHubReadinessPanel({ projectId }: { projectId: string }) {
               <span className="text-xs font-medium">Webhook Setup Test</span>
             </div>
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleTest}
@@ -500,6 +502,7 @@ export function GitHubReadinessPanel({ projectId }: { projectId: string }) {
             </div>
             {!generatedSecret && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateSecret}

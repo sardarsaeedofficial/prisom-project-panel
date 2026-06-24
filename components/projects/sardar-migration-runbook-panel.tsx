@@ -254,13 +254,13 @@ export function SardarMigrationRunbookPanel({
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {!runbook ? (
-                <Button size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
+                <Button type="button" size="sm" variant="outline" onClick={handleGenerate} disabled={activeAction !== null}>
                   {activeAction === "generate"
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : "Generate"}
                 </Button>
               ) : (
-                <Button size="sm" variant="ghost" onClick={handleGenerate} disabled={activeAction !== null}>
+                <Button type="button" size="sm" variant="ghost" onClick={handleGenerate} disabled={activeAction !== null}>
                   {activeAction === "generate"
                     ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     : <RefreshCw className="h-3.5 w-3.5" />}
@@ -302,6 +302,7 @@ export function SardarMigrationRunbookPanel({
           <div className="flex items-center gap-2 shrink-0">
             {runbook && (
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 onClick={handleExport}
@@ -316,6 +317,7 @@ export function SardarMigrationRunbookPanel({
               </Button>
             )}
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleGenerate}
@@ -348,7 +350,7 @@ export function SardarMigrationRunbookPanel({
                 staging validation, production cutover, and post go-live checks.
               </p>
             </div>
-            <Button onClick={handleGenerate} disabled={activeAction !== null}>
+            <Button type="button" onClick={handleGenerate} disabled={activeAction !== null}>
               {activeAction === "generate"
                 ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Generating…</>
                 : <><Play className="h-4 w-4 mr-2" />Generate Runbook</>
