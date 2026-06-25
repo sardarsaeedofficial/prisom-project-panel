@@ -29,6 +29,7 @@ import { FinalGoLiveControlRoom }             from "@/components/projects/final-
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
 import { ProductionExecutionPanel }           from "@/components/projects/production-execution-panel";
 import { ContextualHelpCard }                 from "@/components/projects/contextual-help-card";
+import { ReleaseCandidatePanel }              from "@/components/projects/release-candidate-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -195,6 +196,19 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
+          {/* ── Sprint 68: Release Candidate compact card ── */}
+          {isSardar && (
+            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Release Candidate Hardening</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Final hardening report — score, blockers, manual checklist, confirmation phrases, smoke commands.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -256,6 +270,13 @@ export default async function ReleasesPage({ params }: Props) {
               Go to Migration →
             </Link>
           </div>
+
+          {/* ── Sprint 68: Release Candidate Hardening ── */}
+          {isSardar && (
+            <div className="rounded-xl border bg-card p-4">
+              <ReleaseCandidatePanel projectId={projectId} />
+            </div>
+          )}
 
           {/* ── Sprint 65: Production Cutover Execution Guard ── */}
           <div className="rounded-xl border bg-card p-4">
