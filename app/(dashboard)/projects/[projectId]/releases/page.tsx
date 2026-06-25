@@ -30,6 +30,7 @@ import { DebugSummaryPanel }                  from "@/components/projects/debug-
 import { ProductionExecutionPanel }           from "@/components/projects/production-execution-panel";
 import { ContextualHelpCard }                 from "@/components/projects/contextual-help-card";
 import { ReleaseCandidatePanel }              from "@/components/projects/release-candidate-panel";
+import { QaVerificationPanel }               from "@/components/projects/qa-verification-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -196,6 +197,19 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
+          {/* ── Sprint 69: Live QA Verification compact card ── */}
+          {isSardar && (
+            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+              <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Live QA Verification</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Full QA report — routes, exports, confirmations, safety, smoke checks, manual checklist.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* ── Sprint 68: Release Candidate compact card ── */}
           {isSardar && (
             <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
@@ -270,6 +284,13 @@ export default async function ReleasesPage({ params }: Props) {
               Go to Migration →
             </Link>
           </div>
+
+          {/* ── Sprint 69: Live QA Verification ── */}
+          {isSardar && (
+            <div className="rounded-xl border bg-card p-4">
+              <QaVerificationPanel projectId={projectId} />
+            </div>
+          )}
 
           {/* ── Sprint 68: Release Candidate Hardening ── */}
           {isSardar && (
