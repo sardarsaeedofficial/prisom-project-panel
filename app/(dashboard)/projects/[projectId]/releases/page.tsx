@@ -32,6 +32,8 @@ import { ContextualHelpCard }                 from "@/components/projects/contex
 import { ReleaseCandidatePanel }              from "@/components/projects/release-candidate-panel";
 import { QaVerificationPanel }               from "@/components/projects/qa-verification-panel";
 import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
+import { LaunchSignoffPanel }                from "@/components/projects/launch-signoff-panel";
+import { OperatorTrainingPanel }             from "@/components/projects/operator-training-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -305,6 +307,10 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
+          {/* Sprint 74: Launch Signoff + Training compact refs */}
+          <LaunchSignoffPanel projectId={projectId} compact />
+          <OperatorTrainingPanel projectId={projectId} compact />
+
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 
           {/* ── Sprint 69: Live QA Verification ── */}
@@ -330,6 +336,9 @@ export default async function ReleasesPage({ params }: Props) {
           <div className="rounded-xl border bg-card p-4">
             <FinalGoLiveControlRoom projectId={projectId} />
           </div>
+
+          {/* ── Sprint 74: Final Launch Signoff ── */}
+          <LaunchSignoffPanel projectId={projectId} />
 
           {/* ── Sprint 58: Debug failed dry-run/cutover ── */}
           <DebugSummaryPanel projectId={projectId} compact context="dry_run" />

@@ -4,9 +4,10 @@ import Link                  from "next/link";
 import { BookOpen }          from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }      from "@/components/projects/workspace-nav";
-import { OperatorRunbookPanel } from "@/components/projects/operator-runbook-panel";
-import { Card, CardContent } from "@/components/ui/card";
-import { db }                from "@/lib/db";
+import { OperatorRunbookPanel }   from "@/components/projects/operator-runbook-panel";
+import { OperatorTrainingPanel }  from "@/components/projects/operator-training-panel";
+import { Card, CardContent }      from "@/components/ui/card";
+import { db }                     from "@/lib/db";
 
 export const metadata: Metadata = { title: "Runbook" };
 export const dynamic = "force-dynamic";
@@ -59,6 +60,9 @@ export default async function ProjectRunbookPage({ params }: Props) {
               <OperatorRunbookPanel projectId={projectId} />
             </CardContent>
           </Card>
+
+          {/* Sprint 74: Operator Training Pack */}
+          <OperatorTrainingPanel projectId={projectId} />
         </div>
       </DashboardShell>
     </div>

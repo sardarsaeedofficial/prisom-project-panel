@@ -23,6 +23,8 @@ import { isSardarProject }                    from "@/lib/migration/sardar-migra
 import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
 import { ProjectTemplateSelector }           from "@/components/projects/project-template-selector";
 import { NewMigrationWizard }                from "@/components/projects/new-migration-wizard";
+import { LaunchSignoffPanel }                from "@/components/projects/launch-signoff-panel";
+import { OperatorTrainingPanel }             from "@/components/projects/operator-training-panel";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -58,6 +60,10 @@ export default async function ProjectMigrationPage({ params }: Props) {
 
           {/* Sprint 72: New migration wizard */}
           <NewMigrationWizard projectId={projectId} isSardar={isSardar} />
+
+          {/* Sprint 74: Launch Signoff + Training compact refs */}
+          <LaunchSignoffPanel projectId={projectId} compact />
+          <OperatorTrainingPanel projectId={projectId} compact />
 
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />

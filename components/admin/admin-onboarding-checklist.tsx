@@ -95,6 +95,38 @@ const ITEMS: OnboardingItem[] = [
     label:     "Handoff exports reviewed",
     detail:    "Understand what OPERATOR_RUNBOOK.md, FINAL_GO_LIVE_PACK.md, and POST_CUTOVER_MONITORING_REPORT.md contain.",
   },
+
+  // Sprint 74: Launch signoff + training reminders
+  {
+    id:        "operator-training-pack",
+    label:     "Operator Training Pack reviewed",
+    detail:    "Open the Runbook page > Operator Training Pack. Generate and export OPERATOR_TRAINING_PACK.md. Share with all operators.",
+    critical:  true,
+  },
+  {
+    id:        "launch-signoff-owner",
+    label:     "Launch signoff owner confirmed",
+    detail:    "Confirm who is responsible for completing the manual signoff in FINAL_LAUNCH_SIGNOFF.md before go-live.",
+    critical:  true,
+  },
+  {
+    id:        "emergency-contact",
+    label:     "Emergency contact confirmed",
+    detail:    "Confirm who to contact if the app goes down after launch. Document phone/email in the project runbook.",
+    critical:  true,
+  },
+  {
+    id:        "cutover-approver",
+    label:     "Cutover approver confirmed",
+    detail:    "Confirm who has authority to approve production cutover. This person must be available on launch day.",
+    critical:  true,
+  },
+  {
+    id:        "rollback-approver",
+    label:     "Rollback approver confirmed",
+    detail:    "Confirm who can approve and execute an emergency rollback. They must understand the EXECUTE PRODUCTION ROLLBACK phrase.",
+    critical:  true,
+  },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────

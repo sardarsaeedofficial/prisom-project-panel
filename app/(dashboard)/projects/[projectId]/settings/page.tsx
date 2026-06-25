@@ -17,6 +17,8 @@ import { ProjectSettingsForm, type ProjectFormValues } from "@/components/projec
 import { OperatorRunbookPanel }          from "@/components/projects/operator-runbook-panel";
 import { ProjectProfileCard }            from "@/components/projects/project-profile-card";
 import { ProjectTemplateSelector }       from "@/components/projects/project-template-selector";
+import { LaunchSignoffPanel }            from "@/components/projects/launch-signoff-panel";
+import { OperatorTrainingPanel }         from "@/components/projects/operator-training-panel";
 import { getProjectById } from "@/lib/data/projects";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -66,6 +68,12 @@ export default async function ProjectSettingsPage({ params }: Props) {
           {/* Sprint 72: Migration template selector */}
           <div className="max-w-2xl">
             <ProjectTemplateSelector projectId={projectId} compact />
+          </div>
+
+          {/* Sprint 74: Signoff + Training compact cards */}
+          <div className="max-w-2xl space-y-3">
+            <LaunchSignoffPanel projectId={projectId} compact />
+            <OperatorTrainingPanel projectId={projectId} compact />
           </div>
 
           <ProjectSettingsForm projectId={projectId} initialValues={formValues} />
