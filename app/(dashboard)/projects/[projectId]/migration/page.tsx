@@ -21,6 +21,8 @@ import { ProductionCutoverPanel }             from "@/components/projects/produc
 import { db }                                 from "@/lib/db";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
+import { ProjectTemplateSelector }           from "@/components/projects/project-template-selector";
+import { NewMigrationWizard }                from "@/components/projects/new-migration-wizard";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -50,6 +52,12 @@ export default async function ProjectMigrationPage({ params }: Props) {
         <div className="max-w-3xl space-y-6">
           {/* Sprint 71: Project Migration Profile */}
           <ProjectProfileCard projectId={projectId} />
+
+          {/* Sprint 72: Migration template selector */}
+          <ProjectTemplateSelector projectId={projectId} />
+
+          {/* Sprint 72: New migration wizard */}
+          <NewMigrationWizard projectId={projectId} isSardar={isSardar} />
 
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />

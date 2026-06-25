@@ -4,6 +4,8 @@
  * app/actions/project-templates.ts
  *
  * Sprint 19: Server action for creating a project from a curated template.
+ * Sprint 72: Added migration-plan actions (listProjectTemplatesAction,
+ *             generateTemplateMigrationPlanAction, exportClientMigrationPlanAction).
  *
  * Security guarantees:
  *  - Only curated local templates are used — no remote fetching.
@@ -22,6 +24,14 @@ import path from "path";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/current-workspace";
 import { renderTemplateFiles, validateTemplateVariables, getProjectTemplate } from "@/lib/templates/template-renderer";
+// Sprint 72: migration-plan template imports
+import {
+  listProjectTemplates as listMigrationTemplates,
+  getProjectTemplate  as getMigrationTemplate,
+  generateTemplateMigrationPlan,
+}                                       from "@/lib/project-templates/project-template-service";
+import { exportClientMigrationPlan }    from "@/lib/project-templates/client-migration-export";
+import type { ProjectTemplate as MigrationTemplate, TemplateMigrationPlan } from "@/lib/project-templates/project-template-types";
 import { validateTemplateFileSet } from "@/lib/templates/template-safety";
 import { writeProjectAuditEvent } from "@/lib/audit/project-audit";
 import { getAuditRequestContext } from "@/lib/audit/request-context";
@@ -649,4 +659,111 @@ export async function repairNextConfigAction(
       message: `Repaired: renamed next.config.ts → next.config.mjs in storage/projects/${slug}.`,
     },
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 72: Migration Plan Template Actions
+// These actions use lib/project-templates (migration guidance), NOT the
+// lib/templates scaffolding system above. No files are written to disk.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── List migration templates ──────────────────────────────────────────────────
+
+export async function listProjectTemplatesAction(): Promise<ActionResult<MigrationTemplate[]>> {
+  const user = await getCurrentUser();
+  if (!user?.id) return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
+  return { ok: true, data: listMigrationTemplates() };
+}
+
+// ── Generate template migration plan ─────────────────────────────────────────
+
+export async function generateTemplateMigrationPlanAction(input: {
+  projectId?: string;
+  templateId: string;
+}): Promise<ActionResult<TemplateMigrationPlan>> {
+  const { projectId, templateId } = input;
+  const user = await getCurrentUser();
+  if (!user?.id) return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
+
+  if (projectId) {
+    const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
+    if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+  }
+
+  const template = getMigrationTemplate(templateId);
+  if (!template) return { ok: false, error: `Unknown template: ${templateId}` };
+
+  try {
+    const plan = await generateTemplateMigrationPlan({ projectId, templateId });
+
+    if (projectId) {
+      const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
+      if (auth.ok) {
+        const ctx = await getAuditRequestContext();
+        void writeProjectAuditEvent({
+          projectId,
+          actorUserId: auth.userId,
+          actorRole:   auth.role,
+          action:      "project_template.plan_generated",
+          category:    "publishing",
+          result:      "success",
+          summary:     `Migration plan generated from template: ${template.label}`,
+          metadata:    { templateId, templateKind: template.kind },
+          ...ctx,
+        }).catch(() => null);
+      }
+    }
+
+    return { ok: true, data: plan };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.slice(0, 300) : "Failed to generate migration plan.";
+    return { ok: false, error: msg };
+  }
+}
+
+// ── Export client migration plan ──────────────────────────────────────────────
+
+export async function exportClientMigrationPlanAction(input: {
+  projectId?: string;
+  templateId: string;
+}): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const { projectId, templateId } = input;
+  const user = await getCurrentUser();
+  if (!user?.id) return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
+
+  if (projectId) {
+    const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
+    if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+  }
+
+  const template = getMigrationTemplate(templateId);
+  if (!template) return { ok: false, error: `Unknown template: ${templateId}` };
+
+  try {
+    const plan     = await generateTemplateMigrationPlan({ projectId, templateId });
+    const markdown = exportClientMigrationPlan(plan);
+
+    if (projectId) {
+      const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
+      if (auth.ok) {
+        const ctx = await getAuditRequestContext();
+        void writeProjectAuditEvent({
+          projectId,
+          actorUserId: auth.userId,
+          actorRole:   auth.role,
+          action:      "project_template.plan_exported",
+          category:    "publishing",
+          result:      "success",
+          summary:     `Migration plan exported: ${template.label}`,
+          metadata:    { templateId, templateKind: template.kind },
+          ...ctx,
+        }).catch(() => null);
+      }
+    }
+
+    return { ok: true, data: { markdown, filename: "CLIENT_MIGRATION_PLAN.md" } };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.slice(0, 300) : "Failed to export migration plan.";
+    return { ok: false, error: msg };
+  }
 }
