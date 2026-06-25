@@ -37,7 +37,7 @@ import { ProjectServicesPanel }  from "@/components/projects/project-services-pa
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
-import { AlertTriangle, RefreshCw, Flag, ShoppingCart, Trophy, Container, ShieldCheck } from "lucide-react";
+import { AlertTriangle, RefreshCw, Flag, ShoppingCart, Trophy, Container, ShieldCheck, Activity } from "lucide-react";
 import Link                         from "next/link";
 import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
@@ -348,6 +348,23 @@ export default async function ProjectPublishingPage({ params }: Props) {
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
               Go to Migration →
+            </Link>
+          </div>
+
+          {/* ── Sprint 66: Post-Cutover Monitoring compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Post-Cutover Monitoring</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Monitor production health, triage incidents, and support rollback decisions after cutover.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/monitoring`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Monitoring →
             </Link>
           </div>
 

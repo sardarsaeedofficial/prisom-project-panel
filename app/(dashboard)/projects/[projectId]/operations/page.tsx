@@ -49,6 +49,18 @@ export default async function ProjectOperationsPage({ params }: Props) {
           <code className="font-mono">production_execution.rollback_requested</code>) and will appear in the operation history below.
         </div>
 
+        {/* Sprint 66: monitoring/incident review audit note */}
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">Post-Cutover Monitoring Audit: </span>
+          Health checks and incident reviews from the{" "}
+          <Link href={`/projects/${projectId}/monitoring`} className="text-primary hover:underline">
+            Monitoring → Post-Cutover Control Room
+          </Link>{" "}
+          are audit logged (
+          <code className="font-mono">post_cutover.health_checks_passed</code>,{" "}
+          <code className="font-mono">post_cutover.incident_reviewed</code>) and will appear here.
+        </div>
+
         <ProjectOperationsPanel projectId={projectId} />
       </DashboardShell>
     </div>

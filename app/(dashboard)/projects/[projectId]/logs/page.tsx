@@ -43,12 +43,18 @@ export default async function ProjectLogsPage({ params, searchParams }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
-      {/* Sprint 65: smoke check failure debug hint */}
-      <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95">
+      {/* Sprint 65/66: smoke check and monitoring debug hints */}
+      <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95 space-y-1">
         <p className="text-xs text-muted-foreground">
           Debugging a production cutover smoke check failure?{" "}
           <Link href={`/projects/${projectId}/releases`} className="text-primary hover:underline">
-            Run smoke checks in the Production Cutover Execution Guard →
+            Production Cutover Execution Guard →
+          </Link>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Post-cutover production health issues?{" "}
+          <Link href={`/projects/${projectId}/monitoring`} className="text-primary hover:underline">
+            Post-Cutover Monitoring Control Room →
           </Link>
           {" "}Check nginx error logs (<code className="font-mono text-xs">sudo tail -f /var/log/nginx/error.log</code>) and PM2 logs below.
         </p>
