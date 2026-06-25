@@ -49,6 +49,8 @@ import { ExternalServicesReadinessPanel }     from "@/components/projects/extern
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
+import { CutoverRehearsalPanel }              from "@/components/projects/cutover-rehearsal-panel";
+import { LaunchFreezePanel }                  from "@/components/projects/launch-freeze-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -369,6 +371,10 @@ export default async function ProjectPublishingPage({ params }: Props) {
               </Link>
             </div>
           )}
+
+          {/* ── Sprint 75: Cutover Rehearsal + Freeze compact cards ── */}
+          <CutoverRehearsalPanel projectId={projectId} compact />
+          <LaunchFreezePanel projectId={projectId} compact />
 
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">

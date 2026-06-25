@@ -6,6 +6,7 @@ import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell"
 import { WorkspaceNav }      from "@/components/projects/workspace-nav";
 import { OperatorRunbookPanel }   from "@/components/projects/operator-runbook-panel";
 import { OperatorTrainingPanel }  from "@/components/projects/operator-training-panel";
+import { LaunchFreezePanel }      from "@/components/projects/launch-freeze-panel";
 import { Card, CardContent }      from "@/components/ui/card";
 import { db }                     from "@/lib/db";
 
@@ -63,6 +64,9 @@ export default async function ProjectRunbookPage({ params }: Props) {
 
           {/* Sprint 74: Operator Training Pack */}
           <OperatorTrainingPanel projectId={projectId} />
+
+          {/* Sprint 75: Launch Freeze compact reference */}
+          <LaunchFreezePanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>

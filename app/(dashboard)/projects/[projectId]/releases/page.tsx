@@ -34,6 +34,8 @@ import { QaVerificationPanel }               from "@/components/projects/qa-veri
 import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
 import { LaunchSignoffPanel }                from "@/components/projects/launch-signoff-panel";
 import { OperatorTrainingPanel }             from "@/components/projects/operator-training-panel";
+import { CutoverRehearsalPanel }             from "@/components/projects/cutover-rehearsal-panel";
+import { LaunchFreezePanel }                 from "@/components/projects/launch-freeze-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -311,6 +313,10 @@ export default async function ReleasesPage({ params }: Props) {
           <LaunchSignoffPanel projectId={projectId} compact />
           <OperatorTrainingPanel projectId={projectId} compact />
 
+          {/* Sprint 75: Cutover Rehearsal + Freeze compact refs */}
+          <CutoverRehearsalPanel projectId={projectId} compact />
+          <LaunchFreezePanel projectId={projectId} compact />
+
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 
           {/* ── Sprint 69: Live QA Verification ── */}
@@ -339,6 +345,12 @@ export default async function ReleasesPage({ params }: Props) {
 
           {/* ── Sprint 74: Final Launch Signoff ── */}
           <LaunchSignoffPanel projectId={projectId} />
+
+          {/* ── Sprint 75: Production Cutover Rehearsal ── */}
+          <CutoverRehearsalPanel projectId={projectId} />
+
+          {/* ── Sprint 75: Launch Freeze Checklist ── */}
+          <LaunchFreezePanel projectId={projectId} />
 
           {/* ── Sprint 58: Debug failed dry-run/cutover ── */}
           <DebugSummaryPanel projectId={projectId} compact context="dry_run" />

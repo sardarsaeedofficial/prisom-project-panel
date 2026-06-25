@@ -19,6 +19,8 @@ import { ProjectProfileCard }            from "@/components/projects/project-pro
 import { ProjectTemplateSelector }       from "@/components/projects/project-template-selector";
 import { LaunchSignoffPanel }            from "@/components/projects/launch-signoff-panel";
 import { OperatorTrainingPanel }         from "@/components/projects/operator-training-panel";
+import { CutoverRehearsalPanel }         from "@/components/projects/cutover-rehearsal-panel";
+import { LaunchFreezePanel }             from "@/components/projects/launch-freeze-panel";
 import { getProjectById } from "@/lib/data/projects";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -70,10 +72,12 @@ export default async function ProjectSettingsPage({ params }: Props) {
             <ProjectTemplateSelector projectId={projectId} compact />
           </div>
 
-          {/* Sprint 74: Signoff + Training compact cards */}
+          {/* Sprint 74–75: Signoff, Training, Rehearsal, Freeze compact cards */}
           <div className="max-w-2xl space-y-3">
             <LaunchSignoffPanel projectId={projectId} compact />
             <OperatorTrainingPanel projectId={projectId} compact />
+            <CutoverRehearsalPanel projectId={projectId} compact />
+            <LaunchFreezePanel projectId={projectId} compact />
           </div>
 
           <ProjectSettingsForm projectId={projectId} initialValues={formValues} />
