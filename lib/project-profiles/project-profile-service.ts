@@ -13,27 +13,35 @@ import type { ProjectMigrationProfile, ProjectProfileKind, ProjectProfileService
 
 // ── Env key category detection ────────────────────────────────────────────────
 
-const STRIPE_KEYS   = ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_API_KEY"];
-const CLOUD_KEYS    = ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "S3_BUCKET", "AWS_ACCESS_KEY_ID"];
-const EMAIL_KEYS    = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "RESEND_API_KEY", "SENDGRID_API_KEY", "MAILGUN_API_KEY"];
-const DATABASE_KEYS = ["DATABASE_URL", "DB_URL", "POSTGRES_URL", "MYSQL_URL", "MONGODB_URI"];
-const AUTH_KEYS     = ["SESSION_SECRET", "JWT_SECRET", "NEXTAUTH_SECRET", "AUTH_SECRET", "COOKIE_SECRET"];
-
 function hasAny(names: string[], patterns: string[]): boolean {
   return names.some((n) => patterns.some((p) => n.toUpperCase().includes(p)));
 }
 
 function envCategory(name: string): ProjectProfileEnvRequirement["category"] {
   const u = name.toUpperCase();
-  if (STRIPE_KEYS.some((k)   => u.includes(k.replace("_KEY","").replace("_SECRET","").replace("_PUBLISHABLE","").split("_")[0]!) && u.includes("STRIPE")) ) return "stripe";
-  if (CLOUD_KEYS.some((k)    => u === k || u.includes("CLOUDINARY") || u.includes("AWS_") || u.includes("S3_"))) return "cloudinary";
-  if (EMAIL_KEYS.some((k)    => u === k || u.includes("SMTP") || u.includes("RESEND") || u.includes("SENDGRID") || u.includes("MAILGUN"))) return "email";
-  if (DATABASE_KEYS.some((k) => u === k || u.includes("DATABASE") || u.includes("POSTGRES") || u.includes("MYSQL") || u.includes("MONGO"))) return "database";
-  if (AUTH_KEYS.some((k)     => u === k || u.includes("SECRET") || u.includes("JWT") || u.includes("AUTH"))) return "auth";
-  if (u.includes("STRIPE"))                            return "stripe";
-  if (u.includes("WEBHOOK"))                           return "webhook";
-  if (u.includes("URL") || u.includes("HOST") || u.includes("PORT")) return "app";
+  // Order matters: STRIPE before SECRET so STRIPE_WEBHOOK_SECRET → stripe not auth
+  if (u.includes("STRIPE"))                                                        return "stripe";
+  if (u.includes("CLOUDINARY") || u.includes("AWS_") || u.includes("S3_"))       return "cloudinary";
+  if (u.includes("SMTP") || u.includes("RESEND") || u.includes("SENDGRID") || u.includes("MAILGUN")) return "email";
+  if (u.includes("DATABASE") || u.includes("POSTGRES") || u.includes("MYSQL") || u.includes("MONGO") || u === "DB_URL") return "database";
+  if (u.includes("SECRET") || u.includes("JWT") || u.includes("NEXTAUTH") || u.includes("SESSION") || u.includes("COOKIE")) return "auth";
+  if (u.includes("WEBHOOK"))                                                       return "webhook";
+  if (u.includes("STORAGE") || u.includes("BUCKET") || u.includes("CDN"))        return "storage";
+  if (u.includes("URL") || u.includes("HOST") || u.includes("PORT"))             return "app";
   return "other";
+}
+
+function isRequiredKey(name: string): boolean {
+  const u = name.toUpperCase();
+  return (
+    u.includes("DATABASE") || u === "DB_URL" || u.includes("POSTGRES") ||
+    u.includes("SESSION_SECRET") || u.includes("JWT_SECRET") || u.includes("AUTH_SECRET")
+  );
+}
+
+function isPublicKey(name: string): boolean {
+  const u = name.toUpperCase();
+  return u === "APP_URL" || u === "SITE_URL" || u === "STRIPE_PUBLISHABLE_KEY" || u.startsWith("NEXT_PUBLIC_");
 }
 
 // ── Profile builder helpers ───────────────────────────────────────────────────
@@ -41,9 +49,9 @@ function envCategory(name: string): ProjectProfileEnvRequirement["category"] {
 function buildEnvRequirements(names: string[]): ProjectProfileEnvRequirement[] {
   return names.map((name) => ({
     name,
-    category: envCategory(name),
-    required: DATABASE_KEYS.some((k) => name.toUpperCase().includes(k.split("_")[0]!)) || AUTH_KEYS.some((k) => name.toUpperCase().includes(k.split("_")[0]!)),
-    secret:   !["APP_URL", "STRIPE_PUBLISHABLE_KEY", "NEXT_PUBLIC_"].some((p) => name.startsWith(p)),
+    category:    envCategory(name),
+    required:    isRequiredKey(name),
+    secret:      !isPublicKey(name),
     description: "",
   }));
 }

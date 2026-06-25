@@ -93,18 +93,26 @@ export function ProjectTemplateSelector({ projectId, compact }: ProjectTemplateS
     setPlan(null);
     setExportData("");
     startGen(async () => {
-      const result = await generateTemplateMigrationPlanAction({ projectId, templateId: selectedId });
-      genFlight.current = false;
-      if (!result.ok) { setError(result.error); return; }
-      setPlan(result.data);
-      setShowSteps(true);
-      // Pre-generate export
-      startExp(async () => {
-        expFlight.current = true;
-        const exp = await exportClientMigrationPlanAction({ projectId, templateId: selectedId });
-        expFlight.current = false;
-        if (exp.ok) setExportData(exp.data.markdown);
-      });
+      try {
+        const result = await generateTemplateMigrationPlanAction({ projectId, templateId: selectedId });
+        if (!result.ok) { setError(result.error); return; }
+        setPlan(result.data);
+        setShowSteps(true);
+        // Pre-generate export
+        startExp(async () => {
+          expFlight.current = true;
+          try {
+            const exp = await exportClientMigrationPlanAction({ projectId, templateId: selectedId });
+            if (exp.ok) setExportData(exp.data.markdown);
+          } finally {
+            expFlight.current = false;
+          }
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Unexpected error generating plan.");
+      } finally {
+        genFlight.current = false;
+      }
     });
   }
 

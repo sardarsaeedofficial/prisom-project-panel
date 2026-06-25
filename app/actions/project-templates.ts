@@ -23,6 +23,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/current-workspace";
+import { requireProjectPermission as requireMigrationPermission } from "@/lib/auth/project-membership";
 import { renderTemplateFiles, validateTemplateVariables, getProjectTemplate } from "@/lib/templates/template-renderer";
 // Sprint 72: migration-plan template imports
 import {
@@ -685,9 +686,10 @@ export async function generateTemplateMigrationPlanAction(input: {
   const user = await getCurrentUser();
   if (!user?.id) return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
 
+  let planAuth: Awaited<ReturnType<typeof requireMigrationPermission>> | null = null;
   if (projectId) {
-    const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
-    if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+    planAuth = await requireMigrationPermission(projectId, "project.view");
+    if (!planAuth.ok) return { ok: false, error: planAuth.error, code: planAuth.code };
   }
 
   const template = getMigrationTemplate(templateId);
@@ -696,22 +698,19 @@ export async function generateTemplateMigrationPlanAction(input: {
   try {
     const plan = await generateTemplateMigrationPlan({ projectId, templateId });
 
-    if (projectId) {
-      const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
-      if (auth.ok) {
-        const ctx = await getAuditRequestContext();
-        void writeProjectAuditEvent({
-          projectId,
-          actorUserId: auth.userId,
-          actorRole:   auth.role,
-          action:      "project_template.plan_generated",
-          category:    "publishing",
-          result:      "success",
-          summary:     `Migration plan generated from template: ${template.label}`,
-          metadata:    { templateId, templateKind: template.kind },
-          ...ctx,
-        }).catch(() => null);
-      }
+    if (projectId && planAuth?.ok) {
+      const ctx = await getAuditRequestContext();
+      void writeProjectAuditEvent({
+        projectId,
+        actorUserId: planAuth.userId,
+        actorRole:   planAuth.role,
+        action:      "project_template.plan_generated",
+        category:    "publishing",
+        result:      "success",
+        summary:     `Migration plan generated from template: ${template.label}`,
+        metadata:    { templateId, templateKind: template.kind },
+        ...ctx,
+      }).catch(() => null);
     }
 
     return { ok: true, data: plan };
@@ -731,9 +730,10 @@ export async function exportClientMigrationPlanAction(input: {
   const user = await getCurrentUser();
   if (!user?.id) return { ok: false, error: "Not authenticated.", code: "UNAUTHENTICATED" };
 
+  let expAuth: Awaited<ReturnType<typeof requireMigrationPermission>> | null = null;
   if (projectId) {
-    const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
-    if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+    expAuth = await requireMigrationPermission(projectId, "project.view");
+    if (!expAuth.ok) return { ok: false, error: expAuth.error, code: expAuth.code };
   }
 
   const template = getMigrationTemplate(templateId);
@@ -743,22 +743,19 @@ export async function exportClientMigrationPlanAction(input: {
     const plan     = await generateTemplateMigrationPlan({ projectId, templateId });
     const markdown = exportClientMigrationPlan(plan);
 
-    if (projectId) {
-      const auth = await (await import("@/lib/auth/project-membership")).requireProjectPermission(projectId, "project.view");
-      if (auth.ok) {
-        const ctx = await getAuditRequestContext();
-        void writeProjectAuditEvent({
-          projectId,
-          actorUserId: auth.userId,
-          actorRole:   auth.role,
-          action:      "project_template.plan_exported",
-          category:    "publishing",
-          result:      "success",
-          summary:     `Migration plan exported: ${template.label}`,
-          metadata:    { templateId, templateKind: template.kind },
-          ...ctx,
-        }).catch(() => null);
-      }
+    if (projectId && expAuth?.ok) {
+      const ctx = await getAuditRequestContext();
+      void writeProjectAuditEvent({
+        projectId,
+        actorUserId: expAuth.userId,
+        actorRole:   expAuth.role,
+        action:      "project_template.plan_exported",
+        category:    "publishing",
+        result:      "success",
+        summary:     `Migration plan exported: ${template.label}`,
+        metadata:    { templateId, templateKind: template.kind },
+        ...ctx,
+      }).catch(() => null);
     }
 
     return { ok: true, data: { markdown, filename: "CLIENT_MIGRATION_PLAN.md" } };

@@ -161,7 +161,7 @@ export default async function ProjectMigrationPage({ params }: Props) {
             <details className="group">
               <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground list-none flex items-center gap-1.5 py-1">
                 <span className="text-xs border rounded px-2 py-0.5 group-open:bg-muted">
-                  + Ecommerce migration (Sardar Security Supplies)
+                  + Advanced ecommerce migration panels
                 </span>
               </summary>
               <div className="mt-2 space-y-4">
