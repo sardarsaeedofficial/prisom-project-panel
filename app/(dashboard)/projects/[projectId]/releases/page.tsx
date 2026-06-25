@@ -138,38 +138,92 @@ export default async function ReleasesPage({ params }: Props) {
 
         <div className="space-y-5 max-w-3xl">
 
-          {/* Sprint 67: Contextual help card */}
+          {/* Help card */}
           <ContextualHelpCard
             purpose="Deployment history, release promotions, go-live control room, and production cutover guard."
-            doHere="Generate the execution plan. Preview production routes. Run smoke checks. Apply cutover only when ready. Export the production execution plan."
+            doHere="Generate the execution plan. Preview production routes. Run smoke checks. Export the production execution plan."
             dontDo="Do not type APPLY PRODUCTION CUTOVER until all 14 evidence items are reviewed and a backup is confirmed. The panel records the request — nginx must still be applied manually by an operator."
             nextPage={{ label: "Monitoring (post-cutover)", href: `/projects/${projectId}/monitoring` }}
           />
 
-          {/* ── Sprint 60: Disaster Recovery compact card ── */}
+          {/* ── Final Verification ────────────────────────────────────── */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Final Verification</p>
+
+          {isSardar && (
+            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+              <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Live QA Verification</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  QA report — routes, exports, confirmations, safety, smoke checks, 18-item manual checklist. <span className="text-primary">↓ Panel below</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isSardar && (
+            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Release Candidate Hardening</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Final hardening score, blockers, manual checklist, confirmation phrase index, smoke commands. <span className="text-primary">↓ Panel below</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Execution ─────────────────────────────────────────────── */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Execution</p>
+
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-            <Database className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Backup / Restore Drill</p>
+              <p className="text-sm font-medium">Production Cutover Execution Guard</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Run a full restore drill before production cutover to confirm your backups are recoverable.
+                Confirmation-gated workflow — APPLY PRODUCTION CUTOVER, RUN PRODUCTION SMOKE CHECKS, EXECUTE PRODUCTION ROLLBACK. <span className="text-primary">↓ Panel below</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Trophy className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Final Go-Live Control Room</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Aggregate readiness gate — all Sprint 50–68 checks. Generate FINAL_GO_LIVE_PACK.md before cutover. <span className="text-primary">↓ Panel below</span>
+              </p>
+            </div>
+          </div>
+
+          {/* ── Monitoring ───────────────────────────────────────────── */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">After Cutover</p>
+
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Post-Cutover Monitoring</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Monitor production health, triage incidents, run health checks, and support rollback decisions after cutover.
               </p>
             </div>
             <Link
-              href={`/projects/${projectId}/backups`}
+              href={`/projects/${projectId}/monitoring`}
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
-              Go to Backups →
+              Go to Monitoring →
             </Link>
           </div>
 
-          {/* ── Sprint 61: Staging Trial Migration compact card ── */}
+          {/* ── Prerequisites ────────────────────────────────────────── */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Prerequisites</p>
+
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-            <Flag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <Container className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Sardar Staging Trial Migration</p>
+              <p className="text-sm font-medium">Staging Deployment</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Complete the staging trial migration before production cutover — smoke checks, env, DB, routing, and backup drill must all pass.
+                Plan and verify an isolated staging deployment — service config, source prep, smoke checks, STAGING_DEPLOYMENT_PROOF.md.
               </p>
             </div>
             <Link
@@ -180,7 +234,6 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
-          {/* ── Sprint 62: Ecommerce Test Harness compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <ShoppingCart className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
@@ -197,39 +250,47 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
-          {/* ── Sprint 69: Live QA Verification compact card ── */}
-          {isSardar && (
-            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-              <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">Live QA Verification</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Full QA report — routes, exports, confirmations, safety, smoke checks, manual checklist.
-                </p>
-              </div>
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Flag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Staging Trial Migration</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Complete the staging trial before production cutover — smoke checks, env, DB, routing, and backup drill must all pass.
+              </p>
             </div>
-          )}
+            <Link
+              href={`/projects/${projectId}/migration`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Migration →
+            </Link>
+          </div>
 
-          {/* ── Sprint 68: Release Candidate compact card ── */}
-          {isSardar && (
-            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-              <CheckCircle2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">Release Candidate Hardening</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Final hardening report — score, blockers, manual checklist, confirmation phrases, smoke commands.
-                </p>
-              </div>
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Database className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Backup / Restore Drill</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Run a full restore drill before production cutover to confirm your backups are recoverable.
+              </p>
             </div>
-          )}
+            <Link
+              href={`/projects/${projectId}/backups`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Backups →
+            </Link>
+          </div>
 
-          {/* ── Sprint 67: Operator Runbook compact card ── */}
+          {/* ── Documentation ────────────────────────────────────────── */}
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Documentation</p>
+
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium">Operator Runbook</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Documentation guide for daily operations, incident response, rollback, and handoff exports.
+                Daily operations, incident response, rollback procedures, and handoff exports.
               </p>
             </div>
             <Link
@@ -240,50 +301,7 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
-          {/* ── Sprint 66: Post-Cutover Monitoring compact card ── */}
-          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-            <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Post-Cutover Monitoring</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Monitor production health, triage incidents, and support rollback decisions after cutover.
-              </p>
-            </div>
-            <Link
-              href={`/projects/${projectId}/monitoring`}
-              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
-            >
-              Go to Monitoring →
-            </Link>
-          </div>
-
-          {/* ── Sprint 65: Production Execution Guard compact card ── */}
-          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-            <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Production Cutover Execution Guard</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Final guarded workflow for route apply, smoke checks, and rollback confirmation.
-              </p>
-            </div>
-          </div>
-
-          {/* ── Sprint 64: Staging Deployment compact card ── */}
-          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
-            <Container className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">Sardar Staging Deployment</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Plan, verify, and export a staging deployment proof before production cutover.
-              </p>
-            </div>
-            <Link
-              href={`/projects/${projectId}/migration`}
-              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
-            >
-              Go to Migration →
-            </Link>
-          </div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 
           {/* ── Sprint 69: Live QA Verification ── */}
           {isSardar && (

@@ -104,7 +104,7 @@ export async function prepareStagingSourceAction(input: {
 }): Promise<ActionResult<{ plan: Awaited<ReturnType<typeof prepareStagingSourcePlan>> }>> {
   const { projectId, stagingSlug = DEFAULT_STAGING_SLUG, confirmation } = input;
 
-  if (confirmation !== "PREPARE STAGING SOURCE") {
+  if (confirmation.trim() !== "PREPARE STAGING SOURCE") {
     return { ok: false, error: 'Confirmation must be "PREPARE STAGING SOURCE".' };
   }
 
@@ -151,7 +151,7 @@ export async function runStagingDeploymentDryRunAction(input: {
     confirmation,
   } = input;
 
-  if (confirmation !== "RUN STAGING DRY RUN") {
+  if (confirmation.trim() !== "RUN STAGING DRY RUN") {
     return { ok: false, error: 'Confirmation must be "RUN STAGING DRY RUN".' };
   }
 
@@ -249,7 +249,7 @@ export async function markStagingReadyAction(input: {
 }): Promise<ActionResult<{ markedAt: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "MARK STAGING READY") {
+  if (confirmation.trim() !== "MARK STAGING READY") {
     return { ok: false, error: 'Confirmation must be "MARK STAGING READY".' };
   }
 

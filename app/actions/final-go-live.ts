@@ -44,7 +44,7 @@ export async function generateFinalGoLiveGateReportAction(input: {
 }): Promise<ActionResult<FinalGoLiveGateReport>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== undefined && confirmation !== "GENERATE FINAL GO LIVE GATE") {
+  if (confirmation !== undefined && confirmation.trim() !== "GENERATE FINAL GO LIVE GATE") {
     return { ok: false, error: 'Confirmation phrase must be "GENERATE FINAL GO LIVE GATE".' };
   }
 
@@ -88,7 +88,7 @@ export async function exportFinalGoLivePackAction(input: {
 }): Promise<ActionResult<{ markdown: string; filename: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== undefined && confirmation !== "EXPORT FINAL GO LIVE PACK") {
+  if (confirmation !== undefined && confirmation.trim() !== "EXPORT FINAL GO LIVE PACK") {
     return { ok: false, error: 'Confirmation phrase must be "EXPORT FINAL GO LIVE PACK".' };
   }
 

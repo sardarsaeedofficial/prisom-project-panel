@@ -56,7 +56,7 @@ export async function generateEcommerceTestReportAction(input: {
 }): Promise<ActionResult<EcommerceTestReport>> {
   const { projectId, targetDomain, confirmation } = input;
 
-  if (confirmation !== undefined && confirmation !== "GENERATE ECOMMERCE TEST PLAN") {
+  if (confirmation !== undefined && confirmation.trim() !== "GENERATE ECOMMERCE TEST PLAN") {
     return { ok: false, error: 'Confirmation phrase must be "GENERATE ECOMMERCE TEST PLAN".' };
   }
 
@@ -101,7 +101,7 @@ export async function runSafeEcommerceSmokeChecksAction(input: {
 }): Promise<ActionResult<EcommerceSmokeReport>> {
   const { projectId, targetDomain, confirmation } = input;
 
-  if (confirmation !== "RUN SAFE ECOMMERCE CHECKS") {
+  if (confirmation.trim() !== "RUN SAFE ECOMMERCE CHECKS") {
     return { ok: false, error: 'Confirmation phrase "RUN SAFE ECOMMERCE CHECKS" is required.' };
   }
 
@@ -214,7 +214,7 @@ export async function markEcommerceProofCompleteAction(input: {
 }): Promise<ActionResult<{ completedAt: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "MARK ECOMMERCE PROOF COMPLETE") {
+  if (confirmation.trim() !== "MARK ECOMMERCE PROOF COMPLETE") {
     return { ok: false, error: 'Confirmation phrase "MARK ECOMMERCE PROOF COMPLETE" is required.' };
   }
 

@@ -92,7 +92,7 @@ export async function runProductionHealthChecksAction(input: {
 }): Promise<ActionResult<PostCutoverMonitoringReport>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "RUN PRODUCTION HEALTH CHECKS") {
+  if (confirmation.trim() !== "RUN PRODUCTION HEALTH CHECKS") {
     return { ok: false, error: "Type RUN PRODUCTION HEALTH CHECKS to confirm." };
   }
 
@@ -150,7 +150,7 @@ export async function exportPostCutoverMonitoringReportAction(input: {
 }): Promise<ActionResult<{ content: string; filename: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation && confirmation !== "EXPORT MONITORING REPORT") {
+  if (confirmation && confirmation.trim() !== "EXPORT MONITORING REPORT") {
     return { ok: false, error: "Type EXPORT MONITORING REPORT to confirm." };
   }
 
@@ -193,7 +193,7 @@ export async function markIncidentReviewedAction(input: {
 }): Promise<ActionResult<{ reviewedAt: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "MARK INCIDENT REVIEWED") {
+  if (confirmation.trim() !== "MARK INCIDENT REVIEWED") {
     return { ok: false, error: "Type MARK INCIDENT REVIEWED to confirm." };
   }
 

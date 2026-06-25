@@ -70,7 +70,7 @@ export async function runProductionCutoverSmokeChecksAction(input: {
 }): Promise<ActionResult<ProductionCutoverSmokeReport>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== SMOKE_CONFIRMATION) {
+  if (confirmation.trim() !== SMOKE_CONFIRMATION) {
     return {
       ok:    false,
       error: `Type "${SMOKE_CONFIRMATION}" to confirm running smoke checks.`,
@@ -184,7 +184,7 @@ export async function markProductionCutoverCompleteAction(input: {
 }): Promise<ActionResult> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== COMPLETE_CONFIRMATION) {
+  if (confirmation.trim() !== COMPLETE_CONFIRMATION) {
     return {
       ok:    false,
       error: `Type "${COMPLETE_CONFIRMATION}" to confirm marking cutover complete.`,

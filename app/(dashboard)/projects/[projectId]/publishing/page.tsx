@@ -351,6 +351,25 @@ export default async function ProjectPublishingPage({ params }: Props) {
             </Link>
           </div>
 
+          {/* ── Sprint 69: Live QA Verification compact card ── */}
+          {isSardar && (
+            <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+              <Activity className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">Live QA Verification</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  QA report — routes, exports, confirmations, safety, smoke checks, manual checklist. Run after go-live.
+                </p>
+              </div>
+              <Link
+                href={`/projects/${projectId}/releases`}
+                className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+              >
+                Go to Releases →
+              </Link>
+            </div>
+          )}
+
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />

@@ -73,7 +73,7 @@ export async function runLiveQaSmokeChecksAction(input: {
 }): Promise<ActionResult<LiveSmokeReport>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "RUN LIVE QA SMOKE CHECKS") {
+  if (confirmation.trim() !== "RUN LIVE QA SMOKE CHECKS") {
     return { ok: false, error: 'Type exactly "RUN LIVE QA SMOKE CHECKS" to proceed.', code: "CONFIRMATION_REQUIRED" };
   }
 

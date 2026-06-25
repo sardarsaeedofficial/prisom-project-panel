@@ -77,7 +77,7 @@ export async function runDeploymentBuildDryRunAction(input: {
   );
   if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
 
-  if (confirmation !== BUILD_CONFIRMATION_PHRASE) {
+  if ((confirmation ?? "").trim() !== BUILD_CONFIRMATION_PHRASE) {
     return {
       ok:    false,
       error: `Type "${BUILD_CONFIRMATION_PHRASE}" to confirm running the build dry run.`,
@@ -97,7 +97,7 @@ export async function runDeploymentBuildDryRunAction(input: {
     ...ctx,
   }).catch(() => null);
 
-  const result = await runBuildDryRun({ projectId, serviceId, confirmation });
+  const result = await runBuildDryRun({ projectId, serviceId, confirmation: confirmation! });
 
   void writeProjectAuditEvent({
     projectId,

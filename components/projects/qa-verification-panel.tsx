@@ -270,7 +270,7 @@ export function QaVerificationPanel({ projectId }: { projectId: string }) {
 
   function handleSmoke() {
     if (inFlightSmk.current) return;
-    if (smokeInput !== "RUN LIVE QA SMOKE CHECKS") {
+    if (smokeInput.trim() !== "RUN LIVE QA SMOKE CHECKS") {
       setSmokeError('Type exactly "RUN LIVE QA SMOKE CHECKS" to run live checks.');
       return;
     }
@@ -278,7 +278,7 @@ export function QaVerificationPanel({ projectId }: { projectId: string }) {
     inFlightSmk.current = true;
     setError(null);
     startSmk(async () => {
-      const result = await runLiveQaSmokeChecksAction({ projectId, confirmation: smokeInput });
+      const result = await runLiveQaSmokeChecksAction({ projectId, confirmation: smokeInput.trim() });
       inFlightSmk.current = false;
       if (result.ok) {
         setSmokeReport(result.data);
@@ -493,7 +493,7 @@ export function QaVerificationPanel({ projectId }: { projectId: string }) {
             loadingLabel="Running smoke checks…"
             size="sm"
             variant="outline"
-            disabled={smokeInput !== "RUN LIVE QA SMOKE CHECKS"}
+            disabled={smokeInput.trim() !== "RUN LIVE QA SMOKE CHECKS"}
           >
             <Activity className="h-3.5 w-3.5 mr-1.5" />
             Run Live QA Smoke Checks

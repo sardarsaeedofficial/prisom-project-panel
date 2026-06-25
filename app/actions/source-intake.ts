@@ -278,7 +278,7 @@ export async function prepareGitHubImportAction(input: {
   const alreadyExists = await pathExists(destAbsPath);
 
   // If source already exists, require REPLACE SOURCE confirmation
-  if (alreadyExists && confirmation !== REPLACE_SOURCE_PHRASE) {
+  if (alreadyExists && (confirmation ?? "").trim() !== REPLACE_SOURCE_PHRASE) {
     return {
       ok: false,
       error: `Source already exists at ${destPath}. To replace it, confirm with: ${REPLACE_SOURCE_PHRASE}`,

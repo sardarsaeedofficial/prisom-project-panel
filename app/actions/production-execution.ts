@@ -133,7 +133,7 @@ export async function runProductionSmokeChecksAction(input: {
 }): Promise<ActionResult<ProductionExecutionSmokeReport>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "RUN PRODUCTION SMOKE CHECKS") {
+  if (confirmation.trim() !== "RUN PRODUCTION SMOKE CHECKS") {
     return { ok: false, error: "Type RUN PRODUCTION SMOKE CHECKS to confirm smoke checks." };
   }
 
@@ -193,7 +193,7 @@ export async function applyProductionCutoverAction(input: {
 }): Promise<ActionResult<{ message: string; readyForManualApply: true; executionId: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "APPLY PRODUCTION CUTOVER") {
+  if (confirmation.trim() !== "APPLY PRODUCTION CUTOVER") {
     return { ok: false, error: "Type APPLY PRODUCTION CUTOVER to confirm production cutover." };
   }
 
@@ -238,7 +238,7 @@ export async function executeProductionRollbackAction(input: {
 }): Promise<ActionResult<{ message: string; rollbackId: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "EXECUTE PRODUCTION ROLLBACK") {
+  if (confirmation.trim() !== "EXECUTE PRODUCTION ROLLBACK") {
     return { ok: false, error: "Type EXECUTE PRODUCTION ROLLBACK to confirm production rollback." };
   }
 

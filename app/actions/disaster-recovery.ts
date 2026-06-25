@@ -130,7 +130,7 @@ export async function verifyBackupIntegrityAction(input: {
 }): Promise<ActionResult<BackupIntegrityResult>> {
   const { projectId, backupId, confirmation } = input;
 
-  if (confirmation !== "VERIFY BACKUP") {
+  if (confirmation.trim() !== "VERIFY BACKUP") {
     return { ok: false, error: 'Confirmation phrase "VERIFY BACKUP" is required.' };
   }
 
@@ -220,7 +220,7 @@ export async function markRestoreDrillCompleteAction(input: {
 }): Promise<ActionResult<{ completedAt: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "MARK DRILL COMPLETE") {
+  if (confirmation.trim() !== "MARK DRILL COMPLETE") {
     return { ok: false, error: 'Confirmation phrase "MARK DRILL COMPLETE" is required.' };
   }
 

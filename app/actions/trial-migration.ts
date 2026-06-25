@@ -90,7 +90,7 @@ export async function runTrialMigrationSmokeChecksAction(input: {
 }): Promise<ActionResult<StagingSmokeCheckReport>> {
   const { projectId, stagingDomain, confirmation } = input;
 
-  if (confirmation !== "RUN STAGING CHECKS") {
+  if (confirmation.trim() !== "RUN STAGING CHECKS") {
     return { ok: false, error: 'Confirmation phrase "RUN STAGING CHECKS" is required.' };
   }
 
@@ -191,7 +191,7 @@ export async function markTrialMigrationCompleteAction(input: {
 }): Promise<ActionResult<{ completedAt: string }>> {
   const { projectId, confirmation } = input;
 
-  if (confirmation !== "MARK TRIAL COMPLETE") {
+  if (confirmation.trim() !== "MARK TRIAL COMPLETE") {
     return { ok: false, error: 'Confirmation phrase "MARK TRIAL COMPLETE" is required.' };
   }
 
