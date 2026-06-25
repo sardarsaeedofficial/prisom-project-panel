@@ -8,7 +8,7 @@ import { WorkspaceNav }                    from "@/components/projects/workspace
 import { ReplitMigrationAssistant }           from "@/components/projects/replit-migration-assistant";
 import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
-import { Database }                           from "lucide-react";
+import { Database, Trophy }                   from "lucide-react";
 import Link                                   from "next/link";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
@@ -91,6 +91,22 @@ export default async function ProjectMigrationPage({ params }: Props) {
               <div className="rounded-xl border bg-card p-4">
                 <EcommerceTestPanel projectId={projectId} />
               </div>
+              {/* Sprint 63: Final Go-Live Control Room compact card */}
+              <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+                <Trophy className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Final Go-Live Control Room</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Aggregate readiness gate — all Sprint 50–62 checks. Generate the final gate and FINAL_GO_LIVE_PACK.md.
+                  </p>
+                </div>
+                <Link
+                  href={`/projects/${projectId}/releases`}
+                  className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+                >
+                  Go to Releases →
+                </Link>
+              </div>
             </>
           ) : (
             <details className="group">
@@ -107,6 +123,22 @@ export default async function ProjectMigrationPage({ params }: Props) {
                 </div>
                 <div className="rounded-xl border bg-card p-4">
                   <EcommerceTestPanel projectId={projectId} />
+                </div>
+                {/* Sprint 63: Final Go-Live Control Room compact card */}
+                <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+                  <Trophy className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Final Go-Live Control Room</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Aggregate readiness gate — all Sprint 50–62 checks. Generate the final gate and FINAL_GO_LIVE_PACK.md.
+                    </p>
+                  </div>
+                  <Link
+                    href={`/projects/${projectId}/releases`}
+                    className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+                  >
+                    Go to Releases →
+                  </Link>
                 </div>
               </div>
             </details>

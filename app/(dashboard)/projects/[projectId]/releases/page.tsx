@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart,
+  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -25,6 +25,7 @@ import { DeploymentDryRunPanel }              from "@/components/projects/deploy
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { GoLiveRegressionChecklist }          from "@/components/projects/go-live-regression-checklist";
+import { FinalGoLiveControlRoom }             from "@/components/projects/final-go-live-control-room";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
@@ -182,6 +183,11 @@ export default async function ReleasesPage({ params }: Props) {
             >
               Go to Migration →
             </Link>
+          </div>
+
+          {/* ── Sprint 63: Final Go-Live Control Room ── */}
+          <div className="rounded-xl border bg-card p-4">
+            <FinalGoLiveControlRoom projectId={projectId} />
           </div>
 
           {/* ── Sprint 58: Debug failed dry-run/cutover ── */}

@@ -37,7 +37,7 @@ import { ProjectServicesPanel }  from "@/components/projects/project-services-pa
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
-import { AlertTriangle, RefreshCw, Flag, ShoppingCart } from "lucide-react";
+import { AlertTriangle, RefreshCw, Flag, ShoppingCart, Trophy } from "lucide-react";
 import Link                         from "next/link";
 import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
@@ -348,6 +348,23 @@ export default async function ProjectPublishingPage({ params }: Props) {
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
               Go to Migration →
+            </Link>
+          </div>
+
+          {/* ── Sprint 63: Final Go-Live Control Room compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Trophy className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Final Go-Live Control Room</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Aggregate readiness gate for all Sprint 50–62 checks. Generate the final gate report and FINAL_GO_LIVE_PACK.md before cutover.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/releases`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Releases →
             </Link>
           </div>
 

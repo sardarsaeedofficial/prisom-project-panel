@@ -999,6 +999,65 @@ function buildDisasterRecoverySection(): string {
   return lines.join("\n");
 }
 
+// ── Sprint 63: Final Go-Live Gate summary section ─────────────────────────────
+
+function buildFinalGoLiveGateSection(): string {
+  const lines: string[] = [
+    "## Final Go-Live Gate (Sprint 63)",
+    "",
+    "> Aggregate production readiness gate — Sprints 50–62.",
+    "> **Generate the gate report on the Releases page** before production cutover.",
+    "> No secrets are included in this section.",
+    "",
+    "### Key Requirements (all must pass before cutover)",
+    "",
+    "| Category | Requirement | Page |",
+    "|----------|-------------|------|",
+    "| Source | Deployment config exists, services configured | Publishing |",
+    "| Staging | Trial migration complete (MARK TRIAL COMPLETE) | Migration |",
+    "| Ecommerce | Ecommerce proof complete (MARK ECOMMERCE PROOF COMPLETE) | Migration |",
+    "| Env | Env vars configured, no placeholders, no localhost | Env |",
+    "| Database | Connection test passed, migration plan reviewed | Database |",
+    "| External | Stripe/Cloudinary/email on staging | Env |",
+    "| Routing | Nginx routing plan reviewed and approved | Publishing |",
+    "| Domains | Active domain, SSL cert issued | Domains |",
+    "| Deployment | At least 1 successful deployment | Releases |",
+    "| Backup | Recent backup exists, restore drill complete (MARK DRILL COMPLETE) | Backups |",
+    "| Permissions | Team roles reviewed, no unauthorized access | Team |",
+    "| Rollback | Rollback target exists, rollback plan reviewed | Releases |",
+    "| Manual | Owner sign-off obtained | Releases |",
+    "",
+    "### Final Evidence Checklist",
+    "",
+    "- [ ] Source intake reviewed",
+    "- [ ] Staging trial migration reviewed (MARK TRIAL COMPLETE)",
+    "- [ ] Ecommerce proof reviewed (MARK ECOMMERCE PROOF COMPLETE)",
+    "- [ ] Backup/restore drill reviewed (MARK DRILL COMPLETE)",
+    "- [ ] Team permissions reviewed",
+    "- [ ] Env/secrets reviewed (no placeholders, no localhost)",
+    "- [ ] Database readiness reviewed (connection test passed)",
+    "- [ ] External services reviewed (Stripe/Cloudinary/email on staging)",
+    "- [ ] Routing plan reviewed (nginx preview approved)",
+    "- [ ] Domain/SSL health reviewed",
+    "- [ ] Build dry run reviewed",
+    "- [ ] Rollback plan reviewed",
+    "- [ ] Debug/logs page checked",
+    "- [ ] Owner sign-off obtained",
+    "",
+    "### Safety Rules",
+    "",
+    "- Do not apply production nginx routes before all gate checks pass",
+    "- Do not restart PM2 automatically — use Releases → MARK CUTOVER COMPLETE",
+    "- Do not run DB migrations automatically",
+    "- Do not expose secrets in the gate report",
+    "- Do not touch Doorsteps/LocalShop",
+    "- Application rollback does NOT rollback DB schema/data",
+    "- Generate `FINAL_GO_LIVE_PACK.md` on the Releases page — download for your records",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 /**
  * Generates a Markdown handoff document from an enriched migration report.
  * Safe to share — no secret values are included.
@@ -1033,6 +1092,7 @@ export function generateHandoffMarkdown(
     buildDisasterRecoverySection(),
     buildStagingTrialSection(),
     buildEcommerceTestProofSection(),
+    buildFinalGoLiveGateSection(),
     buildServices(report),
     buildFooter(),
   ]
