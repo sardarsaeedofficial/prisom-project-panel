@@ -14,6 +14,7 @@ import { db }                          from "@/lib/db";
 import { isSardarProject }            from "@/lib/migration/sardar-migration-types";
 import { ProjectMonitoringPanel }      from "@/components/projects/project-monitoring-panel";
 import { PostCutoverMonitoringPanel }  from "@/components/projects/post-cutover-monitoring-panel";
+import { ContextualHelpCard }         from "@/components/projects/contextual-help-card";
 
 export const metadata: Metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -41,6 +42,14 @@ export default async function ProjectMonitoringPage({ params }: Props) {
         />
 
         <div className="max-w-3xl space-y-6">
+          {/* Sprint 67: Contextual help card */}
+          <ContextualHelpCard
+            purpose="Check production health, classify incidents, review rollback recommendations after cutover."
+            doHere="Generate monitoring report. Run RUN PRODUCTION HEALTH CHECKS. Complete ecommerce checklist. Export POST_CUTOVER_MONITORING_REPORT.md."
+            dontDo="Do not execute rollback here automatically. Do not restart PM2. Do not change DNS. This page is observation and documentation only."
+            nextPage={{ label: "Releases (cutover/rollback)", href: `/projects/${projectId}/releases` }}
+          />
+
           {/* Sprint 66: Post-Cutover Monitoring Control Room */}
           {isSardar && (
             <Card>

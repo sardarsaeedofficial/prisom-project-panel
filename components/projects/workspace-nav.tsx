@@ -40,6 +40,7 @@ import {
   HardDrive,
   History,
   Tag,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -120,7 +121,8 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     {
       label: "Advanced",
       items: [
-        { label: "Settings", href: `${base}/settings`, icon: Settings },
+        { label: "Runbook",  href: `${base}/runbook`,  icon: BookOpen  },
+        { label: "Settings", href: `${base}/settings`, icon: Settings  },
       ],
     },
   ];

@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy, Container, ShieldCheck, Activity,
+  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy, Container, ShieldCheck, Activity, BookOpen,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -28,6 +28,7 @@ import { GoLiveRegressionChecklist }          from "@/components/projects/go-liv
 import { FinalGoLiveControlRoom }             from "@/components/projects/final-go-live-control-room";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
 import { ProductionExecutionPanel }           from "@/components/projects/production-execution-panel";
+import { ContextualHelpCard }                 from "@/components/projects/contextual-help-card";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -135,6 +136,14 @@ export default async function ReleasesPage({ params }: Props) {
 
         <div className="space-y-5 max-w-3xl">
 
+          {/* Sprint 67: Contextual help card */}
+          <ContextualHelpCard
+            purpose="Deployment history, release promotions, go-live control room, and production cutover guard."
+            doHere="Generate the execution plan. Preview production routes. Run smoke checks. Apply cutover only when ready. Export the production execution plan."
+            dontDo="Do not type APPLY PRODUCTION CUTOVER until all 14 evidence items are reviewed and a backup is confirmed. The panel records the request — nginx must still be applied manually by an operator."
+            nextPage={{ label: "Monitoring (post-cutover)", href: `/projects/${projectId}/monitoring` }}
+          />
+
           {/* ── Sprint 60: Disaster Recovery compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <Database className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -183,6 +192,23 @@ export default async function ReleasesPage({ params }: Props) {
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
               Go to Migration →
+            </Link>
+          </div>
+
+          {/* ── Sprint 67: Operator Runbook compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Operator Runbook</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Documentation guide for daily operations, incident response, rollback, and handoff exports.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/runbook`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Runbook →
             </Link>
           </div>
 

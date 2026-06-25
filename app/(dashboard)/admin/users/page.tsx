@@ -1,6 +1,7 @@
 import { requireAdmin }     from "@/lib/auth/require-admin";
 import { listUsers }         from "@/lib/auth/user-management";
 import { AdminUsersPanel }   from "@/components/admin/admin-users-panel";
+import { AdminOnboardingChecklist } from "@/components/admin/admin-onboarding-checklist";
 import { ShieldAlert }       from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,11 @@ export default async function AdminUsersPage() {
         actorRole={actor.role}
         actorEmail={actor.email}
       />
+
+      {/* Sprint 67: Admin onboarding checklist */}
+      <div className="max-w-7xl mx-auto mt-6">
+        <AdminOnboardingChecklist />
+      </div>
     </main>
   );
 }

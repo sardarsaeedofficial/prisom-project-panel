@@ -6,6 +6,7 @@ import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ProjectLogsCenter } from "@/components/projects/project-logs-center";
 import { discoverLogSources } from "@/lib/logs/project-log-sources";
 import { DebugSummaryPanel } from "@/components/projects/debug-summary-panel";
+import { ContextualHelpCard } from "@/components/projects/contextual-help-card";
 
 export const metadata: Metadata = { title: "Logs" };
 export const dynamic = "force-dynamic";
@@ -43,6 +44,16 @@ export default async function ProjectLogsPage({ params, searchParams }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
+      {/* Sprint 67: Contextual help card */}
+      <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95">
+        <ContextualHelpCard
+          purpose="Stream and search PM2 process logs and nginx error logs for this project."
+          doHere="Select a log source. Use Debug Summary to analyze recent failures. Filter logs by error keyword."
+          dontDo="Do not run commands from this page that restart PM2 or mutate config. Logs are read-only."
+          nextPage={{ label: "Monitoring (health checks)", href: `/projects/${projectId}/monitoring` }}
+        />
+      </div>
+
       {/* Sprint 65/66: smoke check and monitoring debug hints */}
       <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95 space-y-1">
         <p className="text-xs text-muted-foreground">

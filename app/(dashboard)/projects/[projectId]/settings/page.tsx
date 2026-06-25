@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Plus, Eye } from "lucide-react";
+import Link from "next/link";
+import { Plus, Eye, BookOpen } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ProjectSettingsForm, type ProjectFormValues } from "@/components/projects/project-settings-form";
+import { OperatorRunbookPanel } from "@/components/projects/operator-runbook-panel";
 import { getProjectById } from "@/lib/data/projects";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -55,6 +57,38 @@ export default async function ProjectSettingsPage({ params }: Props) {
 
         <div className="space-y-8">
           <ProjectSettingsForm projectId={projectId} initialValues={formValues} />
+
+          {/* Sprint 67: Project Operations Guide */}
+          <Card className="max-w-2xl">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-base">Project Operations Guide</CardTitle>
+              </div>
+              <CardDescription className="mt-1">
+                Key operational pages for this project — monitoring, team, backups, and runbook.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Operator Runbook",          href: `/projects/${projectId}/runbook` },
+                { label: "Team & Permissions",        href: `/projects/${projectId}/team` },
+                { label: "Backups",                   href: `/projects/${projectId}/backups` },
+                { label: "Monitoring",                href: `/projects/${projectId}/monitoring` },
+                { label: "Logs",                      href: `/projects/${projectId}/logs` },
+                { label: "Final Go-Live Control Room", href: `/projects/${projectId}/releases` },
+              ].map(({ label, href }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors py-1"
+                >
+                  <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                  {label}
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
 
           {/* Environment variables (read-only display in this phase) */}
           <Card className="max-w-2xl">

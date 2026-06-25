@@ -7,6 +7,7 @@ import { ProjectBackupSchedulePanel } from "@/components/projects/project-backup
 import { DisasterRecoveryPanel } from "@/components/projects/disaster-recovery-panel";
 import { getProjectById } from "@/lib/data/projects";
 import { getOrCreateBackupSchedule } from "@/lib/backups/backup-schedule-service";
+import { ContextualHelpCard } from "@/components/projects/contextual-help-card";
 import Link from "next/link";
 import { Trophy } from "lucide-react";
 
@@ -31,6 +32,16 @@ export default async function ProjectBackupsPage({ params }: Props) {
           title="Backups & Snapshots"
           description={`Point-in-time backups of ${project.name} — restore source files to any previous snapshot.`}
         />
+
+        {/* Sprint 67: Contextual help card */}
+        <div className="mb-6 max-w-2xl">
+          <ContextualHelpCard
+            purpose="Create, schedule, and restore point-in-time backups of project source files."
+            doHere="Create a new backup before any deployment or cutover. Run a restore drill to verify backups work. Check backup integrity status."
+            dontDo="Do not restore a backup without confirming DB state first. Backup restore does NOT rollback database data automatically."
+            nextPage={{ label: "Monitoring (post-cutover)", href: `/projects/${projectId}/monitoring` }}
+          />
+        </div>
 
         {/* Sprint 30: Scheduled backup configuration */}
         <div className="mb-8 max-w-2xl">

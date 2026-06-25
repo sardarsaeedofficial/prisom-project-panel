@@ -6,6 +6,7 @@ import { ProjectTeamPanel } from "@/components/projects/project-team-panel";
 import { ProjectPermissionPolicyPanel } from "@/components/projects/project-permission-policy-panel";
 import { TeamPermissionReviewChecklist } from "@/components/projects/team-permission-review-checklist";
 import { getProjectById } from "@/lib/data/projects";
+import { ContextualHelpCard } from "@/components/projects/contextual-help-card";
 import Link from "next/link";
 import { Trophy } from "lucide-react";
 
@@ -26,6 +27,16 @@ export default async function ProjectTeamPage({ params }: Props) {
           title="Team"
           description={`Manage team members and permissions for ${project.name}`}
         />
+        {/* Sprint 67: Contextual help card */}
+        <div className="mb-6 max-w-2xl">
+          <ContextualHelpCard
+            purpose="Manage project team members and configure permission policies for who can deploy, edit, and trigger cutover."
+            doHere="Add or remove team members. Set appropriate roles. Complete the permission review checklist before go-live."
+            dontDo="Do not give viewers deploy.trigger access. Never share credentials — add people as members instead. Only owner/admin should approve production cutover."
+            nextPage={{ label: "Releases (cutover gate)", href: `/projects/${projectId}/releases` }}
+          />
+        </div>
+
         <ProjectTeamPanel projectId={projectId} />
 
         {/* Sprint 59: Permission hardening + review checklist */}

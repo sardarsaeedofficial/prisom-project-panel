@@ -8,7 +8,7 @@ import { WorkspaceNav }                    from "@/components/projects/workspace
 import { ReplitMigrationAssistant }           from "@/components/projects/replit-migration-assistant";
 import { SourceIntakePanel }                  from "@/components/projects/source-intake-panel";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
-import { Database, Trophy, ShieldCheck }       from "lucide-react";
+import { Database, Trophy, ShieldCheck, BookOpen } from "lucide-react";
 import Link                                   from "next/link";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
@@ -128,6 +128,22 @@ export default async function ProjectMigrationPage({ params }: Props) {
                   Go to Releases →
                 </Link>
               </div>
+              {/* Sprint 67: Operator Runbook compact card */}
+              <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+                <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Operator Runbook</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Documentation guide for daily operations, incident response, rollback, and handoff exports.
+                  </p>
+                </div>
+                <Link
+                  href={`/projects/${projectId}/runbook`}
+                  className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+                >
+                  Go to Runbook →
+                </Link>
+              </div>
             </>
           ) : (
             <details className="group">
@@ -179,6 +195,22 @@ export default async function ProjectMigrationPage({ params }: Props) {
                     className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
                   >
                     Go to Releases →
+                  </Link>
+                </div>
+                {/* Sprint 67: Operator Runbook compact card */}
+                <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+                  <BookOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Operator Runbook</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Documentation guide for daily operations, incident response, rollback, and handoff exports.
+                    </p>
+                  </div>
+                  <Link
+                    href={`/projects/${projectId}/runbook`}
+                    className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+                  >
+                    Go to Runbook →
                   </Link>
                 </div>
               </div>
