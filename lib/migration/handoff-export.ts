@@ -738,6 +738,85 @@ function buildStagingTrialSection(): string {
   return lines.join("\n");
 }
 
+// ── Sprint 62: Ecommerce Test Proof section ───────────────────────────────────
+
+function buildEcommerceTestProofSection(): string {
+  const STAGING_DOMAIN = "staging-sardar-security-project.doorstepmanchester.uk";
+
+  const lines: string[] = [
+    "## Ecommerce Test Proof (Sardar Security Supplies)",
+    "",
+    "> Complete the **Ecommerce Test Harness** on the Migration page before production go-live.",
+    "> No real charges, no production orders, no secrets exposed.",
+    "> All Stripe tests must use test-mode keys and test cards only.",
+    "",
+    `**Staging target:** \`https://${STAGING_DOMAIN}\``,
+    "",
+    "### Provider Readiness Checklist",
+    "",
+    "| Provider | Required Env Names | Notes |",
+    "|----------|--------------------|-------|",
+    "| Stripe   | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET` | Use `sk_test_` / `pk_test_` in staging |",
+    "| Cloudinary | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Staging can share Cloudinary account |",
+    "| Email | `RESEND_API_KEY` or `SMTP_HOST` | Use test mailbox in staging |",
+    "",
+    "### Safe Ecommerce Smoke Checks",
+    "",
+    "> Confirm with `RUN SAFE ECOMMERCE CHECKS` in the Ecommerce Test Harness panel.",
+    "",
+    "- [ ] `GET /` returns HTTP 200",
+    "- [ ] `GET /api/healthz` returns HTTP 200",
+    "- [ ] `GET /non-existent-route` returns HTTP 200 (SPA fallback)",
+    "- [ ] `GET /products` or `/shop` returns HTTP 200",
+    "- [ ] `GET /api/products` returns HTTP 200 (if applicable)",
+    "",
+    "### Manual Order Flow Checklist",
+    "",
+    "- [ ] Storefront loads on staging",
+    "- [ ] Product list visible",
+    "- [ ] Product detail page visible",
+    "- [ ] Product images load (Cloudinary)",
+    "- [ ] Add-to-cart works",
+    "- [ ] Cart quantity update works",
+    "- [ ] Cart item remove works",
+    "- [ ] Checkout form loads",
+    "- [ ] Checkout validation errors display",
+    "- [ ] Stripe test card checkout reviewed (`4242 4242 4242 4242`)",
+    "- [ ] Stripe webhook endpoint documented and registered in Stripe Dashboard (test)",
+    "- [ ] Test order created in staging/test mode ONLY",
+    "- [ ] Order confirmation page reviewed",
+    "- [ ] Admin orders page reviewed",
+    "- [ ] Test email reviewed (no real customer address)",
+    "- [ ] Cloudinary test upload reviewed safely",
+    "- [ ] Refund/cancel path reviewed manually",
+    "- [ ] Database backup exists before order-flow test",
+    "",
+    "### Stripe Test Mode Instructions",
+    "",
+    "> **Use test mode only.** Stripe live keys must not be used in staging.",
+    "",
+    "| Scenario | Card | Expiry | CVC |",
+    "|----------|------|--------|-----|",
+    "| Success | `4242 4242 4242 4242` | Any future | Any |",
+    "| Insufficient funds | `4000 0000 0000 9995` | Any future | Any |",
+    "| Requires auth | `4000 0025 0000 3155` | Any future | Any |",
+    "| Declined | `4000 0000 0000 0002` | Any future | Any |",
+    "",
+    `Staging webhook: \`https://${STAGING_DOMAIN}/api/webhooks/stripe\``,
+    "",
+    "### Safety Rules",
+    "",
+    "- Never use Stripe live keys (sk_live_ / pk_live_) in staging",
+    "- Never use real customer email addresses for test email delivery",
+    "- Never upload destructive assets to Cloudinary during testing",
+    "- Never create production orders during staging tests",
+    "- Never charge real cards",
+    "- Ecommerce harness HTTP checks are GET-only — no POST to checkout or order endpoints",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -953,6 +1032,7 @@ export function generateHandoffMarkdown(
     buildPermissionsSection(),
     buildDisasterRecoverySection(),
     buildStagingTrialSection(),
+    buildEcommerceTestProofSection(),
     buildServices(report),
     buildFooter(),
   ]

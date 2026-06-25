@@ -13,6 +13,7 @@ import Link                                   from "next/link";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { TrialMigrationPanel }               from "@/components/projects/trial-migration-panel";
+import { EcommerceTestPanel }               from "@/components/projects/ecommerce-test-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
@@ -86,6 +87,10 @@ export default async function ProjectMigrationPage({ params }: Props) {
               <div className="rounded-xl border bg-card p-4">
                 <TrialMigrationPanel projectId={projectId} />
               </div>
+              {/* Sprint 62: Ecommerce test harness */}
+              <div className="rounded-xl border bg-card p-4">
+                <EcommerceTestPanel projectId={projectId} />
+              </div>
             </>
           ) : (
             <details className="group">
@@ -99,6 +104,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
                 <SardarMigrationRunbookPanel projectId={projectId} />
                 <div className="rounded-xl border bg-card p-4">
                   <TrialMigrationPanel projectId={projectId} />
+                </div>
+                <div className="rounded-xl border bg-card p-4">
+                  <EcommerceTestPanel projectId={projectId} />
                 </div>
               </div>
             </details>
