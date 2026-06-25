@@ -674,6 +674,70 @@ function buildProductionCutover(_r: EnrichedMigrationReport): string {
   return lines.join("\n") + "\n";
 }
 
+// ── Sprint 61: Staging Trial Migration section ────────────────────────────────
+
+function buildStagingTrialSection(): string {
+  const STAGING_SLUG   = "sardar-security-staging";
+  const STAGING_DOMAIN = "staging-sardar-security-project.doorstepmanchester.uk";
+
+  const lines: string[] = [
+    "## Sardar Staging Trial Migration",
+    "",
+    "> Complete the staging trial migration using the **Migration → Staging Trial** panel.",
+    "> All stages must pass and manual evidence items must be confirmed before production cutover.",
+    "> This trial does NOT modify live Sardar routing, apply nginx changes, run DB migrations, or restart PM2.",
+    "",
+    `| Field | Value |`,
+    `|-------|-------|`,
+    `| Staging slug | \`${STAGING_SLUG}\` |`,
+    `| Staging domain | \`${STAGING_DOMAIN}\` |`,
+    `| Staging trial action | Migration → Staging Trial Migration |`,
+    "",
+    "### Trial Stage Checklist",
+    "",
+    "| Stage | Description |",
+    "|-------|-------------|",
+    "| Source Intake | Source imported, structure detected, Replit markers patched |",
+    "| Staging Import | Staging project exists, source deployed to staging environment |",
+    "| Services | API service and static frontend service configured |",
+    "| Env / Secrets | Staging env vars configured (test/sandbox values only) |",
+    "| Database | Staging DB URL separate from production, schema reviewed |",
+    "| Routing | Route preview correct — /api/* → API, /* → frontend SPA |",
+    "| Dry Run | Deployment dry run executed and passed |",
+    "| External Services | Stripe test mode, Cloudinary, email all verified in staging |",
+    "| Backup Drill | Backup integrity verified, restore drill reviewed |",
+    "| Smoke Checks | Root URL 200, /api/healthz 200, SPA fallback 200 (RUN STAGING CHECKS) |",
+    "| Manual Review | All evidence items manually confirmed |",
+    "",
+    "### Smoke Check Confirmation",
+    "",
+    "Type `RUN STAGING CHECKS` in the Staging Trial panel to run HTTP checks against the staging domain.",
+    "",
+    "- Checks: `/`, `/api/healthz`, `/non-existent-spa-route`",
+    "- Expected: all return HTTP 200 (or 3xx redirect for /)",
+    "- DNS/connection failures return a warning, not a blocker — staging may not be deployed yet",
+    "",
+    "### Mark Trial Complete",
+    "",
+    "Once all stages pass and the manual evidence checklist is confirmed:",
+    "",
+    "Type `MARK TRIAL COMPLETE` in the Staging Trial Migration panel.",
+    "",
+    "> Only then proceed to production cutover.",
+    "",
+    "### Safety Rules",
+    "",
+    "- Staging trial does NOT route production traffic",
+    "- Staging trial does NOT apply production nginx config",
+    "- Staging trial does NOT run production DB migrations",
+    "- Staging trial does NOT restart live PM2 services",
+    "- Staging env must use separate DB from production",
+    "- No production secrets copied to staging — use test/sandbox values only",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export type HandoffOptions = {
@@ -888,6 +952,7 @@ export function generateHandoffMarkdown(
     buildSourceIntakeSummary(report),
     buildPermissionsSection(),
     buildDisasterRecoverySection(),
+    buildStagingTrialSection(),
     buildServices(report),
     buildFooter(),
   ]

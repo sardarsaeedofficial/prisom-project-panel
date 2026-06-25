@@ -12,6 +12,7 @@ import { Database }                           from "lucide-react";
 import Link                                   from "next/link";
 import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar-migration-runbook-panel";
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
+import { TrialMigrationPanel }               from "@/components/projects/trial-migration-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
@@ -76,11 +77,15 @@ export default async function ProjectMigrationPage({ params }: Props) {
           {/* Sprint 53: Deployment dry run — run before promotion */}
           <DeploymentDryRunPanel projectId={projectId} compact />
 
-          {/* Sprint 50: Sardar runbook + Sprint 51: Staging import — shown prominently for Sardar projects */}
+          {/* Sprint 50: Sardar runbook + Sprint 51: Staging import + Sprint 61: Trial migration */}
           {isSardar ? (
             <>
               <StagingImportPanel projectId={projectId} />
               <SardarMigrationRunbookPanel projectId={projectId} />
+              {/* Sprint 61: Full staging trial migration panel */}
+              <div className="rounded-xl border bg-card p-4">
+                <TrialMigrationPanel projectId={projectId} />
+              </div>
             </>
           ) : (
             <details className="group">
@@ -92,6 +97,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
               <div className="mt-2 space-y-4">
                 <StagingImportPanel projectId={projectId} />
                 <SardarMigrationRunbookPanel projectId={projectId} />
+                <div className="rounded-xl border bg-card p-4">
+                  <TrialMigrationPanel projectId={projectId} />
+                </div>
               </div>
             </details>
           )}

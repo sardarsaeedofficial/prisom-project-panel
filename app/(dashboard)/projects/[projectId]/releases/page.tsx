@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch, Database,
+  RotateCcw, ChevronLeft, GitBranch, Database, Flag,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -147,6 +147,23 @@ export default async function ReleasesPage({ params }: Props) {
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
               Go to Backups →
+            </Link>
+          </div>
+
+          {/* ── Sprint 61: Staging Trial Migration compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Flag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Sardar Staging Trial Migration</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Complete the staging trial migration before production cutover — smoke checks, env, DB, routing, and backup drill must all pass.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/migration`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Migration →
             </Link>
           </div>
 

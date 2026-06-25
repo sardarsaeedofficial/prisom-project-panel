@@ -37,7 +37,7 @@ import { ProjectServicesPanel }  from "@/components/projects/project-services-pa
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, Flag } from "lucide-react";
 import Link                         from "next/link";
 import { generateProjectRouteMap }  from "@/lib/routing/project-route-planner";
 import { generateNginxFromRouteMap } from "@/lib/routing/nginx-route-generator";
@@ -314,6 +314,23 @@ export default async function ProjectPublishingPage({ params }: Props) {
               className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
             >
               Go to Backups →
+            </Link>
+          </div>
+
+          {/* ── Sprint 61: Staging Trial Migration compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Flag className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Sardar Staging Trial Migration</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Run a guided staging trial before production cutover — smoke checks, env, DB, routing, and backup drill.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/migration`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Migration →
             </Link>
           </div>
 
