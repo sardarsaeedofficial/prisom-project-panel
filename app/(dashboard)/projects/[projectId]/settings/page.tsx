@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ProjectSettingsForm, type ProjectFormValues } from "@/components/projects/project-settings-form";
 import { OperatorRunbookPanel } from "@/components/projects/operator-runbook-panel";
+import { ProjectProfileCard }  from "@/components/projects/project-profile-card";
 import { getProjectById } from "@/lib/data/projects";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -56,6 +57,11 @@ export default async function ProjectSettingsPage({ params }: Props) {
         <PageHeader title="Settings" description={`Configure ${project.name}`} />
 
         <div className="space-y-8">
+          {/* Sprint 71: Project Migration Profile */}
+          <div className="max-w-2xl">
+            <ProjectProfileCard projectId={projectId} />
+          </div>
+
           <ProjectSettingsForm projectId={projectId} initialValues={formValues} />
 
           {/* Sprint 67: Project Operations Guide */}

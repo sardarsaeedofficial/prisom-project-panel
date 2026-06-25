@@ -31,6 +31,7 @@ import { ProductionExecutionPanel }           from "@/components/projects/produc
 import { ContextualHelpCard }                 from "@/components/projects/contextual-help-card";
 import { ReleaseCandidatePanel }              from "@/components/projects/release-candidate-panel";
 import { QaVerificationPanel }               from "@/components/projects/qa-verification-panel";
+import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -137,6 +138,9 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* Sprint 71: Project Migration Profile */}
+          <ProjectProfileCard projectId={projectId} />
 
           {/* Help card */}
           <ContextualHelpCard

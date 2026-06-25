@@ -20,6 +20,7 @@ import { ExternalServicesReadinessPanel }     from "@/components/projects/extern
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
 import { db }                                 from "@/lib/db";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
+import { ProjectProfileCard }                from "@/components/projects/project-profile-card";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -47,6 +48,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           description="Analyze Replit-style projects and prepare them for VPS deployment with Prisom."
         />
         <div className="max-w-3xl space-y-6">
+          {/* Sprint 71: Project Migration Profile */}
+          <ProjectProfileCard projectId={projectId} />
+
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />
 
