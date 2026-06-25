@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound }     from "next/navigation";
 import { db }           from "@/lib/db";
+import Link             from "next/link";
 import {
   DashboardShell,
   PageHeader,
@@ -35,6 +36,19 @@ export default async function ProjectOperationsPage({ params }: Props) {
           description={`Track deploys, backups, restores, and patch operations for ${project.name}. Active operations are shown in the banner above.`}
         />
         <DebugSummaryPanel projectId={projectId} compact context="operation" />
+
+        {/* Sprint 65: production apply/rollback audit note */}
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">Production Cutover Audit: </span>
+          All production apply and rollback requests from the{" "}
+          <Link href={`/projects/${projectId}/releases`} className="text-primary hover:underline">
+            Releases → Production Cutover Execution Guard
+          </Link>{" "}
+          are recorded as audit events (
+          <code className="font-mono">production_execution.cutover_apply_requested</code>,{" "}
+          <code className="font-mono">production_execution.rollback_requested</code>) and will appear in the operation history below.
+        </div>
+
         <ProjectOperationsPanel projectId={projectId} />
       </DashboardShell>
     </div>

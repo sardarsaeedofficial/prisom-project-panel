@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy, Container,
+  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy, Container, ShieldCheck,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -27,6 +27,7 @@ import { ProductionCutoverPanel }             from "@/components/projects/produc
 import { GoLiveRegressionChecklist }          from "@/components/projects/go-live-regression-checklist";
 import { FinalGoLiveControlRoom }             from "@/components/projects/final-go-live-control-room";
 import { DebugSummaryPanel }                  from "@/components/projects/debug-summary-panel";
+import { ProductionExecutionPanel }           from "@/components/projects/production-execution-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -185,6 +186,17 @@ export default async function ReleasesPage({ params }: Props) {
             </Link>
           </div>
 
+          {/* ── Sprint 65: Production Execution Guard compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Production Cutover Execution Guard</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Final guarded workflow for route apply, smoke checks, and rollback confirmation.
+              </p>
+            </div>
+          </div>
+
           {/* ── Sprint 64: Staging Deployment compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
             <Container className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -200,6 +212,11 @@ export default async function ReleasesPage({ params }: Props) {
             >
               Go to Migration →
             </Link>
+          </div>
+
+          {/* ── Sprint 65: Production Cutover Execution Guard ── */}
+          <div className="rounded-xl border bg-card p-4">
+            <ProductionExecutionPanel projectId={projectId} />
           </div>
 
           {/* ── Sprint 63: Final Go-Live Control Room ── */}

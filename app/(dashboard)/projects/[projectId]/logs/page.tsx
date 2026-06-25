@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound }     from "next/navigation";
 import { db }           from "@/lib/db";
+import Link             from "next/link";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ProjectLogsCenter } from "@/components/projects/project-logs-center";
 import { discoverLogSources } from "@/lib/logs/project-log-sources";
@@ -42,6 +43,17 @@ export default async function ProjectLogsPage({ params, searchParams }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
+      {/* Sprint 65: smoke check failure debug hint */}
+      <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95">
+        <p className="text-xs text-muted-foreground">
+          Debugging a production cutover smoke check failure?{" "}
+          <Link href={`/projects/${projectId}/releases`} className="text-primary hover:underline">
+            Run smoke checks in the Production Cutover Execution Guard →
+          </Link>
+          {" "}Check nginx error logs (<code className="font-mono text-xs">sudo tail -f /var/log/nginx/error.log</code>) and PM2 logs below.
+        </p>
+      </div>
+
       {/* Debug summary panel — collapsible, sits above the logs viewer */}
       <div className="flex-shrink-0 border-b px-4 py-3 bg-background/95">
         <details>
