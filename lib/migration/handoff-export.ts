@@ -1058,6 +1058,78 @@ function buildFinalGoLiveGateSection(): string {
   return lines.join("\n");
 }
 
+// ── Sprint 64: Staging Deployment Proof summary section ──────────────────────
+
+function buildStagingDeploymentProofSection(): string {
+  const STAGING_SLUG   = "sardar-security-staging";
+  const STAGING_DOMAIN = "staging-sardar-security-project.doorstepmanchester.uk";
+
+  const lines: string[] = [
+    "## Staging Deployment Proof (Sprint 64)",
+    "",
+    `> **Staging slug:** \`${STAGING_SLUG}\``,
+    `> **Staging domain:** \`https://${STAGING_DOMAIN}\``,
+    "> **Generate the full proof on the Migration page** — Staging Deployment panel.",
+    "> No secrets are included in this section.",
+    "",
+    "### Sardar Service Plan",
+    "",
+    "| Service | Kind | Root | Build Command | Route |",
+    "|---------|------|------|---------------|-------|",
+    "| `api`   | API     | `artifacts/api-server`      | `pnpm --filter @workspace/api-server run build`      | `/api/*` |",
+    "| `web`   | Static  | `artifacts/sardar-security` | `pnpm --filter @workspace/sardar-security run build` | `/*`     |",
+    "",
+    "### Source Preparation (plan-only)",
+    "",
+    "```bash",
+    "# Install",
+    "pnpm install --frozen-lockfile",
+    "",
+    "# Build",
+    "pnpm --filter @workspace/api-server run build",
+    "pnpm --filter @workspace/sardar-security run build",
+    "```",
+    "",
+    "### Staging Smoke Checks",
+    "",
+    "| Check | URL |",
+    "|-------|-----|",
+    `| Root | \`https://${STAGING_DOMAIN}/\` |`,
+    `| API health | \`https://${STAGING_DOMAIN}/api/healthz\` |`,
+    `| SPA fallback | \`https://${STAGING_DOMAIN}/non-existent-spa-route\` |`,
+    "",
+    "### Staging Evidence Checklist",
+    "",
+    "- [ ] Staging project target reviewed",
+    "- [ ] Staging source path reviewed",
+    "- [ ] Production source untouched",
+    "- [ ] Staging env placeholders reviewed",
+    "- [ ] Staging DATABASE_URL uses staging DB",
+    "- [ ] API service command reviewed",
+    "- [ ] Static frontend command reviewed",
+    "- [ ] /api/* route preview reviewed",
+    "- [ ] /* static route preview reviewed",
+    "- [ ] Build dry run reviewed",
+    "- [ ] Staging root smoke check reviewed",
+    "- [ ] Staging API health reviewed",
+    "- [ ] Staging SPA fallback reviewed",
+    "- [ ] Logs reviewed after dry run",
+    "- [ ] Staging marked ready by owner",
+    "",
+    "### Safety Rules",
+    "",
+    "- Do not overwrite live Sardar source (port 4100)",
+    "- Do not mutate production nginx routes",
+    "- Do not change DNS without team approval",
+    "- Do not restart live Sardar PM2 processes",
+    "- Do not run production DB migrations",
+    "- Do not copy production secrets into staging automatically",
+    "- Confirm with MARK STAGING READY when all items pass",
+    "",
+  ];
+  return lines.join("\n");
+}
+
 /**
  * Generates a Markdown handoff document from an enriched migration report.
  * Safe to share — no secret values are included.
@@ -1092,6 +1164,7 @@ export function generateHandoffMarkdown(
     buildDisasterRecoverySection(),
     buildStagingTrialSection(),
     buildEcommerceTestProofSection(),
+    buildStagingDeploymentProofSection(),
     buildFinalGoLiveGateSection(),
     buildServices(report),
     buildFooter(),

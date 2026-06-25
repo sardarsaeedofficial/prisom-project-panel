@@ -3,7 +3,7 @@ import { notFound }        from "next/navigation";
 import Link                from "next/link";
 import {
   CheckCircle2, XCircle, AlertTriangle, Clock, Rocket,
-  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy,
+  RotateCcw, ChevronLeft, GitBranch, Database, Flag, ShoppingCart, Trophy, Container,
 } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
@@ -175,6 +175,23 @@ export default async function ReleasesPage({ params }: Props) {
               <p className="text-sm font-medium">Ecommerce Test Harness</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Prove checkout, orders, and Stripe test-mode readiness on staging. No real charges — required before production go-live.
+              </p>
+            </div>
+            <Link
+              href={`/projects/${projectId}/migration`}
+              className="text-xs text-primary hover:underline whitespace-nowrap mt-0.5"
+            >
+              Go to Migration →
+            </Link>
+          </div>
+
+          {/* ── Sprint 64: Staging Deployment compact card ── */}
+          <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
+            <Container className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Sardar Staging Deployment</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Plan, verify, and export a staging deployment proof before production cutover.
               </p>
             </div>
             <Link

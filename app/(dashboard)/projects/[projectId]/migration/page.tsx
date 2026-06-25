@@ -14,6 +14,7 @@ import { SardarMigrationRunbookPanel }        from "@/components/projects/sardar
 import { StagingImportPanel }                 from "@/components/projects/staging-import-panel";
 import { TrialMigrationPanel }               from "@/components/projects/trial-migration-panel";
 import { EcommerceTestPanel }               from "@/components/projects/ecommerce-test-panel";
+import { StagingDeploymentPanel }            from "@/components/projects/staging-deployment-panel";
 import { DeploymentDryRunPanel }              from "@/components/projects/deployment-dry-run-panel";
 import { ExternalServicesReadinessPanel }     from "@/components/projects/external-services-readiness-panel";
 import { ProductionCutoverPanel }             from "@/components/projects/production-cutover-panel";
@@ -91,6 +92,10 @@ export default async function ProjectMigrationPage({ params }: Props) {
               <div className="rounded-xl border bg-card p-4">
                 <EcommerceTestPanel projectId={projectId} />
               </div>
+              {/* Sprint 64: Staging Deployment */}
+              <div className="rounded-xl border bg-card p-4">
+                <StagingDeploymentPanel projectId={projectId} />
+              </div>
               {/* Sprint 63: Final Go-Live Control Room compact card */}
               <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
                 <Trophy className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -123,6 +128,10 @@ export default async function ProjectMigrationPage({ params }: Props) {
                 </div>
                 <div className="rounded-xl border bg-card p-4">
                   <EcommerceTestPanel projectId={projectId} />
+                </div>
+                {/* Sprint 64: Staging Deployment */}
+                <div className="rounded-xl border bg-card p-4">
+                  <StagingDeploymentPanel projectId={projectId} />
                 </div>
                 {/* Sprint 63: Final Go-Live Control Room compact card */}
                 <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">
