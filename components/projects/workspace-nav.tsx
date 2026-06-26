@@ -41,6 +41,7 @@ import {
   History,
   Tag,
   BookOpen,
+  HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -121,8 +122,9 @@ export function WorkspaceNav({ projectId }: WorkspaceNavProps) {
     {
       label: "Advanced",
       items: [
-        { label: "Runbook",  href: `${base}/runbook`,  icon: BookOpen  },
-        { label: "Settings", href: `${base}/settings`, icon: Settings  },
+        { label: "Help Center", href: `${base}/help`,     icon: HelpCircle },
+        { label: "Runbook",     href: `${base}/runbook`,  icon: BookOpen   },
+        { label: "Settings",    href: `${base}/settings`, icon: Settings   },
       ],
     },
   ];

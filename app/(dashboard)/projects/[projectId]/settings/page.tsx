@@ -29,6 +29,7 @@ import { DeployVerificationPanel }      from "@/components/projects/deploy-verif
 import { LaunchExecutionChecklistPanel } from "@/components/projects/launch-execution-checklist-panel";
 import { FinalLiveVerificationPanel }    from "@/components/projects/final-live-verification-panel";
 import { GoNoGoEvidencePanel }           from "@/components/projects/go-no-go-evidence-panel";
+import { HelpCenterPanel }               from "@/components/projects/help-center-panel";
 import { getProjectById } from "@/lib/data/projects";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -97,6 +98,8 @@ export default async function ProjectSettingsPage({ params }: Props) {
             {/* Sprint 79: Final Live Verification + Go/No-Go Evidence compact cards */}
             <FinalLiveVerificationPanel projectId={projectId} compact />
             <GoNoGoEvidencePanel projectId={projectId} compact />
+            {/* Sprint 81: Help Center compact card */}
+            <HelpCenterPanel projectId={projectId} compact />
           </div>
 
           <ProjectSettingsForm projectId={projectId} initialValues={formValues} />

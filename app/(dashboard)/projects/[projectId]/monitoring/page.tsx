@@ -23,6 +23,7 @@ import { DeployVerificationPanel }   from "@/components/projects/deploy-verifica
 import { LaunchExecutionChecklistPanel } from "@/components/projects/launch-execution-checklist-panel";
 import { FinalLiveVerificationPanel }    from "@/components/projects/final-live-verification-panel";
 import { GoNoGoEvidencePanel }           from "@/components/projects/go-no-go-evidence-panel";
+import { HelpCenterPanel }               from "@/components/projects/help-center-panel";
 
 export const metadata: Metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -92,6 +93,8 @@ export default async function ProjectMonitoringPage({ params }: Props) {
           {/* Sprint 79: Final Live Verification + Go/No-Go Evidence compact cards */}
           <FinalLiveVerificationPanel projectId={projectId} compact />
           <GoNoGoEvidencePanel projectId={projectId} compact />
+          {/* Sprint 81: Help Center compact card */}
+          <HelpCenterPanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>

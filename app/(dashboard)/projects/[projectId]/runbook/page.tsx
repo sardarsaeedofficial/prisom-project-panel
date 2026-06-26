@@ -13,6 +13,7 @@ import { StopBuildGatePanel }              from "@/components/projects/stop-buil
 import { LaunchExecutionChecklistPanel }   from "@/components/projects/launch-execution-checklist-panel";
 import { GoNoGoEvidencePanel }             from "@/components/projects/go-no-go-evidence-panel";
 import { FinalLiveVerificationPanel }      from "@/components/projects/final-live-verification-panel";
+import { HelpCenterPanel }                 from "@/components/projects/help-center-panel";
 import { Card, CardContent }      from "@/components/ui/card";
 import { db }                     from "@/lib/db";
 
@@ -89,6 +90,8 @@ export default async function ProjectRunbookPage({ params }: Props) {
 
           {/* Sprint 79: Go/No-Go Evidence Pack — full panel on Runbook */}
           <GoNoGoEvidencePanel projectId={projectId} />
+          {/* Sprint 81: Help Center compact card */}
+          <HelpCenterPanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>

@@ -59,6 +59,7 @@ import { DeployVerificationPanel }           from "@/components/projects/deploy-
 import { LaunchExecutionChecklistPanel }     from "@/components/projects/launch-execution-checklist-panel";
 import { FinalLiveVerificationPanel }        from "@/components/projects/final-live-verification-panel";
 import { GoNoGoEvidencePanel }               from "@/components/projects/go-no-go-evidence-panel";
+import { HelpCenterPanel }                   from "@/components/projects/help-center-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -399,6 +400,8 @@ export default async function ProjectPublishingPage({ params }: Props) {
           {/* ── Sprint 79: Final Live Verification + Go/No-Go Evidence compact cards ── */}
           <FinalLiveVerificationPanel projectId={projectId} compact />
           <GoNoGoEvidencePanel projectId={projectId} compact />
+          {/* ── Sprint 81: Help Center compact card ── */}
+          <HelpCenterPanel projectId={projectId} compact />
 
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">

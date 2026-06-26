@@ -44,6 +44,7 @@ import { DeployVerificationPanel }          from "@/components/projects/deploy-v
 import { LaunchExecutionChecklistPanel }    from "@/components/projects/launch-execution-checklist-panel";
 import { FinalLiveVerificationPanel }       from "@/components/projects/final-live-verification-panel";
 import { GoNoGoEvidencePanel }              from "@/components/projects/go-no-go-evidence-panel";
+import { HelpCenterPanel }                  from "@/components/projects/help-center-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -156,6 +157,9 @@ export default async function ReleasesPage({ params }: Props) {
 
           {/* Sprint 79: Go/No-Go Evidence Pack */}
           <GoNoGoEvidencePanel projectId={projectId} />
+
+          {/* Sprint 81: Help Center compact card */}
+          <HelpCenterPanel projectId={projectId} compact />
 
           {/* Sprint 77: Final Readiness Audit */}
           <FinalReadinessAuditPanel projectId={projectId} />
