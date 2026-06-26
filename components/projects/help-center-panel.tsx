@@ -4,9 +4,15 @@ import { useState, useTransition, useRef } from "react";
 import Link                                 from "next/link";
 import {
   generateProjectKnowledgeBaseAction,
+  generateProjectDeepMapAction,
+  generateOperatorSopLibraryAction,
+  generateTroubleshootingPlaybookAction,
   exportProjectKnowledgeBaseAction,
   exportProjectFileInventoryAction,
   exportProjectMethodsAndResourcesAction,
+  exportProjectDeepMapAction,
+  exportOperatorSopLibraryAction,
+  exportTroubleshootingPlaybookAction,
 }                                           from "@/app/actions/help-center";
 import { CopyDownloadButton }               from "@/components/common/copy-download-button";
 import { ActionLoadingButton }             from "@/components/common/action-loading-button";
@@ -16,12 +22,16 @@ import {
 }                                           from "@/components/ui/card";
 import {
   BookOpen, FileText, FolderOpen, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp, ShieldCheck,
+  ChevronDown, ChevronUp, ShieldCheck, Map, ClipboardList,
+  Wrench, Download,
 }                                           from "lucide-react";
+import type { ProjectHelpCenterReport, HelpKnowledgeSection } from "@/lib/help-center/help-center-types";
+import type { HelpProjectDeepMap }          from "@/lib/help-center/help-project-map-types";
+import type { HelpSopLibrary, HelpSop }     from "@/lib/help-center/help-sop-types";
 import type {
-  ProjectHelpCenterReport,
-  HelpKnowledgeSection,
-} from "@/lib/help-center/help-center-types";
+  HelpTroubleshootingLibrary,
+  HelpTroubleshootingPlaybook,
+}                                           from "@/lib/help-center/help-troubleshooting-types";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -49,12 +59,18 @@ const CATEGORY_LABEL: Record<HelpKnowledgeSection["category"], string> = {
   troubleshooting: "Troubleshooting",
 };
 
+const SEVERITY_VARIANT = {
+  critical: "destructive" as const,
+  high:     "error"       as const,
+  medium:   "warning"     as const,
+  low:      "secondary"   as const,
+};
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function SectionRow({ section }: { section: HelpKnowledgeSection }) {
   const [open, setOpen] = useState(false);
   const label = CATEGORY_LABEL[section.category] ?? section.category;
-
   return (
     <div className="border rounded-md overflow-hidden">
       <button
@@ -66,10 +82,7 @@ function SectionRow({ section }: { section: HelpKnowledgeSection }) {
           <Badge variant="secondary" className="text-[10px] shrink-0">{label}</Badge>
           <span className="text-sm font-medium truncate">{section.title}</span>
         </div>
-        {open
-          ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        }
+        {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
       </button>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t bg-muted/20">
@@ -87,15 +100,135 @@ function SectionRow({ section }: { section: HelpKnowledgeSection }) {
   );
 }
 
+function SopCard({ sop }: { sop: HelpSop }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border rounded-md overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-start justify-between px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <Badge variant="outline" className="text-[10px] shrink-0">
+              {sop.category.replace(/_/g, " ")}
+            </Badge>
+            <span className="text-sm font-medium truncate">{sop.title}</span>
+          </div>
+          <p className="text-xs text-muted-foreground line-clamp-1">{sop.summary}</p>
+        </div>
+        {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1 border-t bg-muted/20 space-y-2">
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">Steps</p>
+            <ul className="space-y-0.5">
+              {sop.steps.map((s, i) => (
+                <li key={i} className="text-xs">{s}</li>
+              ))}
+            </ul>
+          </div>
+          {sop.commands.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">Commands</p>
+              <pre className="text-[10px] bg-muted rounded px-2 py-1 overflow-x-auto font-mono">
+                {sop.commands.join("\n")}
+              </pre>
+            </div>
+          )}
+          {sop.safetyNotes.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-yellow-600 mb-1">Safety</p>
+              {sop.safetyNotes.map((n, i) => (
+                <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">⚠ {n}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlaybookCard({ pb }: { pb: HelpTroubleshootingPlaybook }) {
+  const [open, setOpen] = useState(false);
+  const svVariant = SEVERITY_VARIANT[pb.severity] ?? "secondary";
+  return (
+    <div className="border rounded-md overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-start justify-between px-3 py-2 text-left hover:bg-muted/50 transition-colors"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-0.5">
+            <Badge variant={svVariant} className="text-[10px] shrink-0">
+              {pb.severity.toUpperCase()}
+            </Badge>
+            <span className="text-sm font-medium truncate">{pb.title}</span>
+          </div>
+          <p className="text-xs text-muted-foreground line-clamp-1">{pb.symptoms[0]}</p>
+        </div>
+        {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1 border-t bg-muted/20 space-y-2">
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">Symptoms</p>
+            <ul className="space-y-0.5">{pb.symptoms.map((s, i) => <li key={i} className="text-xs">• {s}</li>)}</ul>
+          </div>
+          <div>
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">Checks</p>
+            <ul className="space-y-0.5">{pb.checks.map((c, i) => <li key={i} className="text-xs">{c}</li>)}</ul>
+          </div>
+          {pb.commands.length > 0 && (
+            <pre className="text-[10px] bg-muted rounded px-2 py-1 overflow-x-auto font-mono">
+              {pb.commands.join("\n")}
+            </pre>
+          )}
+          {pb.safeFixes.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-green-600 mb-1">Safe fixes</p>
+              {pb.safeFixes.map((f, i) => <p key={i} className="text-xs text-green-700 dark:text-green-400">✅ {f}</p>)}
+            </div>
+          )}
+          {pb.unsafeFixes.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-destructive mb-1">Restricted (escalate first)</p>
+              {pb.unsafeFixes.map((f, i) => <p key={i} className="text-xs text-destructive">{f}</p>)}
+            </div>
+          )}
+          {pb.escalation.length > 0 && (
+            <div>
+              <p className="text-[10px] font-medium text-yellow-600 mb-1">Escalation</p>
+              {pb.escalation.map((e, i) => <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">🔺 {e}</p>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
+type Tab = "sections" | "map" | "sops" | "troubleshooting" | "exports" | "warnings";
+
 export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
-  const [report,     setReport]     = useState<ProjectHelpCenterReport | null>(null);
-  const [error,      setError]      = useState("");
-  const [kbMd,       setKbMd]       = useState("");
-  const [invMd,      setInvMd]      = useState("");
-  const [methodsMd,  setMethodsMd]  = useState("");
-  const [activeTab,  setActiveTab]  = useState<"sections" | "exports" | "warnings">("sections");
+  const [report,    setReport]    = useState<ProjectHelpCenterReport | null>(null);
+  const [deepMap,   setDeepMap]   = useState<HelpProjectDeepMap | null>(null);
+  const [sopLib,    setSopLib]    = useState<HelpSopLibrary | null>(null);
+  const [troubleLib, setTroubleLib] = useState<HelpTroubleshootingLibrary | null>(null);
+  const [error,     setError]     = useState("");
+  const [kbMd,      setKbMd]      = useState("");
+  const [invMd,     setInvMd]     = useState("");
+  const [methodsMd, setMethodsMd] = useState("");
+  const [mapMd,     setMapMd]     = useState("");
+  const [sopMd,     setSopMd]     = useState("");
+  const [troubleMd, setTroubleMd] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("sections");
 
   const [isPending, startTransition] = useTransition();
   const [expPending, startExp]       = useTransition();
@@ -116,7 +249,7 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
             <Badge variant="secondary" className="text-[10px] shrink-0">Read-only</Badge>
           </div>
           <CardDescription className="text-xs mt-0.5">
-            Search files, methods, routes, exports, and resources. No secrets included.
+            Knowledge base, SOPs, troubleshooting playbooks, deep project map. No secrets.
           </CardDescription>
         </CardHeader>
         <CardContent className="pb-4 px-4">
@@ -132,35 +265,52 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
     );
   }
 
-  // ── Generate ──────────────────────────────────────────────────────────────
+  // ── Generate all ──────────────────────────────────────────────────────────
 
   function handleGenerate() {
     if (flight.current) return;
     flight.current = true;
     setError("");
     setReport(null);
-    setKbMd("");
-    setInvMd("");
-    setMethodsMd("");
+    setDeepMap(null);
+    setSopLib(null);
+    setTroubleLib(null);
+    setKbMd(""); setInvMd(""); setMethodsMd(""); setMapMd(""); setSopMd(""); setTroubleMd("");
 
     startTransition(async () => {
       try {
-        const res = await generateProjectKnowledgeBaseAction({ projectId });
-        if (!res.ok) { setError(res.error); return; }
-        setReport(res.data);
+        const [kbRes, mapRes, sopRes, troubleRes] = await Promise.all([
+          generateProjectKnowledgeBaseAction({ projectId }),
+          generateProjectDeepMapAction({ projectId }),
+          generateOperatorSopLibraryAction({ projectId }),
+          generateTroubleshootingPlaybookAction({ projectId }),
+        ]);
 
-        // Pre-fetch all three exports
+        if (kbRes.ok)     setReport(kbRes.data);        else setError(kbRes.error);
+        if (mapRes.ok)    setDeepMap(mapRes.data);
+        if (sopRes.ok)    setSopLib(sopRes.data);
+        if (troubleRes.ok) setTroubleLib(troubleRes.data);
+
+        if (!kbRes.ok) return;
+
+        // Pre-fetch all 6 exports
         expFlight.current = true;
         startExp(async () => {
           try {
-            const [kb, inv, methods] = await Promise.all([
+            const [kb, inv, methods, map, sop, trouble] = await Promise.all([
               exportProjectKnowledgeBaseAction({ projectId }),
               exportProjectFileInventoryAction({ projectId }),
               exportProjectMethodsAndResourcesAction({ projectId }),
+              exportProjectDeepMapAction({ projectId }),
+              exportOperatorSopLibraryAction({ projectId }),
+              exportTroubleshootingPlaybookAction({ projectId }),
             ]);
             if (kb.ok)      setKbMd(kb.data.markdown ?? "");
             if (inv.ok)     setInvMd(inv.data.markdown ?? "");
             if (methods.ok) setMethodsMd(methods.data.markdown ?? "");
+            if (map.ok)     setMapMd(map.data.markdown ?? "");
+            if (sop.ok)     setSopMd(sop.data.markdown ?? "");
+            if (trouble.ok) setTroubleMd(trouble.data.markdown ?? "");
           } finally {
             expFlight.current = false;
           }
@@ -175,6 +325,15 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const TABS: Array<{ key: Tab; label: string; icon: React.ReactNode }> = [
+    { key: "sections",       label: report ? `Sections (${report.sections.length})` : "Sections",          icon: <BookOpen className="h-3 w-3" /> },
+    { key: "map",            label: deepMap ? `Deep Map (${deepMap.routeMap.length} routes)` : "Deep Map",  icon: <Map className="h-3 w-3" /> },
+    { key: "sops",           label: sopLib ? `SOPs (${sopLib.sops.length})` : "SOPs",                       icon: <ClipboardList className="h-3 w-3" /> },
+    { key: "troubleshooting",label: troubleLib ? `Troubleshooting (${troubleLib.playbooks.length})` : "Troubleshooting", icon: <Wrench className="h-3 w-3" /> },
+    { key: "exports",        label: "Exports",                                                               icon: <Download className="h-3 w-3" /> },
+    { key: "warnings",       label: report ? `Warnings (${report.warnings.length})` : "Warnings",           icon: <AlertTriangle className="h-3 w-3" /> },
+  ];
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -185,7 +344,7 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
               <CardTitle className="text-base">Project Help Center</CardTitle>
             </div>
             <CardDescription className="mt-1 text-xs">
-              Generates a living README and searchable knowledge base from the panel codebase.
+              Generates knowledge base, deep project map, operator SOPs, and troubleshooting playbooks.
               Read-only — no secrets exposed, no production mutation.
             </CardDescription>
           </div>
@@ -202,35 +361,33 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
         {/* Safety note */}
         <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2">
           <ShieldCheck className="h-3.5 w-3.5 text-green-600 mt-0.5 shrink-0" />
-          <span>Read-only documentation only. No secret values included. No .env, node_modules, .git, or backup paths scanned.</span>
+          <span>Read-only documentation only. No secrets included. No .env, node_modules, .git, or backup paths scanned.</span>
         </div>
 
         {/* Generate button */}
         <ActionLoadingButton
           type="button"
           loading={isPending}
-          loadingLabel="Generating knowledge base…"
+          loadingLabel="Generating all documentation…"
           onClick={handleGenerate}
           variant="outline"
         >
           <BookOpen className="h-4 w-4" />
-          {report ? "Regenerate Knowledge Base" : "Generate Knowledge Base"}
+          {report ? "Regenerate All Documentation" : "Generate All Documentation"}
         </ActionLoadingButton>
 
-        {error && (
-          <p className="text-xs text-destructive">{error}</p>
-        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
 
         {/* Report summary */}
         {report && (
           <>
-            {/* Stats row */}
+            {/* Stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: "Files scanned", value: report.fileCount },
-                { label: "Sections",      value: report.sections.length },
-                { label: "Languages",     value: Object.keys(report.languages).length },
-                { label: "Frameworks",    value: report.frameworks.length },
+                { label: "KB Sections",   value: report.sections.length },
+                { label: "SOPs",          value: sopLib?.sops.length ?? "—" },
+                { label: "Playbooks",     value: troubleLib?.playbooks.length ?? "—" },
               ].map(({ label, value }) => (
                 <div key={label} className="bg-muted/30 rounded-md px-3 py-2 text-center">
                   <p className="text-lg font-semibold">{value}</p>
@@ -249,27 +406,25 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
             )}
 
             {/* Tabs */}
-            <div className="flex gap-1 border-b pb-0">
-              {(["sections", "exports", "warnings"] as const).map((tab) => (
+            <div className="flex flex-wrap gap-1 border-b pb-0">
+              {TABS.map(({ key, label, icon }) => (
                 <button
-                  key={tab}
+                  key={key}
                   type="button"
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => setActiveTab(key)}
                   className={[
-                    "px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
-                    activeTab === tab
+                    "flex items-center gap-1 px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors",
+                    activeTab === key
                       ? "border-primary text-primary"
                       : "border-transparent text-muted-foreground hover:text-foreground",
                   ].join(" ")}
                 >
-                  {tab === "sections"  ? `Knowledge Sections (${report.sections.length})` : ""}
-                  {tab === "exports"   ? "Exports" : ""}
-                  {tab === "warnings"  ? `Warnings (${report.warnings.length})` : ""}
+                  {icon}{label}
                 </button>
               ))}
             </div>
 
-            {/* Knowledge Sections */}
+            {/* ── Knowledge Sections ── */}
             {activeTab === "sections" && (
               <div className="space-y-1.5">
                 {report.sections.map((section) => (
@@ -278,60 +433,124 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
               </div>
             )}
 
-            {/* Exports */}
+            {/* ── Deep Map ── */}
+            {activeTab === "map" && (
+              <div className="space-y-4">
+                {!deepMap ? (
+                  <p className="text-xs text-muted-foreground">Deep map not yet generated — click Regenerate.</p>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-xs font-medium mb-2">Route Map ({deepMap.routeMap.length} routes)</p>
+                      <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                        {deepMap.routeMap.map((r) => (
+                          <div key={r.route} className="border rounded-md px-3 py-2 text-xs space-y-1">
+                            <p className="font-mono font-medium">{r.route}</p>
+                            {r.panels.length > 0 && <p className="text-muted-foreground">Panels: {r.panels.slice(0, 4).join(", ")}</p>}
+                            {r.exports.length > 0 && <p className="text-muted-foreground">Exports: {r.exports.slice(0, 4).join(", ")}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium mb-2">Export Map ({deepMap.exportMap.length} known exports)</p>
+                      <div className="space-y-1 max-h-60 overflow-y-auto">
+                        {deepMap.exportMap.map((e) => (
+                          <div key={e.filename} className="flex items-start gap-2 text-xs border-b last:border-0 py-1">
+                            <FileText className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="font-mono font-medium">{e.filename}</span>
+                              <span className="text-muted-foreground ml-2">{e.purpose.slice(0, 70)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ── SOPs ── */}
+            {activeTab === "sops" && (
+              <div className="space-y-1.5">
+                {!sopLib ? (
+                  <p className="text-xs text-muted-foreground">SOPs not yet generated — click Regenerate.</p>
+                ) : (
+                  sopLib.sops.map((sop) => (
+                    <SopCard key={sop.id} sop={sop} />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* ── Troubleshooting ── */}
+            {activeTab === "troubleshooting" && (
+              <div className="space-y-1.5">
+                {!troubleLib ? (
+                  <p className="text-xs text-muted-foreground">Troubleshooting playbooks not yet generated — click Regenerate.</p>
+                ) : (
+                  troubleLib.playbooks.map((pb) => (
+                    <PlaybookCard key={pb.id} pb={pb} />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* ── Exports ── */}
             {activeTab === "exports" && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <p className="text-xs text-muted-foreground">
-                  {expPending
-                    ? "Preparing exports…"
-                    : "Download documentation exports. No secrets included."}
+                  {expPending ? "Preparing exports…" : "Download all 6 documentation exports. No secrets included."}
                 </p>
 
+                {/* Knowledge base group */}
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-xs font-medium">PROJECT_KNOWLEDGE_BASE.md</span>
-                  </div>
-                  <CopyDownloadButton
-                    content={kbMd}
-                    filename="PROJECT_KNOWLEDGE_BASE.md"
-                    label="Download Knowledge Base"
-                    mimeType="text/markdown"
-                    disabled={!kbMd || expPending}
-                  />
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Knowledge Base</p>
+                  {[
+                    { label: "PROJECT_KNOWLEDGE_BASE.md",       content: kbMd,      filename: "PROJECT_KNOWLEDGE_BASE.md",       icon: <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                    { label: "PROJECT_FILE_INVENTORY.md",        content: invMd,     filename: "PROJECT_FILE_INVENTORY.md",        icon: <FolderOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                    { label: "PROJECT_METHODS_AND_RESOURCES.md", content: methodsMd, filename: "PROJECT_METHODS_AND_RESOURCES.md", icon: <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                  ].map(({ label, content, filename, icon }) => (
+                    <div key={filename} className="flex items-center gap-2">
+                      {icon}
+                      <span className="text-xs font-mono flex-1 truncate">{label}</span>
+                      <CopyDownloadButton
+                        content={content}
+                        filename={filename}
+                        label="Download"
+                        mimeType="text/markdown"
+                        disabled={!content || expPending}
+                      />
+                    </div>
+                  ))}
                 </div>
 
+                {/* Deep map + SOPs + Troubleshooting group */}
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <FolderOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-xs font-medium">PROJECT_FILE_INVENTORY.md</span>
-                  </div>
-                  <CopyDownloadButton
-                    content={invMd}
-                    filename="PROJECT_FILE_INVENTORY.md"
-                    label="Download File Inventory"
-                    mimeType="text/markdown"
-                    disabled={!invMd || expPending}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-xs font-medium">PROJECT_METHODS_AND_RESOURCES.md</span>
-                  </div>
-                  <CopyDownloadButton
-                    content={methodsMd}
-                    filename="PROJECT_METHODS_AND_RESOURCES.md"
-                    label="Download Methods & Resources"
-                    mimeType="text/markdown"
-                    disabled={!methodsMd || expPending}
-                  />
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Operator Documentation</p>
+                  {[
+                    { label: "PROJECT_DEEP_MAP.md",        content: mapMd,     filename: "PROJECT_DEEP_MAP.md",        icon: <Map className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                    { label: "OPERATOR_SOP_LIBRARY.md",    content: sopMd,     filename: "OPERATOR_SOP_LIBRARY.md",    icon: <ClipboardList className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                    { label: "TROUBLESHOOTING_PLAYBOOK.md",content: troubleMd, filename: "TROUBLESHOOTING_PLAYBOOK.md",icon: <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> },
+                  ].map(({ label, content, filename, icon }) => (
+                    <div key={filename} className="flex items-center gap-2">
+                      {icon}
+                      <span className="text-xs font-mono flex-1 truncate">{label}</span>
+                      <CopyDownloadButton
+                        content={content}
+                        filename={filename}
+                        label="Download"
+                        mimeType="text/markdown"
+                        disabled={!content || expPending}
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* Warnings & Excluded */}
+            {/* ── Warnings ── */}
             {activeTab === "warnings" && (
               <div className="space-y-4">
                 {report.warnings.length > 0 ? (
@@ -340,8 +559,7 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
                     <ul className="space-y-1">
                       {report.warnings.map((w, i) => (
                         <li key={i} className="flex items-start gap-1.5 text-xs text-yellow-700 dark:text-yellow-400">
-                          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-                          {w}
+                          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />{w}
                         </li>
                       ))}
                     </ul>
@@ -351,7 +569,6 @@ export function HelpCenterPanel({ projectId, compact }: HelpCenterPanelProps) {
                     <CheckCircle2 className="h-3.5 w-3.5" />No scan warnings.
                   </p>
                 )}
-
                 {report.excludedPaths.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-muted-foreground">

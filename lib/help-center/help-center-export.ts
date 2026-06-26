@@ -1,5 +1,11 @@
-import { generateProjectKnowledgeBase } from "./project-knowledge-builder";
-import type { ProjectHelpCenterReport } from "./help-center-types";
+import { generateProjectKnowledgeBase }          from "./project-knowledge-builder";
+import { generateHelpProjectDeepMap }             from "./help-project-map-service";
+import { generateHelpSopLibrary }                 from "./help-sop-service";
+import { generateHelpTroubleshootingLibrary }     from "./help-troubleshooting-service";
+import type { ProjectHelpCenterReport }           from "./help-center-types";
+import type { HelpProjectDeepMap }                from "./help-project-map-types";
+import type { HelpSopLibrary }                    from "./help-sop-types";
+import type { HelpTroubleshootingLibrary }        from "./help-troubleshooting-types";
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -335,4 +341,237 @@ function collectMethods(report: ProjectHelpCenterReport) {
     .map(([pkg, count]) => ({ pkg, count }));
 
   return { actions, exports, routes, packages };
+}
+
+// ── PROJECT_DEEP_MAP.md ───────────────────────────────────────────────────────
+
+export async function exportProjectDeepMap(input: {
+  projectId: string;
+}): Promise<{ filename: string; markdown: string }> {
+  const deepMap = await generateHelpProjectDeepMap(input);
+
+  const lines: string[] = [
+    "# PROJECT_DEEP_MAP.md",
+    "",
+    `**Generated:** ${new Date(deepMap.generatedAt).toUTCString()}`,
+    `**Nodes:** ${deepMap.nodes.length}  |  **Routes:** ${deepMap.routeMap.length}  |  **Action files:** ${deepMap.actionMap.length}  |  **Export files:** ${deepMap.exportMap.length}`,
+    "",
+    safetyHeader(),
+    "",
+    "---",
+    "",
+    "## Route Map",
+    "",
+    "| Route | Page File | Panels | Actions | Exports |",
+    "| --- | --- | --- | --- | --- |",
+    ...deepMap.routeMap.map((r) =>
+      `| \`${r.route}\` | \`${r.pagePath}\` | ${r.panels.slice(0, 3).join(", ")} | ${r.actions.slice(0, 3).join(", ")} | ${r.exports.slice(0, 3).join(", ")} |`
+    ),
+    "",
+    "---",
+    "",
+    "## Action Map",
+    "",
+    "| Action File | Actions | Permissions | Audit Events | Exports Generated |",
+    "| --- | --- | --- | --- | --- |",
+    ...deepMap.actionMap.slice(0, 40).map((a) =>
+      `| \`${a.actionFile}\` | ${a.actions.slice(0, 3).join(", ")} | ${a.permissions.join(", ")} | ${a.auditEvents.slice(0, 2).join(", ")} | ${a.exportsGenerated.join(", ")} |`
+    ),
+    "",
+    "---",
+    "",
+    "## Export Map",
+    "",
+    "| Filename | Source Path | Purpose | Related Panels |",
+    "| --- | --- | --- | --- |",
+    ...deepMap.exportMap.map((e) =>
+      `| \`${e.filename}\` | \`${e.sourcePath}\` | ${e.purpose.slice(0, 80)} | ${e.relatedPanels.join(", ")} |`
+    ),
+    "",
+    "---",
+    "",
+    "## Node Summary",
+    "",
+    "| Kind | Count |",
+    "| --- | --- |",
+    ...Object.entries(
+      deepMap.nodes.reduce<Record<string, number>>((acc, n) => {
+        acc[n.kind] = (acc[n.kind] ?? 0) + 1;
+        return acc;
+      }, {})
+    )
+      .sort(([, a], [, b]) => b - a)
+      .map(([kind, count]) => `| ${kind} | ${count} |`),
+    "",
+    "---",
+    "",
+    excludedPathsSummary([]),
+    "",
+    "---",
+    "",
+    "*End of PROJECT_DEEP_MAP.md*",
+  ];
+
+  return { filename: "PROJECT_DEEP_MAP.md", markdown: lines.join("\n") };
+}
+
+// ── OPERATOR_SOP_LIBRARY.md ───────────────────────────────────────────────────
+
+export async function exportOperatorSopLibrary(input: {
+  projectId: string;
+}): Promise<{ filename: string; markdown: string }> {
+  const lib = await generateHelpSopLibrary(input);
+
+  const lines: string[] = [
+    "# OPERATOR_SOP_LIBRARY.md",
+    "",
+    `**Generated:** ${new Date(lib.generatedAt).toUTCString()}`,
+    `**SOPs:** ${lib.sops.length}`,
+    "",
+    safetyHeader(),
+    "",
+    "> These SOPs describe operational procedures for the Prisom Project Panel.",
+    "> No secret values are included. All destructive operations require SSH access.",
+    "",
+    "---",
+    "",
+    "## SOP Index",
+    "",
+    "| # | Title | Category | Audience |",
+    "| --- | --- | --- | --- |",
+    ...lib.sops.map((sop, i) =>
+      `| ${i + 1} | ${sop.title} | ${sop.category.replace(/_/g, " ")} | ${sop.audience} |`
+    ),
+    "",
+    "---",
+    "",
+  ];
+
+  for (const sop of lib.sops) {
+    lines.push(`## ${sop.title}`);
+    lines.push("");
+    lines.push(`**Category:** ${sop.category.replace(/_/g, " ")}  |  **Audience:** ${sop.audience}`);
+    lines.push("");
+    lines.push(`*${sop.summary}*`);
+    lines.push("");
+
+    lines.push("**When to use:**");
+    for (const w of sop.whenToUse) lines.push(`- ${w}`);
+    lines.push("");
+
+    lines.push("**Steps:**");
+    for (const s of sop.steps) lines.push(`- ${s}`);
+    lines.push("");
+
+    if (sop.commands.length > 0) {
+      lines.push("**Commands:**");
+      lines.push("```bash");
+      for (const c of sop.commands) lines.push(c);
+      lines.push("```");
+      lines.push("");
+    }
+
+    if (sop.safetyNotes.length > 0) {
+      lines.push("**Safety notes:**");
+      for (const n of sop.safetyNotes) lines.push(`- ⚠ ${n}`);
+      lines.push("");
+    }
+
+    if (sop.relatedExports.length > 0) {
+      lines.push(`**Related exports:** ${sop.relatedExports.map((e) => `\`${e}\``).join(", ")}`);
+      lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("");
+  }
+
+  lines.push("*End of OPERATOR_SOP_LIBRARY.md*");
+
+  return { filename: "OPERATOR_SOP_LIBRARY.md", markdown: lines.join("\n") };
+}
+
+// ── TROUBLESHOOTING_PLAYBOOK.md ───────────────────────────────────────────────
+
+export async function exportTroubleshootingPlaybook(input: {
+  projectId: string;
+}): Promise<{ filename: string; markdown: string }> {
+  const lib = await generateHelpTroubleshootingLibrary(input);
+
+  const lines: string[] = [
+    "# TROUBLESHOOTING_PLAYBOOK.md",
+    "",
+    `**Generated:** ${new Date(lib.generatedAt).toUTCString()}`,
+    `**Playbooks:** ${lib.playbooks.length}`,
+    "",
+    safetyHeader(),
+    "",
+    "> Unsafe fixes are clearly marked with ⚠ and require manual operator approval or developer escalation.",
+    "> Never attempt unsafe fixes without explicit authorisation.",
+    "",
+    "---",
+    "",
+    "## Playbook Index",
+    "",
+    "| # | Title | Severity |",
+    "| --- | --- | --- |",
+    ...lib.playbooks.map((pb, i) =>
+      `| ${i + 1} | ${pb.title} | ${pb.severity.toUpperCase()} |`
+    ),
+    "",
+    "---",
+    "",
+  ];
+
+  for (const pb of lib.playbooks) {
+    lines.push(`## ${pb.title}`);
+    lines.push("");
+    lines.push(`**Severity:** ${pb.severity.toUpperCase()}`);
+    lines.push("");
+
+    lines.push("**Symptoms:**");
+    for (const s of pb.symptoms) lines.push(`- ${s}`);
+    lines.push("");
+
+    lines.push("**Likely causes:**");
+    for (const c of pb.likelyCauses) lines.push(`- ${c}`);
+    lines.push("");
+
+    lines.push("**Checks to run:**");
+    for (const c of pb.checks) lines.push(`- ${c}`);
+    lines.push("");
+
+    if (pb.commands.length > 0) {
+      lines.push("**Commands:**");
+      lines.push("```bash");
+      for (const c of pb.commands) lines.push(c);
+      lines.push("```");
+      lines.push("");
+    }
+
+    if (pb.safeFixes.length > 0) {
+      lines.push("**Safe fixes (operator may attempt):**");
+      for (const f of pb.safeFixes) lines.push(`- ✅ ${f}`);
+      lines.push("");
+    }
+
+    if (pb.unsafeFixes.length > 0) {
+      lines.push("**Unsafe / restricted actions:**");
+      for (const f of pb.unsafeFixes) lines.push(`- ${f}`);
+      lines.push("");
+    }
+
+    if (pb.escalation.length > 0) {
+      lines.push("**Escalation:**");
+      for (const e of pb.escalation) lines.push(`- 🔺 ${e}`);
+      lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("");
+  }
+
+  lines.push("*End of TROUBLESHOOTING_PLAYBOOK.md*");
+
+  return { filename: "TROUBLESHOOTING_PLAYBOOK.md", markdown: lines.join("\n") };
 }

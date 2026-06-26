@@ -3,16 +3,25 @@
 import { requireProjectPermission }      from "@/lib/auth/project-membership";
 import { writeProjectAuditEvent }        from "@/lib/audit/project-audit";
 import { getAuditRequestContext }        from "@/lib/audit/request-context";
-import { generateProjectKnowledgeBase }  from "@/lib/help-center/project-knowledge-builder";
-import { searchHelpKnowledge }           from "@/lib/help-center/help-search-index";
-import { answerHelpQuestion }            from "@/lib/help-center/help-answer-service";
+import { generateProjectKnowledgeBase }       from "@/lib/help-center/project-knowledge-builder";
+import { searchHelpKnowledge }                from "@/lib/help-center/help-search-index";
+import { answerHelpQuestion }                 from "@/lib/help-center/help-answer-service";
+import { generateHelpProjectDeepMap }         from "@/lib/help-center/help-project-map-service";
+import { generateHelpSopLibrary }             from "@/lib/help-center/help-sop-service";
+import { generateHelpTroubleshootingLibrary } from "@/lib/help-center/help-troubleshooting-service";
 import {
   exportProjectKnowledgeBase,
   exportProjectFileInventory,
   exportProjectMethodsAndResources,
-}                                        from "@/lib/help-center/help-center-export";
-import type { ProjectHelpCenterReport }  from "@/lib/help-center/help-center-types";
-import type { HelpAnswer, HelpSearchResult } from "@/lib/help-center/help-center-types";
+  exportProjectDeepMap,
+  exportOperatorSopLibrary,
+  exportTroubleshootingPlaybook,
+}                                             from "@/lib/help-center/help-center-export";
+import type { ProjectHelpCenterReport }       from "@/lib/help-center/help-center-types";
+import type { HelpAnswer, HelpSearchResult }  from "@/lib/help-center/help-center-types";
+import type { HelpProjectDeepMap }            from "@/lib/help-center/help-project-map-types";
+import type { HelpSopLibrary }                from "@/lib/help-center/help-sop-types";
+import type { HelpTroubleshootingLibrary }    from "@/lib/help-center/help-troubleshooting-types";
 
 type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -203,6 +212,192 @@ export async function exportProjectMethodsAndResourcesAction(input: {
       category:    "publishing",
       result:      "success",
       summary:     "PROJECT_METHODS_AND_RESOURCES.md exported",
+      metadata:    { filename: result.filename },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: result };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Export failed.",
+    };
+  }
+}
+
+// ── Deep Project Map ──────────────────────────────────────────────────────────
+
+export async function generateProjectDeepMapAction(input: {
+  projectId: string;
+}): Promise<ActionResult<HelpProjectDeepMap>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const deepMap = await generateHelpProjectDeepMap({ projectId });
+    const ctx     = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.deep_map_generated",
+      category:    "publishing",
+      result:      "success",
+      summary:     `Deep Project Map generated — ${deepMap.nodes.length} nodes, ${deepMap.routeMap.length} routes`,
+      metadata:    { nodeCount: deepMap.nodes.length, routeCount: deepMap.routeMap.length },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: deepMap };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Failed to generate deep map.",
+    };
+  }
+}
+
+export async function exportProjectDeepMapAction(input: {
+  projectId: string;
+}): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const result = await exportProjectDeepMap({ projectId });
+    const ctx    = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.deep_map_exported",
+      category:    "publishing",
+      result:      "success",
+      summary:     "PROJECT_DEEP_MAP.md exported",
+      metadata:    { filename: result.filename },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: result };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Export failed.",
+    };
+  }
+}
+
+// ── Operator SOP Library ──────────────────────────────────────────────────────
+
+export async function generateOperatorSopLibraryAction(input: {
+  projectId: string;
+}): Promise<ActionResult<HelpSopLibrary>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const lib = await generateHelpSopLibrary({ projectId });
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.sop_generated",
+      category:    "publishing",
+      result:      "success",
+      summary:     `Operator SOP Library generated — ${lib.sops.length} SOPs`,
+      metadata:    { sopCount: lib.sops.length },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: lib };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Failed to generate SOP library.",
+    };
+  }
+}
+
+export async function exportOperatorSopLibraryAction(input: {
+  projectId: string;
+}): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const result = await exportOperatorSopLibrary({ projectId });
+    const ctx    = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.sop_exported",
+      category:    "publishing",
+      result:      "success",
+      summary:     "OPERATOR_SOP_LIBRARY.md exported",
+      metadata:    { filename: result.filename },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: result };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Export failed.",
+    };
+  }
+}
+
+// ── Troubleshooting Playbook ──────────────────────────────────────────────────
+
+export async function generateTroubleshootingPlaybookAction(input: {
+  projectId: string;
+}): Promise<ActionResult<HelpTroubleshootingLibrary>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const lib = await generateHelpTroubleshootingLibrary({ projectId });
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.troubleshooting_generated",
+      category:    "publishing",
+      result:      "success",
+      summary:     `Troubleshooting Playbook generated — ${lib.playbooks.length} playbooks`,
+      metadata:    { playbookCount: lib.playbooks.length },
+      ...ctx,
+    }).catch(() => null);
+    return { ok: true, data: lib };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message.slice(0, 300) : "Failed to generate troubleshooting playbook.",
+    };
+  }
+}
+
+export async function exportTroubleshootingPlaybookAction(input: {
+  projectId: string;
+}): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const { projectId } = input;
+  const auth = await requireProjectPermission(projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
+
+  try {
+    const result = await exportTroubleshootingPlaybook({ projectId });
+    const ctx    = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "help_center.troubleshooting_exported",
+      category:    "publishing",
+      result:      "success",
+      summary:     "TROUBLESHOOTING_PLAYBOOK.md exported",
       metadata:    { filename: result.filename },
       ...ctx,
     }).catch(() => null);

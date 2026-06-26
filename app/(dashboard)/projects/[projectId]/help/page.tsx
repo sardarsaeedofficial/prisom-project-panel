@@ -30,15 +30,15 @@ export default async function ProjectHelpPage({ params }: Props) {
       <DashboardShell>
         <PageHeader
           title="Project Help Center"
-          description="Living README and knowledge base for this project. Read-only — no secrets exposed, no production mutation."
+          description="Living README, operator SOPs, troubleshooting playbooks, and deep project map. Read-only — no secrets exposed, no production mutation."
         />
 
         <div className="max-w-3xl space-y-5">
           {/* Context card */}
           <ContextualHelpCard
-            purpose="Generate a searchable knowledge base, explore file inventory, search project documentation, and ask questions about the panel codebase."
-            doHere="Generate Knowledge Base. Export PROJECT_KNOWLEDGE_BASE.md, PROJECT_FILE_INVENTORY.md, PROJECT_METHODS_AND_RESOURCES.md. Search sections. Ask questions."
-            dontDo="Do not use this page to deploy, restart PM2, change DNS, or run migrations. This page is documentation and search only."
+            purpose="Generate complete project documentation including knowledge base, deep project map, operator SOPs, and troubleshooting playbooks. Search or ask questions from the generated content."
+            doHere="Click 'Generate All Documentation'. Browse the Sections, Deep Map, SOPs, Troubleshooting, and Exports tabs. Download all 6 documentation exports. Use Search and Ask for quick answers."
+            dontDo="This page is read-only documentation only. Do not use it to deploy, restart PM2, change DNS, reload nginx, run DB migrations, or expose secrets."
             nextPage={{ label: "Releases (go-live)", href: `/projects/${projectId}/releases` }}
           />
 

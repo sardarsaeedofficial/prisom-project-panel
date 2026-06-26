@@ -79,13 +79,19 @@ function SearchResultCard({ result }: { result: HelpSearchResult }) {
 // ── Example questions ─────────────────────────────────────────────────────────
 
 const SEARCH_EXAMPLES = [
-  "deploy", "server actions", "exports", "Sardar", "safety rules", "routes",
+  "deploy", "server actions", "exports", "Sardar", "safety rules", "routes", "SOP", "troubleshooting",
 ];
 
 const ASK_EXAMPLES = [
   "How do I deploy this project?",
   "What should I not touch?",
   "How do I run smoke checks?",
+  "What SOP should I follow for smoke checks?",
+  "How do I troubleshoot Sardar API health?",
+  "What is the launch workflow from start to finish?",
+  "Which panel exports FINAL_LIVE_VERIFICATION_RUN.md?",
+  "What should I do if build fails?",
+  "How do I hand over this project to an operator?",
   "What exports are available?",
   "Where are server actions stored?",
   "How does Sardar migration work?",
