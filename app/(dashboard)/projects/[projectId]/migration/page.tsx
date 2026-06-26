@@ -31,6 +31,8 @@ import { LaunchDaySupportPanel }             from "@/components/projects/launch-
 import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
 import { FinalReadinessAuditPanel }          from "@/components/projects/final-readiness-audit-panel";
 import { StopBuildGatePanel }               from "@/components/projects/stop-build-gate-panel";
+import { DeployVerificationPanel }          from "@/components/projects/deploy-verification-panel";
+import { LaunchExecutionChecklistPanel }    from "@/components/projects/launch-execution-checklist-panel";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -77,6 +79,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           {/* Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards */}
           <FinalReadinessAuditPanel projectId={projectId} compact />
           <StopBuildGatePanel projectId={projectId} compact />
+          {/* Sprint 78: Deploy Verification + Launch Execution compact cards */}
+          <DeployVerificationPanel projectId={projectId} compact />
+          <LaunchExecutionChecklistPanel projectId={projectId} compact />
 
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />

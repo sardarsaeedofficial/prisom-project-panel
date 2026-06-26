@@ -40,6 +40,8 @@ import { LaunchDaySupportPanel }             from "@/components/projects/launch-
 import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
 import { FinalReadinessAuditPanel }          from "@/components/projects/final-readiness-audit-panel";
 import { StopBuildGatePanel }               from "@/components/projects/stop-build-gate-panel";
+import { DeployVerificationPanel }          from "@/components/projects/deploy-verification-panel";
+import { LaunchExecutionChecklistPanel }    from "@/components/projects/launch-execution-checklist-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -152,6 +154,12 @@ export default async function ReleasesPage({ params }: Props) {
 
           {/* Sprint 77: Stop-Build Gate — below readiness audit */}
           <StopBuildGatePanel projectId={projectId} />
+
+          {/* Sprint 78: Deploy Verification */}
+          <DeployVerificationPanel projectId={projectId} />
+
+          {/* Sprint 78: Launch Execution Checklist */}
+          <LaunchExecutionChecklistPanel projectId={projectId} />
 
           {/* Sprint 71: Project Migration Profile */}
           <ProjectProfileCard projectId={projectId} />
@@ -334,6 +342,10 @@ export default async function ReleasesPage({ params }: Props) {
           {/* Sprint 77: Final Readiness + Stop-Build compact refs */}
           <FinalReadinessAuditPanel projectId={projectId} compact />
           <StopBuildGatePanel projectId={projectId} compact />
+
+          {/* Sprint 78: Deploy Verification + Launch Execution compact refs */}
+          <DeployVerificationPanel projectId={projectId} compact />
+          <LaunchExecutionChecklistPanel projectId={projectId} compact />
 
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 

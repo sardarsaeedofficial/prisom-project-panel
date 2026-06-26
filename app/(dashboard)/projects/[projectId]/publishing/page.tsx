@@ -55,6 +55,8 @@ import { LaunchDaySupportPanel }              from "@/components/projects/launch
 import { PostLaunchBugCapturePanel }          from "@/components/projects/post-launch-bug-capture-panel";
 import { FinalReadinessAuditPanel }           from "@/components/projects/final-readiness-audit-panel";
 import { StopBuildGatePanel }                from "@/components/projects/stop-build-gate-panel";
+import { DeployVerificationPanel }           from "@/components/projects/deploy-verification-panel";
+import { LaunchExecutionChecklistPanel }     from "@/components/projects/launch-execution-checklist-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -387,6 +389,10 @@ export default async function ProjectPublishingPage({ params }: Props) {
           {/* ── Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards ── */}
           <FinalReadinessAuditPanel projectId={projectId} compact />
           <StopBuildGatePanel projectId={projectId} compact />
+
+          {/* ── Sprint 78: Deploy Verification + Launch Execution compact cards ── */}
+          <DeployVerificationPanel projectId={projectId} compact />
+          <LaunchExecutionChecklistPanel projectId={projectId} compact />
 
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">

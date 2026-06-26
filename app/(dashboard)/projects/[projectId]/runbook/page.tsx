@@ -8,8 +8,9 @@ import { OperatorRunbookPanel }       from "@/components/projects/operator-runbo
 import { OperatorTrainingPanel }      from "@/components/projects/operator-training-panel";
 import { LaunchFreezePanel }          from "@/components/projects/launch-freeze-panel";
 import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bug-capture-panel";
-import { FinalReadinessAuditPanel }   from "@/components/projects/final-readiness-audit-panel";
-import { StopBuildGatePanel }        from "@/components/projects/stop-build-gate-panel";
+import { FinalReadinessAuditPanel }         from "@/components/projects/final-readiness-audit-panel";
+import { StopBuildGatePanel }              from "@/components/projects/stop-build-gate-panel";
+import { LaunchExecutionChecklistPanel }   from "@/components/projects/launch-execution-checklist-panel";
 import { Card, CardContent }      from "@/components/ui/card";
 import { db }                     from "@/lib/db";
 
@@ -77,6 +78,9 @@ export default async function ProjectRunbookPage({ params }: Props) {
           {/* Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards */}
           <FinalReadinessAuditPanel projectId={projectId} compact />
           <StopBuildGatePanel projectId={projectId} compact />
+
+          {/* Sprint 78: Launch Execution Checklist — full panel on Runbook */}
+          <LaunchExecutionChecklistPanel projectId={projectId} />
         </div>
       </DashboardShell>
     </div>
