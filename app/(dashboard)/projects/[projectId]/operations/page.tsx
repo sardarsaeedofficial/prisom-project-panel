@@ -7,8 +7,9 @@ import {
   PageHeader,
 } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }           from "@/components/projects/workspace-nav";
-import { ProjectOperationsPanel } from "@/components/projects/project-operations-panel";
-import { DebugSummaryPanel }      from "@/components/projects/debug-summary-panel";
+import { ProjectOperationsPanel }    from "@/components/projects/project-operations-panel";
+import { DebugSummaryPanel }         from "@/components/projects/debug-summary-panel";
+import { PostLaunchBugCapturePanel } from "@/components/projects/post-launch-bug-capture-panel";
 
 export const metadata: Metadata = { title: "Operations" };
 export const dynamic = "force-dynamic";
@@ -62,6 +63,11 @@ export default async function ProjectOperationsPage({ params }: Props) {
         </div>
 
         <ProjectOperationsPanel projectId={projectId} />
+
+        {/* Sprint 76: Post-Launch Bug Capture */}
+        <div className="mt-6">
+          <PostLaunchBugCapturePanel projectId={projectId} />
+        </div>
       </DashboardShell>
     </div>
   );

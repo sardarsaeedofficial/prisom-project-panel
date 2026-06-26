@@ -27,6 +27,8 @@ import { LaunchSignoffPanel }                from "@/components/projects/launch-
 import { OperatorTrainingPanel }             from "@/components/projects/operator-training-panel";
 import { CutoverRehearsalPanel }             from "@/components/projects/cutover-rehearsal-panel";
 import { LaunchFreezePanel }                 from "@/components/projects/launch-freeze-panel";
+import { LaunchDaySupportPanel }             from "@/components/projects/launch-day-support-panel";
+import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -63,11 +65,13 @@ export default async function ProjectMigrationPage({ params }: Props) {
           {/* Sprint 72: New migration wizard */}
           <NewMigrationWizard projectId={projectId} isSardar={isSardar} />
 
-          {/* Sprint 74–75: Final readiness compact refs */}
+          {/* Sprint 74–76: Final readiness + launch-day compact refs */}
           <LaunchSignoffPanel projectId={projectId} compact />
           <OperatorTrainingPanel projectId={projectId} compact />
           <CutoverRehearsalPanel projectId={projectId} compact />
           <LaunchFreezePanel projectId={projectId} compact />
+          <LaunchDaySupportPanel projectId={projectId} compact />
+          <PostLaunchBugCapturePanel projectId={projectId} compact />
 
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />

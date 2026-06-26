@@ -15,6 +15,8 @@ import { isSardarProject }            from "@/lib/migration/sardar-migration-typ
 import { ProjectMonitoringPanel }      from "@/components/projects/project-monitoring-panel";
 import { PostCutoverMonitoringPanel }  from "@/components/projects/post-cutover-monitoring-panel";
 import { ContextualHelpCard }         from "@/components/projects/contextual-help-card";
+import { LaunchDaySupportPanel }      from "@/components/projects/launch-day-support-panel";
+import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bug-capture-panel";
 
 export const metadata: Metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -67,6 +69,12 @@ export default async function ProjectMonitoringPage({ params }: Props) {
               />
             </CardContent>
           </Card>
+
+          {/* Sprint 76: Launch-Day Execution Support */}
+          <LaunchDaySupportPanel projectId={projectId} />
+
+          {/* Sprint 76: Post-Launch Bug Capture (compact) */}
+          <PostLaunchBugCapturePanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>

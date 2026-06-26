@@ -36,6 +36,8 @@ import { LaunchSignoffPanel }                from "@/components/projects/launch-
 import { OperatorTrainingPanel }             from "@/components/projects/operator-training-panel";
 import { CutoverRehearsalPanel }             from "@/components/projects/cutover-rehearsal-panel";
 import { LaunchFreezePanel }                 from "@/components/projects/launch-freeze-panel";
+import { LaunchDaySupportPanel }             from "@/components/projects/launch-day-support-panel";
+import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -317,6 +319,10 @@ export default async function ReleasesPage({ params }: Props) {
           <CutoverRehearsalPanel projectId={projectId} compact />
           <LaunchFreezePanel projectId={projectId} compact />
 
+          {/* Sprint 76: Launch-Day + Bug Capture compact refs */}
+          <LaunchDaySupportPanel projectId={projectId} compact />
+          <PostLaunchBugCapturePanel projectId={projectId} compact />
+
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 
           {/* ── Sprint 69: Live QA Verification ── */}
@@ -351,6 +357,12 @@ export default async function ReleasesPage({ params }: Props) {
 
           {/* ── Sprint 75: Launch Freeze Checklist ── */}
           <LaunchFreezePanel projectId={projectId} />
+
+          {/* ── Sprint 76: Launch-Day Execution Support ── */}
+          <LaunchDaySupportPanel projectId={projectId} />
+
+          {/* ── Sprint 76: Post-Launch Bug Capture (compact) ── */}
+          <PostLaunchBugCapturePanel projectId={projectId} compact />
 
           {/* ── Sprint 58: Debug failed dry-run/cutover ── */}
           <DebugSummaryPanel projectId={projectId} compact context="dry_run" />

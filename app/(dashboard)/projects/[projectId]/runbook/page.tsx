@@ -4,9 +4,10 @@ import Link                  from "next/link";
 import { BookOpen }          from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }      from "@/components/projects/workspace-nav";
-import { OperatorRunbookPanel }   from "@/components/projects/operator-runbook-panel";
-import { OperatorTrainingPanel }  from "@/components/projects/operator-training-panel";
-import { LaunchFreezePanel }      from "@/components/projects/launch-freeze-panel";
+import { OperatorRunbookPanel }       from "@/components/projects/operator-runbook-panel";
+import { OperatorTrainingPanel }      from "@/components/projects/operator-training-panel";
+import { LaunchFreezePanel }          from "@/components/projects/launch-freeze-panel";
+import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bug-capture-panel";
 import { Card, CardContent }      from "@/components/ui/card";
 import { db }                     from "@/lib/db";
 
@@ -67,6 +68,9 @@ export default async function ProjectRunbookPage({ params }: Props) {
 
           {/* Sprint 75: Launch Freeze compact reference */}
           <LaunchFreezePanel projectId={projectId} compact />
+
+          {/* Sprint 76: Post-Launch Bug Capture compact reference */}
+          <PostLaunchBugCapturePanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>
