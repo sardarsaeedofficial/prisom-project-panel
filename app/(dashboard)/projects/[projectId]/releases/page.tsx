@@ -42,6 +42,8 @@ import { FinalReadinessAuditPanel }          from "@/components/projects/final-r
 import { StopBuildGatePanel }               from "@/components/projects/stop-build-gate-panel";
 import { DeployVerificationPanel }          from "@/components/projects/deploy-verification-panel";
 import { LaunchExecutionChecklistPanel }    from "@/components/projects/launch-execution-checklist-panel";
+import { FinalLiveVerificationPanel }       from "@/components/projects/final-live-verification-panel";
+import { GoNoGoEvidencePanel }              from "@/components/projects/go-no-go-evidence-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -149,7 +151,13 @@ export default async function ReleasesPage({ params }: Props) {
 
         <div className="space-y-5 max-w-3xl">
 
-          {/* Sprint 77: Final Readiness Audit — top of page */}
+          {/* Sprint 79: Final Live Verification Run — very top */}
+          <FinalLiveVerificationPanel projectId={projectId} />
+
+          {/* Sprint 79: Go/No-Go Evidence Pack */}
+          <GoNoGoEvidencePanel projectId={projectId} />
+
+          {/* Sprint 77: Final Readiness Audit */}
           <FinalReadinessAuditPanel projectId={projectId} />
 
           {/* Sprint 77: Stop-Build Gate — below readiness audit */}

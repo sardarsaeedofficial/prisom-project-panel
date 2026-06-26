@@ -11,6 +11,8 @@ import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bu
 import { FinalReadinessAuditPanel }         from "@/components/projects/final-readiness-audit-panel";
 import { StopBuildGatePanel }              from "@/components/projects/stop-build-gate-panel";
 import { LaunchExecutionChecklistPanel }   from "@/components/projects/launch-execution-checklist-panel";
+import { GoNoGoEvidencePanel }             from "@/components/projects/go-no-go-evidence-panel";
+import { FinalLiveVerificationPanel }      from "@/components/projects/final-live-verification-panel";
 import { Card, CardContent }      from "@/components/ui/card";
 import { db }                     from "@/lib/db";
 
@@ -81,6 +83,12 @@ export default async function ProjectRunbookPage({ params }: Props) {
 
           {/* Sprint 78: Launch Execution Checklist — full panel on Runbook */}
           <LaunchExecutionChecklistPanel projectId={projectId} />
+
+          {/* Sprint 79: Final Live Verification compact reference */}
+          <FinalLiveVerificationPanel projectId={projectId} compact />
+
+          {/* Sprint 79: Go/No-Go Evidence Pack — full panel on Runbook */}
+          <GoNoGoEvidencePanel projectId={projectId} />
         </div>
       </DashboardShell>
     </div>

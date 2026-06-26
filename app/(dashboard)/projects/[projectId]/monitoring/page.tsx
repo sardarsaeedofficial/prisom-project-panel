@@ -21,6 +21,8 @@ import { FinalReadinessAuditPanel }   from "@/components/projects/final-readines
 import { StopBuildGatePanel }        from "@/components/projects/stop-build-gate-panel";
 import { DeployVerificationPanel }   from "@/components/projects/deploy-verification-panel";
 import { LaunchExecutionChecklistPanel } from "@/components/projects/launch-execution-checklist-panel";
+import { FinalLiveVerificationPanel }    from "@/components/projects/final-live-verification-panel";
+import { GoNoGoEvidencePanel }           from "@/components/projects/go-no-go-evidence-panel";
 
 export const metadata: Metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -87,6 +89,9 @@ export default async function ProjectMonitoringPage({ params }: Props) {
           {/* Sprint 78: Deploy Verification + Launch Execution compact cards */}
           <DeployVerificationPanel projectId={projectId} compact />
           <LaunchExecutionChecklistPanel projectId={projectId} compact />
+          {/* Sprint 79: Final Live Verification + Go/No-Go Evidence compact cards */}
+          <FinalLiveVerificationPanel projectId={projectId} compact />
+          <GoNoGoEvidencePanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>
