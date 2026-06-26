@@ -53,6 +53,8 @@ import { CutoverRehearsalPanel }              from "@/components/projects/cutove
 import { LaunchFreezePanel }                  from "@/components/projects/launch-freeze-panel";
 import { LaunchDaySupportPanel }              from "@/components/projects/launch-day-support-panel";
 import { PostLaunchBugCapturePanel }          from "@/components/projects/post-launch-bug-capture-panel";
+import { FinalReadinessAuditPanel }           from "@/components/projects/final-readiness-audit-panel";
+import { StopBuildGatePanel }                from "@/components/projects/stop-build-gate-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const metadata: Metadata = { title: "Publishing" };
@@ -381,6 +383,10 @@ export default async function ProjectPublishingPage({ params }: Props) {
           {/* ── Sprint 76: Launch-Day Support + Bug Capture compact cards ── */}
           <LaunchDaySupportPanel projectId={projectId} compact />
           <PostLaunchBugCapturePanel projectId={projectId} compact />
+
+          {/* ── Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards ── */}
+          <FinalReadinessAuditPanel projectId={projectId} compact />
+          <StopBuildGatePanel projectId={projectId} compact />
 
           {/* ── Sprint 67: Operator Runbook compact card ── */}
           <div className="rounded-xl border bg-card px-4 py-3 flex items-start gap-3">

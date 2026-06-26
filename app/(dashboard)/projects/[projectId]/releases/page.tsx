@@ -38,6 +38,8 @@ import { CutoverRehearsalPanel }             from "@/components/projects/cutover
 import { LaunchFreezePanel }                 from "@/components/projects/launch-freeze-panel";
 import { LaunchDaySupportPanel }             from "@/components/projects/launch-day-support-panel";
 import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
+import { FinalReadinessAuditPanel }          from "@/components/projects/final-readiness-audit-panel";
+import { StopBuildGatePanel }               from "@/components/projects/stop-build-gate-panel";
 import { isSardarProject }                    from "@/lib/migration/sardar-migration-types";
 
 export const dynamic  = "force-dynamic";
@@ -144,6 +146,12 @@ export default async function ReleasesPage({ params }: Props) {
         />
 
         <div className="space-y-5 max-w-3xl">
+
+          {/* Sprint 77: Final Readiness Audit — top of page */}
+          <FinalReadinessAuditPanel projectId={projectId} />
+
+          {/* Sprint 77: Stop-Build Gate — below readiness audit */}
+          <StopBuildGatePanel projectId={projectId} />
 
           {/* Sprint 71: Project Migration Profile */}
           <ProjectProfileCard projectId={projectId} />
@@ -322,6 +330,10 @@ export default async function ReleasesPage({ params }: Props) {
           {/* Sprint 76: Launch-Day + Bug Capture compact refs */}
           <LaunchDaySupportPanel projectId={projectId} compact />
           <PostLaunchBugCapturePanel projectId={projectId} compact />
+
+          {/* Sprint 77: Final Readiness + Stop-Build compact refs */}
+          <FinalReadinessAuditPanel projectId={projectId} compact />
+          <StopBuildGatePanel projectId={projectId} compact />
 
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-0.5">Panels</p>
 

@@ -29,6 +29,8 @@ import { CutoverRehearsalPanel }             from "@/components/projects/cutover
 import { LaunchFreezePanel }                 from "@/components/projects/launch-freeze-panel";
 import { LaunchDaySupportPanel }             from "@/components/projects/launch-day-support-panel";
 import { PostLaunchBugCapturePanel }         from "@/components/projects/post-launch-bug-capture-panel";
+import { FinalReadinessAuditPanel }          from "@/components/projects/final-readiness-audit-panel";
+import { StopBuildGatePanel }               from "@/components/projects/stop-build-gate-panel";
 
 export const metadata: Metadata = { title: "Migration Assistant" };
 export const dynamic = "force-dynamic";
@@ -72,6 +74,9 @@ export default async function ProjectMigrationPage({ params }: Props) {
           <LaunchFreezePanel projectId={projectId} compact />
           <LaunchDaySupportPanel projectId={projectId} compact />
           <PostLaunchBugCapturePanel projectId={projectId} compact />
+          {/* Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards */}
+          <FinalReadinessAuditPanel projectId={projectId} compact />
+          <StopBuildGatePanel projectId={projectId} compact />
 
           {/* Sprint 57: Source Intake — compact card above migration panels */}
           <SourceIntakePanel projectId={projectId} compact />

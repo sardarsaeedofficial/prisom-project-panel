@@ -17,6 +17,8 @@ import { PostCutoverMonitoringPanel }  from "@/components/projects/post-cutover-
 import { ContextualHelpCard }         from "@/components/projects/contextual-help-card";
 import { LaunchDaySupportPanel }      from "@/components/projects/launch-day-support-panel";
 import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bug-capture-panel";
+import { FinalReadinessAuditPanel }   from "@/components/projects/final-readiness-audit-panel";
+import { StopBuildGatePanel }        from "@/components/projects/stop-build-gate-panel";
 
 export const metadata: Metadata = { title: "Monitoring" };
 export const dynamic = "force-dynamic";
@@ -75,6 +77,10 @@ export default async function ProjectMonitoringPage({ params }: Props) {
 
           {/* Sprint 76: Post-Launch Bug Capture (compact) */}
           <PostLaunchBugCapturePanel projectId={projectId} compact />
+
+          {/* Sprint 77: Final Readiness Audit + Stop-Build Gate compact cards */}
+          <FinalReadinessAuditPanel projectId={projectId} compact />
+          <StopBuildGatePanel projectId={projectId} compact />
         </div>
       </DashboardShell>
     </div>
