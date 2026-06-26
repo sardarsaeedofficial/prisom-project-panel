@@ -288,7 +288,6 @@ export async function generateGoNoGoEvidencePack(input: {
 
   const blockedItems  = evidence.filter((e) => e.required && (e.status === "blocked" || e.status === "missing"));
   const warnItems     = evidence.filter((e) => e.required && e.status === "warning");
-  const collectedItems = evidence.filter((e) => e.status === "collected");
   const manualItems   = evidence.filter((e) => e.status === "manual");
 
   const blockers: string[] = blockedItems.map((e) => `Missing: ${e.label}`);
