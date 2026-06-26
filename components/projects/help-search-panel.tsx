@@ -78,16 +78,17 @@ function SearchResultCard({ result }: { result: HelpSearchResult }) {
 
 // ── Example questions ─────────────────────────────────────────────────────────
 
-const EXAMPLE_QUESTIONS = [
-  "What files handle launch execution?",
+const SEARCH_EXAMPLES = [
+  "deploy", "server actions", "exports", "Sardar", "safety rules", "routes",
+];
+
+const ASK_EXAMPLES = [
   "How do I deploy this project?",
-  "Where are server actions stored?",
-  "What exports are available?",
-  "What languages and frameworks are used?",
-  "How does Sardar migration work?",
   "What should I not touch?",
   "How do I run smoke checks?",
-  "Where are confirmation phrases checked?",
+  "What exports are available?",
+  "Where are server actions stored?",
+  "How does Sardar migration work?",
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -146,13 +147,8 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
     });
   }
 
-  function useExample(q: string) {
-    if (activeTab === "search") {
-      setQuery(q);
-    } else {
-      setQuestion(q);
-    }
-  }
+  function useSearchExample(q: string) { setQuery(q); }
+  function useAskExample(q: string)    { setQuestion(q); }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -194,26 +190,26 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
           ))}
         </div>
 
-        {/* Example questions */}
-        <div className="space-y-1">
-          <p className="text-[10px] text-muted-foreground font-medium">Example questions:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {EXAMPLE_QUESTIONS.slice(0, 6).map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => useExample(q)}
-                className="text-[10px] border rounded px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* Search tab */}
         {activeTab === "search" && (
           <div className="space-y-3">
+            {/* Search examples */}
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground font-medium">Try searching for:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {SEARCH_EXAMPLES.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => useSearchExample(q)}
+                    className="text-[10px] border rounded px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground font-mono"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <Input
                 placeholder="e.g. deploy, server actions, Sardar, exports…"
@@ -239,12 +235,23 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
               <p className="text-xs text-destructive">{searchError}</p>
             )}
 
-            {searchResults !== null && (
+            {!query.trim() && searchResults === null && (
+              <p className="text-xs text-muted-foreground">
+                The knowledge base must be generated first (use the Sections tab above). Then search by keyword.
+              </p>
+            )}
+
+            {searchResults !== null && searchResults.length === 0 && (
+              <div className="text-xs text-muted-foreground border rounded-md px-3 py-2 bg-muted/20">
+                No matching sections found for <strong>&ldquo;{query}&rdquo;</strong>.
+                Try broader keywords, or regenerate the knowledge base if it&apos;s out of date.
+              </div>
+            )}
+
+            {searchResults !== null && searchResults.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  {searchResults.length > 0
-                    ? `${searchResults.length} section(s) matched "${query}"`
-                    : `No matching sections found for "${query}"`}
+                  {searchResults.length} section(s) matched &ldquo;{query}&rdquo;
                 </p>
                 {searchResults.map((r) => (
                   <SearchResultCard key={r.sectionId + r.title} result={r} />
@@ -257,6 +264,23 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
         {/* Ask tab */}
         {activeTab === "ask" && (
           <div className="space-y-3">
+            {/* Ask examples */}
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground font-medium">Example questions:</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ASK_EXAMPLES.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => useAskExample(q)}
+                    className="text-[10px] border rounded px-2 py-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <Input
                 placeholder="e.g. How do I deploy this project?"
@@ -298,12 +322,22 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
                   </pre>
                 </div>
 
+                {/* Low confidence warning */}
+                {answer.confidence === "low" && answer.missingInformation.length === 0 && (
+                  <div className="flex items-start gap-2 bg-muted/30 border rounded-md px-3 py-2">
+                    <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <p className="text-xs text-muted-foreground">
+                      Low confidence — the knowledge base may not fully cover this topic. Try regenerating or searching with different keywords.
+                    </p>
+                  </div>
+                )}
+
                 {/* Missing information */}
                 {answer.missingInformation.length > 0 && (
                   <div className="flex items-start gap-2 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-md px-3 py-2">
                     <AlertTriangle className="h-3.5 w-3.5 text-yellow-600 mt-0.5 shrink-0" />
                     <div className="space-y-0.5">
-                      <p className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Missing information:</p>
+                      <p className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Not enough information:</p>
                       {answer.missingInformation.map((m, i) => (
                         <p key={i} className="text-xs text-yellow-700 dark:text-yellow-400">{m}</p>
                       ))}
@@ -337,7 +371,7 @@ export function HelpSearchPanel({ projectId }: HelpSearchPanelProps) {
                           <span className="font-medium">{r.title}</span>
                           {r.sourcePaths.length > 0 && (
                             <span className="text-muted-foreground ml-1">
-                              ({r.sourcePaths[0]})
+                              — <code className="text-[10px]">{r.sourcePaths[0]}</code>
                             </span>
                           )}
                         </span>

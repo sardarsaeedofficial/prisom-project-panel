@@ -33,18 +33,30 @@ function detectLanguage(filename: string): HelpFileInventoryItem["language"] {
 }
 
 function categorizeFile(relPath: string): HelpFileCategory {
-  const p = relPath.replace(/\\/g, "/");
+  const p    = relPath.replace(/\\/g, "/");
+  const base = p.split("/").pop() ?? "";
+
+  if (p.includes(".test.") || p.includes(".spec."))                  return "test";
   if (p.includes("/actions/") || /\/actions?\.(ts|js)$/.test(p))     return "server_action";
   if (/\/route\.(ts|js)$/.test(p))                                   return "server_action";
   if (/\/page\.(tsx|ts|js|jsx)$/.test(p) || /\/layout\.(tsx|ts|js|jsx)$/.test(p)) return "page";
   if (p.startsWith("components/") || p.includes("/components/"))     return "component";
-  if (p.startsWith("lib/"))                                           return "library";
   if (p.endsWith(".prisma") || p.includes("schema.prisma"))          return "schema";
   if (p.endsWith(".json") || /config\.(ts|js)$/.test(p))            return "config";
   if (p.startsWith("scripts/"))                                       return "script";
-  if (p.endsWith(".md"))                                              return "export";
   if (p.endsWith(".css"))                                             return "style";
-  if (p.includes(".test.") || p.includes(".spec."))                  return "test";
+  if (p.endsWith(".md"))                                              return "export";
+
+  if (p.startsWith("lib/")) {
+    // Export files: *-export.ts, *export*.ts in lib
+    if (/-export\.(ts|js)$/.test(base) || /export[-_]/i.test(base)) return "export";
+    // Type definition files: *-types.ts, *type.ts
+    if (/-types?\.(ts|js)$/.test(base))                              return "library";
+    // Service files: *-service.ts
+    if (/-service\.(ts|js)$/.test(base))                             return "library";
+    return "library";
+  }
+
   return "unknown";
 }
 
@@ -84,25 +96,68 @@ function extractRoutes(relPath: string): string[] {
 
 function extractActions(content: string): string[] {
   const found = new Set<string>();
-  const re = /export\s+async\s+function\s+(\w+Action)\b/g;
-  let m;
+  // Explicit *Action named exports
+  const re1 = /export\s+async\s+function\s+(\w+Action)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re1.exec(content)) !== null) found.add(m[1]);
+  // "use server" files — all async exported functions are actions
+  if (content.includes('"use server"') || content.includes("'use server'")) {
+    const re2 = /export\s+async\s+function\s+(\w+)\b/g;
+    while ((m = re2.exec(content)) !== null) found.add(m[1]);
+  }
+  return [...found].slice(0, 12);
+}
+
+function extractExportFilenames(content: string): string[] {
+  const found = new Set<string>();
+  // Matches filename: "FOO_BAR.md" style from CopyDownloadButton / export functions
+  const re = /filename:\s*["'`]([A-Z0-9_\-]+\.md)["'`]/g;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) found.add(m[1]);
-  return [...found].slice(0, 10);
+  return [...found];
 }
 
 function buildSummary(relPath: string, exports: string[], content: string): string {
+  const p    = relPath.replace(/\\/g, "/");
   const name = path.basename(relPath);
+
+  // For action files: list action names
+  if (p.includes("/actions/") || /\/actions?\.(ts|js)$/.test(p)) {
+    const actionNames = exports.filter((e) => e.endsWith("Action") || e.endsWith("action"));
+    if (actionNames.length > 0) {
+      const listed = actionNames.slice(0, 4).join(", ");
+      return `Server actions: ${listed}${actionNames.length > 4 ? ` +${actionNames.length - 4}` : ""}`;
+    }
+  }
+
+  // For export files: include export filenames from content
+  if (/-export\.(ts|js)$/.test(name)) {
+    const filenames = extractExportFilenames(content);
+    if (filenames.length > 0) {
+      return `${name}: generates ${filenames.join(", ")}`;
+    }
+  }
+
+  // For page files: include route
+  const routes = extractRoutes(relPath);
+  if (routes.length > 0) {
+    return `Page at ${routes[0]}`;
+  }
+
+  // Generic: list key exports
   if (exports.length > 0) {
     const listed = exports.slice(0, 4).join(", ");
-    return `${name}: exports ${listed}${exports.length > 4 ? ` (+${exports.length - 4} more)` : ""}`;
+    return `${name}: exports ${listed}${exports.length > 4 ? ` +${exports.length - 4}` : ""}`;
   }
+
+  // Fallback: first meaningful line of content
   const text = content
     .split("\n")
-    .slice(0, 5)
+    .slice(0, 8)
     .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "").trim())
-    .filter(Boolean)
+    .filter((l) => l.length > 10 && !l.startsWith("import") && !l.startsWith("//"))
     .join(" ")
-    .slice(0, 140);
+    .slice(0, 130);
   return text || name;
 }
 

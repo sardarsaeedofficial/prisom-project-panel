@@ -23,10 +23,84 @@ function excludedPathsSummary(paths: string[]): string {
     shown.map((p) => `- \`${p}\``).join("\n"),
     paths.length > 15 ? `- … and ${paths.length - 15} more` : "",
     "",
-    "Hard exclusions: .env, node_modules, .git, .next, dist, build, coverage, storage/backups, *.pem, *.key, *.crt, *.log",
+    "**Hard exclusions:** `.env`, `node_modules`, `.git`, `.next`, `dist`, `build`, `coverage`, `storage/backups`, `*.pem`, `*.key`, `*.crt`, `*.log`",
+    "",
+    "> Secret values are never stored in any export — only names, paths, and variable names are included.",
   ]
     .filter((l) => l !== "")
     .join("\n");
+}
+
+function safetyRulesSection(): string {
+  return [
+    "## Safety Rules",
+    "",
+    "These rules apply to all operators and are enforced by the panel:",
+    "",
+    "| Rule | Detail |",
+    "| --- | --- |",
+    "| No secret exposure | `.env`, keys, tokens, and passwords are never included in any export |",
+    "| No PM2 restarts from UI | All PM2 operations must be performed via SSH |",
+    "| No DNS/nginx changes from UI | DNS and nginx configuration is server-managed only |",
+    "| No DB migrations from UI | `prisma migrate deploy` must be run manually via SSH |",
+    "| No Doorsteps/LocalShop contact | `prisom-manager` and `prisom-backend` must NOT be touched |",
+    "| No destructive actions without confirmation phrase | Destructive UI actions require typed confirmation |",
+    "| Sardar Security is a live production service | `project-sardar-security-project` — treat with care |",
+  ].join("\n");
+}
+
+function quickReferenceSection(report: ProjectHelpCenterReport): string {
+  const methods  = collectMethodsInternal(report);
+  const lines: string[] = ["## Quick Reference", ""];
+
+  // Key routes
+  if (methods.routes.length > 0) {
+    lines.push("### Key Routes", "");
+    lines.push("| Route | File |");
+    lines.push("| --- | --- |");
+    for (const { route, file } of methods.routes.slice(0, 20)) {
+      lines.push(`| \`${route}\` | \`${file}\` |`);
+    }
+    lines.push("");
+  }
+
+  // Key actions
+  if (methods.actions.length > 0) {
+    lines.push("### Server Actions", "");
+    lines.push("| Action | File |");
+    lines.push("| --- | --- |");
+    for (const { name, file } of methods.actions.slice(0, 20)) {
+      lines.push(`| \`${name}\` | \`${file}\` |`);
+    }
+    lines.push("");
+  }
+
+  // Export filenames discovered from code
+  const exportFiles = report.inventory
+    .filter((i) => i.category === "export" || /-export\.(ts|js)$/.test(i.path))
+    .map((i) => i.path);
+  if (exportFiles.length > 0) {
+    lines.push("### Export Files", "");
+    for (const p of exportFiles.slice(0, 12)) lines.push(`- \`${p}\``);
+    lines.push("");
+  }
+
+  // Frameworks
+  if (report.frameworks.length > 0) {
+    lines.push(
+      "### Frameworks",
+      "",
+      report.frameworks.map((f) => `- ${f}`).join("\n"),
+      "",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+// Internal helper used by quickReferenceSection (avoids export naming collision)
+function collectMethodsInternal(report: ProjectHelpCenterReport) {
+  return collectMethods(report);
 }
 
 // ── PROJECT_KNOWLEDGE_BASE.md ─────────────────────────────────────────────────
@@ -44,6 +118,14 @@ export async function exportProjectKnowledgeBase(input: {
     `**Frameworks:** ${report.frameworks.join(", ") || "Next.js, React, Prisma, Tailwind CSS"}`,
     "",
     safetyHeader(),
+    "",
+    "---",
+    "",
+    quickReferenceSection(report),
+    "",
+    "---",
+    "",
+    safetyRulesSection(),
     "",
     "---",
     "",
@@ -145,6 +227,11 @@ export async function exportProjectMethodsAndResources(input: {
   const report = await generateProjectKnowledgeBase(input);
 
   const methods = collectMethods(report);
+
+  // Pull deployment section content from generated knowledge
+  const deploySection = report.sections.find((s) => s.category === "deployment");
+  const safetySection = report.sections.find((s) => s.category === "safety");
+
   const lines: string[] = [
     "# PROJECT_METHODS_AND_RESOURCES.md",
     "",
@@ -164,6 +251,19 @@ export async function exportProjectMethodsAndResources(input: {
     ...report.resources.map((r) => `- ${r}`),
     "",
     "---",
+  ];
+
+  // Deployment commands (extracted from knowledge builder)
+  if (deploySection) {
+    lines.push("", deploySection.content, "", "---");
+  }
+
+  // Safety rules (extracted from knowledge builder)
+  if (safetySection) {
+    lines.push("", safetySection.content, "", "---");
+  }
+
+  lines.push(
     "",
     "## Server Action Methods",
     "",
@@ -202,7 +302,7 @@ export async function exportProjectMethodsAndResources(input: {
     "---",
     "",
     "*End of PROJECT_METHODS_AND_RESOURCES.md*",
-  ];
+  );
 
   return { filename: "PROJECT_METHODS_AND_RESOURCES.md", markdown: lines.join("\n") };
 }

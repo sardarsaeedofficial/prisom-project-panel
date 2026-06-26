@@ -1,26 +1,54 @@
-const SECRET_PATTERNS: Array<{ re: RegExp; label: string }> = [
-  { re: /DATABASE_URL\s*[=:]\s*\S+/gi,          label: "DATABASE_URL" },
-  { re: /NEXTAUTH_SECRET\s*[=:]\s*\S+/gi,        label: "NEXTAUTH_SECRET" },
-  { re: /AUTH_SECRET\s*[=:]\s*\S+/gi,            label: "AUTH_SECRET" },
-  { re: /SESSION_SECRET\s*[=:]\s*\S+/gi,         label: "SESSION_SECRET" },
-  { re: /STRIPE_SECRET_KEY\s*[=:]\s*\S+/gi,      label: "STRIPE_SECRET_KEY" },
-  { re: /STRIPE_WEBHOOK_SECRET\s*[=:]\s*\S+/gi,  label: "STRIPE_WEBHOOK_SECRET" },
-  { re: /CLOUDINARY_SECRET\s*[=:]\s*\S+/gi,      label: "CLOUDINARY_SECRET" },
-  { re: /JWT_SECRET\s*[=:]\s*\S+/gi,             label: "JWT_SECRET" },
-  { re: /RESEND_API_KEY\s*[=:]\s*\S+/gi,         label: "RESEND_API_KEY" },
-  { re: /password\s*=\s*["']?[^\s"']+["']?/gi,   label: "password" },
-  { re: /\btoken\s*=\s*["']?[^\s"']+["']?/gi,    label: "token" },
-  { re: /private_key\s*[=:]\s*\S+/gi,            label: "private_key" },
+// ── Secret value patterns ──────────────────────────────────────────────────────
+// Matches KEY=value or KEY: value assignment forms. Never strips variable names.
+
+const SECRET_PATTERNS: RegExp[] = [
+  // Named env vars with values
+  /DATABASE_URL\s*[=:]\s*\S+/gi,
+  /NEXTAUTH_SECRET\s*[=:]\s*\S+/gi,
+  /AUTH_SECRET\s*[=:]\s*\S+/gi,
+  /SESSION_SECRET\s*[=:]\s*\S+/gi,
+  /STRIPE_SECRET_KEY\s*[=:]\s*\S+/gi,
+  /STRIPE_WEBHOOK_SECRET\s*[=:]\s*\S+/gi,
+  /CLOUDINARY_SECRET\s*[=:]\s*\S+/gi,
+  /CLOUDINARY_API_SECRET\s*[=:]\s*\S+/gi,
+  /CLOUDINARY_URL\s*[=:]\s*\S+/gi,
+  /JWT_SECRET\s*[=:]\s*\S+/gi,
+  /RESEND_API_KEY\s*[=:]\s*\S+/gi,
+  /GITHUB_CLIENT_SECRET\s*[=:]\s*\S+/gi,
+  /NEXTAUTH_URL\s*[=:]\s*\S+/gi,
+  /private_key\s*[=:]\s*\S+/gi,
+
+  // Connection string protocols that carry credentials
+  /postgres(?:ql)?:\/\/[^\s"'`>]+/gi,
+  /mongodb(?:\+srv)?:\/\/[^\s"'`>]+/gi,
+  /redis(?:s)?:\/\/[^\s"'`>]+/gi,
+  /mysql:\/\/[^\s"'`>]+/gi,
+
+  // PEM / cert blocks
+  /-----BEGIN\s[A-Z ]+-----[\s\S]*?-----END\s[A-Z ]+-----/gi,
+
+  // Generic lowercase secret/token/password assignments (avoid over-matching)
+  /\bpassword\s*=\s*["']?[^\s"']{4,}["']?/gi,
+  /\bapi_key\s*[=:]\s*["']?[^\s"']{4,}["']?/gi,
+  /\bsecret\s*[=:]\s*["']?[^\s"']{8,}["']?/gi,
 ];
 
-const EXCLUDED_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "coverage"]);
+const EXCLUDED_DIRS = new Set([
+  "node_modules", ".git", ".next", "dist", "build", "coverage",
+]);
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export function redactHelpContent(content: string): string {
   let result = content;
-  for (const { re } of SECRET_PATTERNS) {
+  for (const re of SECRET_PATTERNS) {
     result = result.replace(re, (m) => {
+      // Preserve the key name (everything up to and including the = or :)
       const eqIdx = m.search(/[=:]/);
-      if (eqIdx >= 0) return m.slice(0, eqIdx + 1) + "[REDACTED]";
+      if (eqIdx >= 0) {
+        return m.slice(0, eqIdx + 1) + "[REDACTED]";
+      }
+      // Connection strings and PEM blocks — replace entirely
       return "[REDACTED]";
     });
   }
@@ -28,19 +56,24 @@ export function redactHelpContent(content: string): string {
 }
 
 export function isExcludedHelpPath(filePath: string): boolean {
-  const p = filePath.replace(/\\/g, "/");
+  const p        = filePath.replace(/\\/g, "/");
   const segments = p.split("/");
   const basename = segments[segments.length - 1] ?? "";
 
-  // Hidden files / .env files
+  // .env files (including .env.local, .env.production, etc.)
   if (basename.startsWith(".env")) return true;
-  if (basename.startsWith(".") && basename !== ".") return true;
+
+  // Any hidden file/dir except the repo root itself
+  if (basename.startsWith(".") && basename.length > 1) return true;
 
   // Secret file extensions
   if (
     basename.endsWith(".pem") ||
     basename.endsWith(".key") ||
     basename.endsWith(".crt") ||
+    basename.endsWith(".cer") ||
+    basename.endsWith(".p12") ||
+    basename.endsWith(".pfx") ||
     basename.endsWith(".log")
   )
     return true;
@@ -52,4 +85,23 @@ export function isExcludedHelpPath(filePath: string): boolean {
   if (p.includes("storage/backups")) return true;
 
   return false;
+}
+
+/**
+ * Checks whether a snippet of text contains any pattern that looks like a
+ * secret value. Used as a final safety gate before surfacing content in UI.
+ */
+export function containsSecretPattern(text: string): boolean {
+  const patterns = [
+    /DATABASE_URL\s*[=:]/i,
+    /postgres(?:ql)?:\/\//i,
+    /mongodb(?:\+srv)?:\/\//i,
+    /redis(?:s)?:\/\//i,
+    /-----BEGIN /i,
+    /STRIPE_SECRET/i,
+    /AUTH_SECRET\s*[=:]/i,
+    /SESSION_SECRET\s*[=:]/i,
+    /password\s*=/i,
+  ];
+  return patterns.some((re) => re.test(text));
 }
