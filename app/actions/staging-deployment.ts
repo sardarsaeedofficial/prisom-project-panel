@@ -25,10 +25,6 @@ import type {
   StagingDeploymentPlan,
   StagingDeploymentProof,
 } from "@/lib/staging/staging-deployment-types";
-import type { StagingSourcePlan } from "@/lib/staging/staging-source-preparer";
-
-// Re-export StagingSourcePlan so the client can use the type
-export type { StagingSourcePlan };
 
 // ── Result type ───────────────────────────────────────────────────────────────
 

@@ -43,7 +43,6 @@ import type {
   StagingDeploymentStage,
   StagingServicePlan,
 } from "@/lib/staging/staging-deployment-types";
-import type { StagingSourcePlan } from "@/app/actions/staging-deployment";
 import type { StagingSmokeReport } from "@/lib/staging/staging-deployment-smoke-checks";
 import {
   DEFAULT_STAGING_SLUG,

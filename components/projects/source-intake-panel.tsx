@@ -141,24 +141,34 @@ function GitHubImportCard({ projectId }: { projectId: string }) {
     setValidation(null);
     setPrepResult(null);
     setPrepError(null);
-    const result = await validateGitHubImportInputAction({ repositoryUrl: repoUrl, branch });
-    if (result.ok) setValidation(result.data);
-    setLoading(false);
+    try {
+      const result = await validateGitHubImportInputAction({ repositoryUrl: repoUrl, branch });
+      if (result.ok) setValidation(result.data);
+    } catch {
+      // validation UI already shows nothing on failure; loading clears below
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handlePrepare() {
     if (!validation?.isValid) return;
     setPrepLoading(true);
     setPrepError(null);
-    const result = await prepareGitHubImportAction({
-      projectId,
-      repositoryUrl: repoUrl,
-      branch,
-      confirmation: replaceConfirm.trim() === "REPLACE SOURCE" ? "REPLACE SOURCE" : undefined,
-    });
-    if (result.ok) setPrepResult(result.data);
-    else            setPrepError(result.error);
-    setPrepLoading(false);
+    try {
+      const result = await prepareGitHubImportAction({
+        projectId,
+        repositoryUrl: repoUrl,
+        branch,
+        confirmation: replaceConfirm.trim() === "REPLACE SOURCE" ? "REPLACE SOURCE" : undefined,
+      });
+      if (result.ok) setPrepResult(result.data);
+      else            setPrepError(result.error);
+    } catch (e) {
+      setPrepError(e instanceof Error ? e.message : "Prepare failed — please try again.");
+    } finally {
+      setPrepLoading(false);
+    }
   }
 
   return (
@@ -674,44 +684,60 @@ export function SourceIntakePanel({
   async function generate() {
     setLoading(true);
     setError(null);
-    const result = await generateSourceIntakeReportAction({ projectId });
-    if (result.ok) {
-      setReport(result.data);
-      setLastAction("Source intake report generated");
-    } else {
-      setError(result.error);
+    try {
+      const result = await generateSourceIntakeReportAction({ projectId });
+      if (result.ok) {
+        setReport(result.data);
+        setLastAction("Source intake report generated");
+      } else {
+        setError(
+          result.error.toLowerCase().includes("no source") ||
+          result.error.toLowerCase().includes("not found") ||
+          result.error.toLowerCase().includes("zip")
+            ? "No source files found. Upload a ZIP or clone a repository first, then run Analyze."
+            : result.error,
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Analysis failed — please try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function exportReport() {
     setLoadingExport(true);
     setExportError(null);
-    const result = await exportSourceIntakeReportAction({ projectId });
-    if (result.ok) {
-      try {
-        const blob = new Blob([result.data.markdown], { type: "text/markdown" });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement("a");
-        a.href     = url;
-        a.download = result.data.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        setLastAction(`Downloaded ${result.data.filename}`);
-      } catch {
+    try {
+      const result = await exportSourceIntakeReportAction({ projectId });
+      if (result.ok) {
         try {
-          await navigator.clipboard.writeText(result.data.markdown);
-          setLastAction("Copied SOURCE_INTAKE_REPORT.md to clipboard");
+          const blob = new Blob([result.data.markdown], { type: "text/markdown" });
+          const url  = URL.createObjectURL(blob);
+          const a    = document.createElement("a");
+          a.href     = url;
+          a.download = result.data.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          setLastAction(`Downloaded ${result.data.filename}`);
         } catch {
-          setExportError("Download failed — refresh and try again.");
+          try {
+            await navigator.clipboard.writeText(result.data.markdown);
+            setLastAction("Copied SOURCE_INTAKE_REPORT.md to clipboard");
+          } catch {
+            setExportError("Download failed — refresh and try again.");
+          }
         }
+      } else {
+        setExportError(result.error);
       }
-    } else {
-      setExportError(result.error);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Export failed — please try again.");
+    } finally {
+      setLoadingExport(false);
     }
-    setLoadingExport(false);
   }
 
   if (compact) {
