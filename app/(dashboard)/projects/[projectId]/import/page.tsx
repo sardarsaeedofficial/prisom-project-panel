@@ -6,6 +6,7 @@ import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ReplitImportWizard } from "@/components/projects/replit-import-wizard";
 import { DbMigrationPanel }   from "@/components/projects/db-migration-panel";
 import { SourceIntakePanel }  from "@/components/projects/source-intake-panel";
+import { SmartImportPanel }   from "@/components/projects/smart-import-panel";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Import / Source Intake" };
@@ -33,10 +34,13 @@ export default async function ProjectImportPage({ params }: Props) {
       <DashboardShell>
         <PageHeader
           title="Import / Source Intake"
-          description="Analyze, detect, and prepare source code from GitHub, ZIP, or Replit exports for VPS deployment."
+          description="Smart Import can detect the stack, apply the best deployment preset, check preview, and tell you what is missing."
         />
 
         <div className="space-y-6 max-w-3xl">
+          {/* ── Sprint 85: Smart Import — top of page ── */}
+          <SmartImportPanel projectId={projectId} />
+
           {/* ── Sprint 57: Source Intake Readiness + GitHub import ── */}
           <SourceIntakePanel projectId={projectId} showGitHubImport />
 

@@ -35,6 +35,7 @@ import { DeploymentConfigPanel } from "@/components/projects/deployment-config-p
 import { DeploymentHistoryPanel } from "@/components/projects/deployment-history-panel";
 import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
+import { SmartImportPanel }        from "@/components/projects/smart-import-panel";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
 import { AlertTriangle, RefreshCw, Flag, ShoppingCart, Trophy, Container, ShieldCheck, Activity, BookOpen } from "lucide-react";
@@ -721,6 +722,9 @@ export default async function ProjectPublishingPage({ params }: Props) {
               domainsHref={`/projects/${projectId}/domains`}
             />
           )}
+
+          {/* ── Sprint 85: Smart Import compact card ── */}
+          <SmartImportPanel projectId={projectId} compact />
 
           {/* ── Readiness panel ── */}
           {!hasDeployConfig && dbDeployConfig && (
