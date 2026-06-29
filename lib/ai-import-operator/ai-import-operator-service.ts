@@ -163,9 +163,13 @@ function explainRun(run: AutoImportRun): {
   if (frontendFailing) {
     const fix: AiImportFixPlan = {
       id:                   "fix-static-frontend-routing",
-      title:                "Serve frontend files at /",
-      plainEnglishSummary:  "Your API is working correctly, but the frontend is not being served. I'll set up split routing so the API handles /api/* and the frontend serves everything else.",
+      title:                "Apply full Sardar/Replit pnpm deploy preset",
+      plainEnglishSummary:  "Your API is working, but the frontend is not being served and the install/build commands need to be set for this pnpm workspace project. I'll apply the complete deployment preset.",
       technicalChanges:     [
+        "Install → pnpm install --frozen-lockfile --ignore-scripts",
+        "Build → pnpm run build",
+        "Start → node artifacts/api-server/dist/index.mjs",
+        "Health path → /api/healthz",
         "Route mode → static_plus_api",
         "Static output → artifacts/sardar-security/dist/public",
         "SPA fallback enabled (React Router links will work)",

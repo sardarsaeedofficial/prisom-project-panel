@@ -66,6 +66,12 @@ export async function executeAiImportFix(input: {
       break;
 
     case "fix-static-frontend-routing":
+      // Apply the full Sardar/Replit pnpm ecommerce preset — not just routing fields.
+      // Existing npm commands would cause "Install step failed" on retry deploy.
+      base.installCommand  = "pnpm install --frozen-lockfile --ignore-scripts";
+      base.buildCommand    = "pnpm run build";
+      base.startCommand    = "node artifacts/api-server/dist/index.mjs";
+      base.healthPath      = "/api/healthz";
       base.routeMode       = "static_plus_api";
       base.staticOutputDir = "artifacts/sardar-security/dist/public";
       base.apiPrefix       = "/api";
