@@ -49,11 +49,15 @@ const FIX_PATTERNS: FixPattern[] = [
     fix: {
       id:                  "fix-static-frontend-routing",
       issueKind:           "frontend_not_served",
-      label:               "Enable API + Static Frontend routing",
-      description:         "The API is healthy but the frontend is returning 404 or 'Cannot GET /'. Set route mode to static_plus_api and configure the static output directory.",
+      label:               "Apply full Sardar/Replit pnpm deploy preset",
+      description:         "The API is healthy but the frontend is returning 404 or 'Cannot GET /'. Applying the full pnpm preset: install/build/start commands + static_plus_api routing.",
       confirmationRequired: true,
       confirmationPhrase:  "APPLY SAFE FIX",
       changes: [
+        "Set installCommand to: pnpm install --frozen-lockfile --ignore-scripts",
+        "Set buildCommand to: pnpm run build",
+        "Set startCommand to: node artifacts/api-server/dist/index.mjs",
+        "Set healthPath to: /api/healthz",
         "Set routeMode to: static_plus_api",
         "Set staticOutputDir to: artifacts/sardar-security/dist/public",
         "Enable SPA fallback so React Router routes work",

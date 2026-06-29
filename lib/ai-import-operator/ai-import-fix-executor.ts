@@ -10,6 +10,7 @@
 
 import { saveDeploymentConfigAction } from "@/app/actions/project-deployments";
 import { db }                         from "@/lib/db";
+import { getSardarReplitFullPreset }   from "@/lib/smart-import/smart-import-presets";
 import { generateAiImportOperatorRun } from "./ai-import-operator-service";
 import type { AiImportOperatorRun }    from "./ai-import-operator-types";
 
@@ -56,26 +57,20 @@ export async function executeAiImportFix(input: {
   switch (input.fixId) {
     case "apply-sardar-preset":
     case "switch-to-pnpm-preset":
-      base.installCommand  = "pnpm install --frozen-lockfile --ignore-scripts";
-      base.buildCommand    = "pnpm run build";
-      base.startCommand    = "node artifacts/api-server/dist/index.mjs";
-      base.healthPath      = "/api/healthz";
-      base.routeMode       = "static_plus_api";
-      base.staticOutputDir = "artifacts/sardar-security/dist/public";
-      base.apiPrefix       = "/api";
+    case "fix-static-frontend-routing": {
+      // All Sardar/Replit pnpm ecommerce fixes apply the same canonical full preset.
+      // Using getSardarReplitFullPreset() ensures a single source of truth and
+      // prevents partial-write bugs where some fields (e.g. installCommand) stay as npm.
+      const p = getSardarReplitFullPreset();
+      base.installCommand  = p.installCommand;
+      base.buildCommand    = p.buildCommand;
+      base.startCommand    = p.startCommand;
+      base.healthPath      = p.healthPath      ?? "/api/healthz";
+      base.routeMode       = p.routeMode       ?? "static_plus_api";
+      base.staticOutputDir = p.staticOutputPath ?? "artifacts/sardar-security/dist/public";
+      base.apiPrefix       = p.apiPrefix        ?? "/api";
       break;
-
-    case "fix-static-frontend-routing":
-      // Apply the full Sardar/Replit pnpm ecommerce preset — not just routing fields.
-      // Existing npm commands would cause "Install step failed" on retry deploy.
-      base.installCommand  = "pnpm install --frozen-lockfile --ignore-scripts";
-      base.buildCommand    = "pnpm run build";
-      base.startCommand    = "node artifacts/api-server/dist/index.mjs";
-      base.healthPath      = "/api/healthz";
-      base.routeMode       = "static_plus_api";
-      base.staticOutputDir = "artifacts/sardar-security/dist/public";
-      base.apiPrefix       = "/api";
-      break;
+    }
 
     case "fix-health-path":
       base.healthPath = "/api/healthz";
@@ -112,6 +107,28 @@ export async function executeAiImportFix(input: {
 
   if (!saveResult.ok) {
     return { ok: false, error: `Fix validation failed: ${saveResult.error}` };
+  }
+
+  // Post-save verification: confirm the DB was actually updated with pnpm commands.
+  // This catches any silent failure in the upsert path.
+  const SARDAR_FIX_IDS = new Set([
+    "apply-sardar-preset",
+    "switch-to-pnpm-preset",
+    "fix-static-frontend-routing",
+  ]);
+  if (SARDAR_FIX_IDS.has(input.fixId)) {
+    const saved = await db.projectDeploymentConfig.findUnique({
+      where:  { projectId: input.projectId },
+      select: { installCommand: true },
+    });
+    if (saved?.installCommand?.trimStart().startsWith("npm ")) {
+      return {
+        ok: false,
+        error:
+          "Fix incomplete: deployment commands are still using npm. " +
+          "Please apply the fix again or use the Replit Import Wizard in Advanced tools.",
+      };
+    }
   }
 
   const run = await generateAiImportOperatorRun({ projectId: input.projectId });

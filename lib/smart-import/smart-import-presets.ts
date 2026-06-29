@@ -113,6 +113,16 @@ const PRESET_MANUAL: SmartImportDeploymentPreset = {
   ],
 };
 
+// ── Sardar full-preset accessor ───────────────────────────────────────────────
+
+/**
+ * Returns the canonical deployment preset for Sardar/Replit pnpm ecommerce projects.
+ * Centralises the values so the AI Import Operator and fix classifier never duplicate them.
+ */
+export function getSardarReplitFullPreset(): typeof PRESET_SARDAR_PNPM {
+  return PRESET_SARDAR_PNPM;
+}
+
 // ── Selector ──────────────────────────────────────────────────────────────────
 
 /**
