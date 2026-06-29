@@ -13,6 +13,7 @@
 import { useState }                   from "react";
 import { BUILTIN_TEMPLATES }          from "@/lib/project-templates/builtin-project-templates";
 import { Badge }                      from "@/components/ui/badge";
+import { Button }                     from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -22,9 +23,10 @@ import {
 }                                     from "@/components/ui/card";
 import {
   ShoppingCart, Globe, Server, FileCode, Settings,
-  CheckCircle2, ChevronRight, Info,
+  CheckCircle2, ChevronRight, Info, Loader2, Terminal,
 } from "lucide-react";
 import type { ProjectTemplate }       from "@/lib/project-templates/project-template-types";
+import { applyReplitPresetAction }    from "@/app/actions/replit-preset";
 
 // ── Steps ────────────────────────────────────────────────────────────────────
 
@@ -111,10 +113,34 @@ export function NewMigrationWizard({ projectId, isSardar }: NewMigrationWizardPr
   const [completedSteps, setCompletedSteps] = useState<Set<WizardStepId>>(new Set());
   const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null);
   const [selectedSource,   setSelectedSource]   = useState<string | null>(null);
+  const [presetApplying,   setPresetApplying]   = useState(false);
+  const [presetResult,     setPresetResult]     = useState<
+    { ok: true; message: string } | { ok: false; error: string } | null
+  >(null);
 
   function markComplete(step: WizardStepId, nextStep: WizardStepId) {
     setCompletedSteps((prev) => new Set([...prev, step]));
     setCurrentStep(nextStep);
+  }
+
+  async function handleApplyPreset() {
+    setPresetApplying(true);
+    setPresetResult(null);
+    try {
+      const result = await applyReplitPresetAction({ projectId });
+      if (result.ok) {
+        setPresetResult({
+          ok: true,
+          message: `Deployment preset applied (${result.data.preset.detected}). Visit Publishing to deploy.`,
+        });
+      } else {
+        setPresetResult({ ok: false, error: result.error });
+      }
+    } catch (e) {
+      setPresetResult({ ok: false, error: e instanceof Error ? e.message : "Unknown error" });
+    } finally {
+      setPresetApplying(false);
+    }
   }
 
   // ── Sardar notice ─────────────────────────────────────────────────────────
@@ -131,9 +157,52 @@ export function NewMigrationWizard({ projectId, isSardar }: NewMigrationWizardPr
           <CardDescription>
             This project has been detected as a Sardar ecommerce profile. The full Sardar migration
             panels (Staging Import, Trial Migration, Ecommerce Test, Staging Deployment) are available below.
-            Use the template selector above to reference the ecommerce template guidance.
           </CardDescription>
         </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Recommended deployment preset */}
+          <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Recommended Deployment Preset
+            </p>
+            <div className="font-mono text-xs space-y-1 text-foreground">
+              <div><span className="text-muted-foreground">install: </span>pnpm install --frozen-lockfile --ignore-scripts</div>
+              <div><span className="text-muted-foreground">build:   </span>pnpm run build</div>
+              <div><span className="text-muted-foreground">start:   </span>node artifacts/api-server/dist/index.mjs</div>
+              <div><span className="text-muted-foreground">health:  </span>/api/healthz</div>
+              <div><span className="text-muted-foreground">mode:    </span>static_plus_api → /api/* Node, /* Vite frontend</div>
+              <div><span className="text-muted-foreground">static:  </span>artifacts/sardar-security/dist/public</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              onClick={handleApplyPreset}
+              disabled={presetApplying || presetResult?.ok === true}
+            >
+              {presetApplying
+                ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Applying…</>
+                : <><Terminal className="h-3 w-3 mr-1.5" />Apply Recommended Sardar Preset</>
+              }
+            </Button>
+            {presetResult?.ok === true && (
+              <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                {presetResult.message}
+              </span>
+            )}
+          </div>
+
+          {presetResult?.ok === false && (
+            <p className="text-xs text-destructive">{presetResult.error}</p>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            Applying the preset saves the deployment config for this project.
+            No deployment is triggered — use the Publishing tab to deploy.
+          </p>
+        </CardContent>
       </Card>
     );
   }

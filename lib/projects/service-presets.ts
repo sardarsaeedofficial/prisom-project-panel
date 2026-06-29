@@ -41,8 +41,38 @@ export type ServicePreset = {
 export function getServicePresets(): ServicePreset[] {
   return [
     {
+      id:          "sardar-pnpm-ecommerce",
+      label:       "Sardar Ecommerce (pnpm workspace — recommended)",
+      description: "Sardar ecommerce pnpm workspace: API at artifacts/api-server, Vite frontend at artifacts/sardar-security.",
+      services: [
+        {
+          name:           "API Server",
+          slug:           "api",
+          serviceType:    "node",
+          workingDir:     ".",
+          packageManager: "pnpm",
+          installCommand: "pnpm install --frozen-lockfile --ignore-scripts",
+          buildCommand:   "pnpm run build",
+          startCommand:   "node artifacts/api-server/dist/index.mjs",
+          healthPath:     "/api/healthz",
+          isPrimary:      false,
+        },
+        {
+          name:            "Sardar Security Frontend",
+          slug:            "sardar-security",
+          serviceType:     "static",
+          workingDir:      ".",
+          packageManager:  "pnpm",
+          buildCommand:    "pnpm run build",
+          staticOutputDir: "artifacts/sardar-security/dist/public",
+          spaFallback:     true,
+          isPrimary:       true,
+        },
+      ],
+    },
+    {
       id:          "replit-react-express",
-      label:       "React/Vite + Express API (pnpm workspace)",
+      label:       "React/Vite + Express API (pnpm workspace — generic)",
       description: "Two services: a Node API backend + a Vite/React static frontend built with pnpm workspaces.",
       services: [
         {
@@ -51,9 +81,9 @@ export function getServicePresets(): ServicePreset[] {
           serviceType:    "node",
           workingDir:     ".",
           packageManager: "pnpm",
-          installCommand: "pnpm install --frozen-lockfile",
-          buildCommand:   "pnpm --filter @workspace/api-server run build",
-          startCommand:   "node --enable-source-maps artifacts/api-server/dist/index.mjs",
+          installCommand: "pnpm install --frozen-lockfile --ignore-scripts",
+          buildCommand:   "pnpm run build",
+          startCommand:   "node artifacts/api-server/dist/index.mjs",
           healthPath:     "/api/healthz",
           isPrimary:      false,
         },
@@ -63,8 +93,8 @@ export function getServicePresets(): ServicePreset[] {
           serviceType:     "static",
           workingDir:      ".",
           packageManager:  "pnpm",
-          buildCommand:    "pnpm --filter @workspace/web run build",
-          staticOutputDir: "artifacts/web/dist/public",
+          buildCommand:    "pnpm run build",
+          staticOutputDir: "artifacts/sardar-security/dist/public",
           spaFallback:     true,
           isPrimary:       true,
         },

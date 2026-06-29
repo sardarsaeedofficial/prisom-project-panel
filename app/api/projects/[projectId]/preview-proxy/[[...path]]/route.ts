@@ -26,6 +26,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
 import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { promises as fsPromises } from "fs";
+import path from "path";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -97,6 +99,93 @@ function errHtml(status: number, title: string, message: string): NextResponse {
   });
 }
 
+// ── Static file helper ─────────────────────────────────────────────────────
+
+const STATIC_MIME: Record<string, string> = {
+  ".html":  "text/html; charset=utf-8",
+  ".css":   "text/css; charset=utf-8",
+  ".js":    "application/javascript; charset=utf-8",
+  ".mjs":   "application/javascript; charset=utf-8",
+  ".cjs":   "application/javascript; charset=utf-8",
+  ".json":  "application/json; charset=utf-8",
+  ".svg":   "image/svg+xml",
+  ".png":   "image/png",
+  ".jpg":   "image/jpeg",
+  ".jpeg":  "image/jpeg",
+  ".gif":   "image/gif",
+  ".ico":   "image/x-icon",
+  ".webp":  "image/webp",
+  ".woff":  "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf":   "font/ttf",
+  ".txt":   "text/plain; charset=utf-8",
+  ".xml":   "application/xml",
+  ".pdf":   "application/pdf",
+};
+
+/**
+ * Serves a static file from `staticRoot` for the given `requestPath`.
+ * Falls back to index.html for extension-free paths (SPA routing).
+ * Returns null if the file cannot be served (let caller proxy to upstream).
+ *
+ * Path traversal is prevented by resolving against staticRoot and verifying
+ * the resolved path starts with staticRoot.
+ */
+async function serveStaticFile(
+  staticRoot: string,
+  requestPath: string,
+): Promise<NextResponse | null> {
+  const resolvedRoot = path.resolve(staticRoot);
+  // Strip leading slash and resolve against root
+  const relative = requestPath.replace(/^\/+/, "");
+  const candidate = path.resolve(resolvedRoot, relative);
+
+  // Path traversal guard
+  if (candidate !== resolvedRoot && !candidate.startsWith(resolvedRoot + path.sep)) {
+    return null;
+  }
+
+  let filePath = candidate;
+
+  try {
+    const stat = await fsPromises.stat(filePath);
+    if (stat.isDirectory()) {
+      filePath = path.join(filePath, "index.html");
+    }
+  } catch {
+    // File/dir not found
+    const ext = path.extname(requestPath);
+    if (ext && ext !== ".html") {
+      // Missing asset (JS chunk, image, etc.) — don't SPA-fallback
+      return null;
+    }
+    // Extension-free path → SPA fallback
+    filePath = path.join(resolvedRoot, "index.html");
+  }
+
+  let content: Buffer;
+  try {
+    content = await fsPromises.readFile(filePath);
+  } catch {
+    return null;
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = STATIC_MIME[ext] ?? "application/octet-stream";
+  const isHtml = ext === ".html";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new NextResponse(content as any, {
+    status: 200,
+    headers: {
+      "content-type":           contentType,
+      "x-prisom-preview-proxy": "1",
+      "x-prisom-static-serve":  "1",
+      "cache-control":          isHtml ? "no-cache" : "public, max-age=31536000, immutable",
+    },
+  });
+}
+
 // ── Core handler ───────────────────────────────────────────────────────────
 
 async function handler(
@@ -133,7 +222,7 @@ async function handler(
   // ── 3. Deployment config ─────────────────────────────────────────────────
   const config = await db.projectDeploymentConfig.findUnique({
     where:  { projectId },
-    select: { port: true },
+    select: { port: true, routeMode: true, publicStaticPath: true, apiPrefix: true },
   });
   if (!config) {
     return errHtml(
@@ -156,13 +245,32 @@ async function handler(
     );
   }
 
-  // ── 5. Build target URL ──────────────────────────────────────────────────
+  // ── 5. Static file serving for static_plus_api mode ─────────────────────
+  // For routes other than /api/* we serve the built frontend directly from the
+  // published static directory (/var/www/prisom-projects/<slug>/<ref>/).
+  // This fixes "Cannot GET /" — the Node API never serves the Vite frontend.
+  const routeMode      = config.routeMode ?? "fullstack_node";
+  const publicStaticPath = config.publicStaticPath ?? null;
+  const apiPrefix      = (config.apiPrefix ?? "/api").replace(/\/$/, "");
+  const upstreamPath   = "/" + pathParts.join("/");
+
+  if (
+    (routeMode === "static_plus_api" || routeMode === "static_only") &&
+    publicStaticPath &&
+    !upstreamPath.startsWith(apiPrefix + "/") &&
+    upstreamPath !== apiPrefix
+  ) {
+    const staticResult = await serveStaticFile(publicStaticPath, upstreamPath);
+    if (staticResult) return staticResult;
+  }
+
+  // ── 6. Build target URL ──────────────────────────────────────────────────
   // Target is ALWAYS 127.0.0.1 — never any user-supplied hostname.
-  const upstreamPath = "/" + pathParts.join("/");
+  // (upstreamPath already computed above)
   const upstreamSearch = req.nextUrl.search;
   const targetUrl = `http://127.0.0.1:${port}${upstreamPath}${upstreamSearch}`;
 
-  // ── 6. Safe forwarded request headers ────────────────────────────────────
+  // ── 7. Safe forwarded request headers ────────────────────────────────────
   const forwardHeaders: Record<string, string> = {
     host:                `127.0.0.1:${port}`,
     "x-forwarded-for":   "127.0.0.1",
@@ -182,7 +290,7 @@ async function handler(
   delete forwardHeaders["authorization"];
   delete forwardHeaders["x-api-key"];
 
-  // ── 7. Proxy the request ──────────────────────────────────────────────────
+  // ── 8. Proxy the request ──────────────────────────────────────────────────
   let upstream: Response;
   try {
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
@@ -212,7 +320,7 @@ async function handler(
     return errHtml(502, "Proxy error", `Upstream error: ${msg.slice(0, 120)}`);
   }
 
-  // ── 8. Build safe response headers ────────────────────────────────────────
+  // ── 9. Build safe response headers ────────────────────────────────────────
   const resHeaders = new Headers();
 
   for (const [key, value] of upstream.headers.entries()) {
@@ -242,7 +350,7 @@ async function handler(
   // Mark this response as proxy-generated
   resHeaders.set("x-prisom-preview-proxy", "1");
 
-  // ── 9. Handle redirects ───────────────────────────────────────────────────
+  // ── 10. Handle redirects ──────────────────────────────────────────────────
   if (upstream.status >= 300 && upstream.status < 400) {
     const location = upstream.headers.get("location") ?? "";
 

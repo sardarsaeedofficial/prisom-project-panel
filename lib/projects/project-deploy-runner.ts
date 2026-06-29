@@ -370,13 +370,24 @@ export function validateAndParseCommand(
 
     // ── node ───────────────────────────────────────────────────────────────
     case "node": {
-      const file = subcmd;
+      // Normalize away --enable-source-maps so users can paste the Replit start
+      // command verbatim. The flag is safe but non-essential; stripping it keeps
+      // the allowlist simple without blocking a common Replit pattern.
+      let file: string | undefined;
+      let extraFlags: string[];
+      if (subcmd === "--enable-source-maps") {
+        file       = flags[0];
+        extraFlags = flags.slice(1);
+      } else {
+        file       = subcmd;
+        extraFlags = flags;
+      }
       if (!file) return { ok: false, error: "node: a file argument is required (e.g. node server.js)" };
       if (file.startsWith("/") || file.includes(".."))
         return { ok: false, error: "node: path must be relative and must not contain .." };
       if (!/\.(js|mjs|cjs)$/.test(file))
         return { ok: false, error: "node: only .js / .mjs / .cjs files are allowed" };
-      if (flags.length > 0)
+      if (extraFlags.length > 0)
         return { ok: false, error: "node: extra arguments are not allowed for safety" };
       return { ok: true, cmd: { binary: "node", args: [file] } };
     }
