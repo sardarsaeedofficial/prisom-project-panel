@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WorkspaceNav } from "@/components/projects/workspace-nav";
+import { AutoImportControlRoom } from "@/components/projects/auto-import-control-room";
 import { db } from "@/lib/db";
 import {
   resolveProjectLiveEndpoints,
@@ -51,6 +52,10 @@ export default async function ProjectPreviewPage({ params }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
+      {/* Sprint 86: Auto Import compact card */}
+      <div className="flex-shrink-0 border-b px-4 py-2">
+        <AutoImportControlRoom projectId={projectId} compact />
+      </div>
       <PreviewIframe
         projectId={projectId}
         initialStatus={initialStatus}

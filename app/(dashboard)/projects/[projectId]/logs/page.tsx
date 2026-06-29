@@ -8,6 +8,7 @@ import { discoverLogSources } from "@/lib/logs/project-log-sources";
 import { DebugSummaryPanel }          from "@/components/projects/debug-summary-panel";
 import { ContextualHelpCard }         from "@/components/projects/contextual-help-card";
 import { PostLaunchBugCapturePanel }  from "@/components/projects/post-launch-bug-capture-panel";
+import { AutoImportControlRoom }      from "@/components/projects/auto-import-control-room";
 
 export const metadata: Metadata = { title: "Logs" };
 export const dynamic = "force-dynamic";
@@ -45,6 +46,11 @@ export default async function ProjectLogsPage({ params, searchParams }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <WorkspaceNav projectId={projectId} />
+      {/* Sprint 86: Auto Import compact card */}
+      <div className="flex-shrink-0 border-b px-4 py-2">
+        <AutoImportControlRoom projectId={projectId} compact />
+      </div>
+
       {/* Sprint 67: Contextual help card */}
       <div className="flex-shrink-0 border-b px-4 py-2 bg-background/95">
         <ContextualHelpCard

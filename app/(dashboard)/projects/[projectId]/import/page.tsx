@@ -6,7 +6,8 @@ import { WorkspaceNav } from "@/components/projects/workspace-nav";
 import { ReplitImportWizard } from "@/components/projects/replit-import-wizard";
 import { DbMigrationPanel }   from "@/components/projects/db-migration-panel";
 import { SourceIntakePanel }  from "@/components/projects/source-intake-panel";
-import { SmartImportPanel }   from "@/components/projects/smart-import-panel";
+import { SmartImportPanel }        from "@/components/projects/smart-import-panel";
+import { AutoImportControlRoom }   from "@/components/projects/auto-import-control-room";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = { title: "Import / Source Intake" };
@@ -38,7 +39,10 @@ export default async function ProjectImportPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
-          {/* ── Sprint 85: Smart Import — top of page ── */}
+          {/* ── Sprint 86: Auto Import Control Room — top of page ── */}
+          <AutoImportControlRoom projectId={projectId} />
+
+          {/* ── Sprint 85: Smart Import ── */}
           <SmartImportPanel projectId={projectId} />
 
           {/* ── Sprint 57: Source Intake Readiness + GitHub import ── */}
