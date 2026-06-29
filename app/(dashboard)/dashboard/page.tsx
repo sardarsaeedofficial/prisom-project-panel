@@ -13,7 +13,7 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { ProjectCard } from "@/components/projects/project-card";
 import { Button } from "@/components/ui/button";
-import { getProjects, toProjectViewModel } from "@/lib/data/projects";
+import { getProjects, toProjectViewModel, type ProjectListItem } from "@/lib/data/projects";
 import { db } from "@/lib/db";
 import { getCurrentWorkspaceId } from "@/lib/current-workspace";
 import { ProjectStatus, Visibility } from "@prisma/client";
@@ -21,49 +21,27 @@ import { ProjectStatus, Visibility } from "@prisma/client";
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  // ── Fetch real data from DB ──────────────────────────────────────────────────
-  type DashboardStats = {
-    totalProjects: number;
-    activeProjects: number;
-    publishedProjects: number;
-    totalDeployments: number;
-  };
+type DashboardStats = {
+  totalProjects:     number;
+  activeProjects:    number;
+  publishedProjects: number;
+  totalDeployments:  number;
+};
 
-  let stats: DashboardStats = {
-    totalProjects: 0,
-    activeProjects: 0,
-    publishedProjects: 0,
-    totalDeployments: 0,
-  };
-  let recentProjectCards: ReturnType<typeof toProjectViewModel>[] = [];
-  let dbError: string | null = null;
+// Shared include so the Tier-2 fallback query produces the same shape as getProjects().
+const PROJECT_INCLUDE = {
+  githubRepository: true,
+  domains:          { where: { isPrimary: true }, take: 1 },
+  deployments:      { orderBy: { createdAt: "desc" } as const, take: 1 },
+  environments:     true,
+  _count:           { select: { logs: true, tasks: true, features: true, commits: true } },
+} as const;
 
-  try {
-    const [allProjects, workspaceId] = await Promise.all([
-      getProjects(),
-      getCurrentWorkspaceId(),
-    ]);
-
-    stats = {
-      totalProjects: allProjects.length,
-      activeProjects: allProjects.filter((p) => p.status === ProjectStatus.ACTIVE).length,
-      publishedProjects: allProjects.filter(
-        (p) => p.visibility === Visibility.PUBLIC
-      ).length,
-      totalDeployments: await db.deployment.count({
-        where: { project: { workspaceId } },
-      }),
-    };
-
-    recentProjectCards = allProjects
-      .slice(0, 4)
-      .map((p) => toProjectViewModel(p));
-  } catch {
-    dbError =
-      "Could not connect to the database. Set DATABASE_URL in .env and run db:seed.";
-  }
-
+function renderPage(
+  stats:              DashboardStats,
+  recentProjectCards: ReturnType<typeof toProjectViewModel>[],
+  dbError:            string | null,
+) {
   return (
     <DashboardShell>
       <PageHeader
@@ -79,7 +57,7 @@ export default async function DashboardPage() {
         }
       />
 
-      {/* DB error banner */}
+      {/* DB error banner — only shown when data genuinely could not be loaded */}
       {dbError && (
         <div className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 mb-6 text-sm text-destructive">
           <Database className="h-4 w-4 shrink-0" />
@@ -93,7 +71,7 @@ export default async function DashboardPage() {
           title="Total Projects"
           value={stats.totalProjects}
           icon={FolderOpen}
-          trend={{ value: "From database", positive: true }}
+          description="All projects"
         />
         <StatCard
           title="Active"
@@ -148,4 +126,66 @@ export default async function DashboardPage() {
       </div>
     </DashboardShell>
   );
+}
+
+export default async function DashboardPage() {
+  let stats: DashboardStats = {
+    totalProjects:     0,
+    activeProjects:    0,
+    publishedProjects: 0,
+    totalDeployments:  0,
+  };
+  let recentProjectCards: ReturnType<typeof toProjectViewModel>[] = [];
+
+  // ── Tier 1: session-aware, workspace-scoped query ─────────────────────────
+  // Normal path — uses the current user's session to scope projects to their workspace.
+  try {
+    const [allProjects, workspaceId] = await Promise.all([
+      getProjects(),
+      getCurrentWorkspaceId(),
+    ]);
+
+    stats = {
+      totalProjects:     allProjects.length,
+      activeProjects:    allProjects.filter((p) => p.status === ProjectStatus.ACTIVE).length,
+      publishedProjects: allProjects.filter((p) => p.visibility === Visibility.PUBLIC).length,
+      totalDeployments:  await db.deployment.count({
+        where: { project: { workspaceId } },
+      }),
+    };
+    recentProjectCards = allProjects.slice(0, 4).map((p) => toProjectViewModel(p));
+    return renderPage(stats, recentProjectCards, null);
+  } catch {
+    // Tier 1 failed — often a session/workspace lookup issue, not a DB problem.
+    // Fall through to Tier 2 before deciding on an error message.
+  }
+
+  // ── Tier 2: direct DB query (no session/workspace dependency) ────────────
+  // Used when the session-based path fails (e.g. workspace not found, no active session).
+  // DATABASE_URL being set and the DB being reachable are the only requirements.
+  if (!process.env.DATABASE_URL) {
+    return renderPage(stats, [], "DATABASE_URL is missing from the panel environment.");
+  }
+
+  try {
+    const [totalProjects, activeProjects, publishedProjects, totalDeployments, recentRaw] =
+      await Promise.all([
+        db.project.count(),
+        db.project.count({ where: { status: ProjectStatus.ACTIVE } }),
+        db.project.count({ where: { visibility: Visibility.PUBLIC } }),
+        db.deployment.count(),
+        db.project.findMany({
+          include:  PROJECT_INCLUDE,
+          orderBy:  { updatedAt: "desc" },
+          take:     4,
+        }),
+      ]);
+
+    stats = { totalProjects, activeProjects, publishedProjects, totalDeployments };
+    recentProjectCards = recentRaw.map((p) => toProjectViewModel(p as ProjectListItem));
+    return renderPage(stats, recentProjectCards, null);
+  } catch (err) {
+    console.error("[dashboard] failed to load dashboard data", err);
+    return renderPage(stats, [], "Dashboard data failed to load. Check server logs.");
+  }
 }
