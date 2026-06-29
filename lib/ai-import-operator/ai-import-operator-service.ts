@@ -214,7 +214,7 @@ function explainRun(run: AutoImportRun): {
   // ── No domain ─────────────────────────────────────────────────────────────
   if (!hasPublicDomain && status === "preview_live") {
     return {
-      summary: "Preview is live and working! To go public, you need to add a domain in the Domains tab.",
+      summary: "Preview is live through the panel proxy. No public domain attached yet — use panel preview until a domain is connected.",
       question: "Go to the Domains tab to add your public domain.",
     };
   }
@@ -230,7 +230,9 @@ function explainRun(run: AutoImportRun): {
   if (status === "preview_live") {
     const url = domains.find((d) => d.type !== "internal")?.url ?? "";
     return {
-      summary: `Preview is live${url ? ` at ${url}` : ""}. Add a public domain to go live.`,
+      summary: url
+        ? `Preview is live at ${url}. Ready for go-live.`
+        : "Preview is available through the panel proxy. Add a public domain to go live.",
     };
   }
 
@@ -476,12 +478,21 @@ export async function generateAiImportOperatorRun(input: {
   const opStatus    = mapToOperatorStatus(autoRun);
 
   // ── Derive preview/domain URLs ────────────────────────────────────────────
-  const previewDomain = autoRun.domains.find((d) => d.type === "preview" || d.type === "public");
-  const publicDomain  = autoRun.domains.find((d) => d.type === "public" && d.status === "working");
+  const previewDomain  = autoRun.domains.find((d) => d.type === "preview" || d.type === "public");
+  const publicDomain   = autoRun.domains.find((d) => d.type === "public" && d.status === "working");
   const internalDomain = autoRun.domains.find((d) => d.type === "internal");
-  const healthPath    = deployConfig?.healthPath ?? "/api/healthz";
-  const previewUrl    = previewDomain?.url ?? internalDomain?.url;
-  const healthUrl     = previewUrl ? `${previewUrl.replace(/\/$/, "")}${healthPath}` : undefined;
+  const healthPath     = deployConfig?.healthPath ?? "/api/healthz";
+
+  // Health checks use the internal loopback — server-side only, never sent to the browser.
+  const internalBase = internalDomain?.url;
+  const healthUrl    = internalBase
+    ? `${internalBase.replace(/\/$/, "")}${healthPath}`
+    : undefined;
+
+  // Browser preview URL: public/preview domain if available, otherwise the panel proxy
+  // path. Never 127.0.0.1 — that only works server-side on the VPS, not in the user's browser.
+  const proxyPath  = `/api/projects/${projectId}/preview-proxy/`;
+  const previewUrl = previewDomain?.url ?? (internalDomain ? proxyPath : undefined);
 
   return {
     projectId,

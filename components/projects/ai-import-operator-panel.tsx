@@ -66,6 +66,17 @@ function StepDot({ status }: { status: "pending" | "running" | "passed" | "warni
   return <Clock className="h-4 w-4 text-muted-foreground shrink-0" />;
 }
 
+/** Returns false for raw 127.0.0.1/localhost URLs — those are VPS-internal only. */
+function isBrowserSafe(url: string): boolean {
+  if (url.startsWith("/")) return true; // relative proxy paths are always safe
+  try {
+    const { hostname } = new URL(url);
+    return hostname !== "127.0.0.1" && hostname !== "localhost";
+  } catch {
+    return false;
+  }
+}
+
 function downloadMarkdown(markdown: string, filename: string) {
   const blob = new Blob([markdown], { type: "text/markdown" });
   const url  = URL.createObjectURL(blob);
@@ -432,17 +443,18 @@ export function AiImportOperatorPanel({ projectId }: AiImportOperatorPanelProps)
             {/* ── Preview / domain URLs ────────────────────────────────────── */}
             {(run.previewUrl || run.publicDomain) && (
               <div className="flex flex-wrap gap-3 text-xs">
-                {run.previewUrl && (
+                {run.previewUrl && isBrowserSafe(run.previewUrl) && (
                   <a
                     href={run.previewUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1 text-primary hover:underline"
                   >
-                    <Eye className="h-3.5 w-3.5" /> Preview
+                    <Eye className="h-3.5 w-3.5" />
+                    {run.previewUrl.startsWith("/api/projects/") ? "Panel preview" : "Preview"}
                   </a>
                 )}
-                {run.publicDomain && (
+                {run.publicDomain && isBrowserSafe(run.publicDomain) && (
                   <a
                     href={run.publicDomain}
                     target="_blank"
