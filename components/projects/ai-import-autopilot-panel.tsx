@@ -423,6 +423,26 @@ export function AiImportAutopilotPanel({ projectId, compact }: AiImportAutopilot
                   {run.hiddenTechnicalDetails.staticOutputPath && (
                     <div><span className="text-muted-foreground">static output:</span> {run.hiddenTechnicalDetails.staticOutputPath}</div>
                   )}
+                  {run.hiddenTechnicalDetails.projectId && (
+                    <div className="pt-1 border-t border-border/50 mt-1">
+                      <span className="text-muted-foreground">project id:</span> {run.hiddenTechnicalDetails.projectId}
+                    </div>
+                  )}
+                  {run.hiddenTechnicalDetails.projectSlug && (
+                    <div><span className="text-muted-foreground">project slug:</span> {run.hiddenTechnicalDetails.projectSlug}</div>
+                  )}
+                  {run.hiddenTechnicalDetails.deploymentConfigFound !== undefined && (
+                    <div><span className="text-muted-foreground">deployment config found:</span> {run.hiddenTechnicalDetails.deploymentConfigFound ? "yes" : "no"}</div>
+                  )}
+                  {run.hiddenTechnicalDetails.envVarNamesFound && (
+                    <div><span className="text-muted-foreground">env vars found:</span> {run.hiddenTechnicalDetails.envVarNamesFound.join(", ") || "none"}</div>
+                  )}
+                  {run.hiddenTechnicalDetails.latestDeploymentStatus !== undefined && (
+                    <div><span className="text-muted-foreground">latest deployment status:</span> {run.hiddenTechnicalDetails.latestDeploymentStatus ?? "none"}</div>
+                  )}
+                  {run.hiddenTechnicalDetails.sourceDirectoryChecked !== undefined && (
+                    <div><span className="text-muted-foreground">source directory checked:</span> {run.hiddenTechnicalDetails.sourceDirectoryChecked ? "found" : "not found"}</div>
+                  )}
                   {Object.keys(run.hiddenTechnicalDetails.fixAttempts).length > 0 && (
                     <div>
                       <span className="text-muted-foreground">fix attempts:</span>{" "}

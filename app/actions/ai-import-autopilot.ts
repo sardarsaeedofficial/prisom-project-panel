@@ -21,6 +21,7 @@ import { requireProjectPermission }        from "@/lib/auth/project-membership";
 import { writeProjectAuditEvent }          from "@/lib/audit/project-audit";
 import { getAuditRequestContext }          from "@/lib/audit/request-context";
 import { db }                              from "@/lib/db";
+import { getProjectByIdForImport }         from "@/lib/projects/project-lookup-fallback";
 import { runAiImportAutopilot }            from "@/lib/ai-import-autopilot/ai-import-autopilot-orchestrator";
 import { exportAiImportAutopilotRunbook }  from "@/lib/ai-import-autopilot/ai-import-autopilot-export";
 import { upsertEnvVarAction }              from "@/app/actions/project-envvars";
@@ -36,11 +37,26 @@ async function deployOrEditAuth(projectId: string) {
   return requireProjectPermission(projectId, "project.edit");
 }
 
+/**
+ * Checks the project exists via a direct DB read BEFORE the workspace/session
+ * permission check. This guarantees a genuine permission failure (project
+ * exists, user lacks access) is never reported to the client as the
+ * misleading "Project not found." — those are different problems.
+ */
+async function assertProjectExists(projectId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const project = await getProjectByIdForImport(projectId);
+  if (!project) return { ok: false, error: "Project not found." };
+  return { ok: true };
+}
+
 // ── Action: runAiImportAutopilotAction ────────────────────────────────────────
 
 export async function runAiImportAutopilotAction(input: {
   projectId: string;
 }): Promise<ActionResult<AiImportAutopilotRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await deployOrEditAuth(input.projectId);
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -80,6 +96,9 @@ export async function saveAutopilotInputsAction(input: {
   projectId: string;
   values: Record<string, string>;
 }): Promise<ActionResult<AiImportAutopilotRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "project.edit");
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -147,6 +166,9 @@ export async function approveAutopilotFixAction(input: {
     return { ok: false, error: "Type I APPROVE to confirm." };
   }
 
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await deployOrEditAuth(input.projectId);
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -179,6 +201,9 @@ export async function approveAutopilotFixAction(input: {
 export async function exportAiImportAutopilotRunbookAction(input: {
   projectId: string;
 }): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "project.view");
   if (!auth.ok) return { ok: false, error: auth.error };
 

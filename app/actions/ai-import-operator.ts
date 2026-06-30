@@ -21,6 +21,7 @@ import { requireProjectPermission }       from "@/lib/auth/project-membership";
 import { writeProjectAuditEvent }         from "@/lib/audit/project-audit";
 import { getAuditRequestContext }         from "@/lib/audit/request-context";
 import { db }                             from "@/lib/db";
+import { getProjectByIdForImport }        from "@/lib/projects/project-lookup-fallback";
 import { generateAiImportOperatorRun }    from "@/lib/ai-import-operator/ai-import-operator-service";
 import { executeAiImportFix }             from "@/lib/ai-import-operator/ai-import-fix-executor";
 import { retryAiImportDeploy }            from "@/lib/ai-import-operator/ai-import-retry-deploy";
@@ -32,11 +33,25 @@ type ActionResult<T = void> =
   | { ok: true;  data: T }
   | { ok: false; error: string };
 
+/**
+ * Checks the project exists via a direct DB read BEFORE the workspace/session
+ * permission check, so a genuine permission failure is never reported to the
+ * client as the misleading "Project not found." — see lib/projects/project-lookup-fallback.ts.
+ */
+async function assertProjectExists(projectId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const project = await getProjectByIdForImport(projectId);
+  if (!project) return { ok: false, error: "Project not found." };
+  return { ok: true };
+}
+
 // ── Action: generateAiImportOperatorRunAction ─────────────────────────────────
 
 export async function generateAiImportOperatorRunAction(input: {
   projectId: string;
 }): Promise<ActionResult<AiImportOperatorRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "project.view");
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -68,6 +83,9 @@ export async function saveAiImportUserInputsAction(input: {
   projectId: string;
   values: Record<string, string>;
 }): Promise<ActionResult<AiImportOperatorRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "project.edit");
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -134,6 +152,9 @@ export async function executeAiImportFixAction(input: {
     return { ok: false, error: "Type APPLY FIX to confirm." };
   }
 
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "deploy.trigger");
   const editAuth = auth.ok ? auth : await requireProjectPermission(input.projectId, "project.edit");
   if (!editAuth.ok) return { ok: false, error: editAuth.error };
@@ -175,6 +196,9 @@ export async function retryAiImportDeployAction(input: {
     return { ok: false, error: "Type RETRY DEPLOY to confirm." };
   }
 
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "deploy.trigger");
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -209,6 +233,9 @@ export async function retryAiImportDeployAction(input: {
 export async function exportAiImportOperatorRunbookAction(input: {
   projectId: string;
 }): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
   const auth = await requireProjectPermission(input.projectId, "project.view");
   if (!auth.ok) return { ok: false, error: auth.error };
 

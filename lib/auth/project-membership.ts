@@ -164,15 +164,17 @@ export async function requireProjectPermission(
     });
 
     if (!project) {
-      return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
+      return { ok: false, error: "Project not found.", code: "NOT_FOUND" };
     }
 
     const isOwner =
       project.ownerId === userId || project.workspace.ownerId === userId;
 
     if (!isOwner) {
-      // User exists but has no membership and does not own the project.
-      return { ok: false, error: "Project not found.", code: "FORBIDDEN" };
+      // The project exists — the resolved user simply isn't a member or owner.
+      // Must not say "Project not found" here: that misleads callers into
+      // thinking the record is missing when it's actually a permission gap.
+      return { ok: false, error: "You do not have access to this project.", code: "FORBIDDEN" };
     }
 
     // Workspace / project owner is treated as full owner.

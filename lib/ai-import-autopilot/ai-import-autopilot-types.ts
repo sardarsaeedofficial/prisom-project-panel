@@ -90,6 +90,13 @@ export type TechnicalDetails = {
   staticOutputPath?:   string;
   lastDeploymentLog?:  string;
   fixAttempts:         Record<string, number>;
+  // ── Debug-safe project lookup summary — names/status only, no secret values ──
+  projectId?:               string;
+  projectSlug?:              string;
+  deploymentConfigFound?:    boolean;
+  envVarNamesFound?:         string[];
+  latestDeploymentStatus?:   string | null;
+  sourceDirectoryChecked?:   boolean;
 };
 
 export type LogClassification = {

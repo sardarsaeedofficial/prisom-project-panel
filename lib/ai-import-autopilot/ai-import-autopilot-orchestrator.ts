@@ -18,6 +18,10 @@
 import { db }                          from "@/lib/db";
 import { runAutoImportAnalysis }       from "@/lib/auto-import/auto-import-orchestrator";
 import { deployProjectAction }         from "@/app/actions/project-deployments";
+import {
+  getProjectByIdForImport,
+  type ImportProjectLookup,
+}                                       from "@/lib/projects/project-lookup-fallback";
 import type { AutoImportRun }          from "@/lib/auto-import/auto-import-types";
 import { applyAutopilotSafeFix }       from "./ai-import-autopilot-fix-engine";
 import { classifyAutopilotLog }        from "./ai-import-autopilot-log-classifier";
@@ -100,6 +104,7 @@ async function loadTechnicalDetails(
   projectId: string,
   detectedStack: DetectedStack,
   retryBudget: RetryBudget,
+  projectLookup: ImportProjectLookup | null,
   lastDeploymentLog?: string,
 ) {
   const config = await db.projectDeploymentConfig.findUnique({
@@ -121,6 +126,13 @@ async function loadTechnicalDetails(
     staticOutputPath:  config?.staticOutputDir   ?? undefined,
     lastDeploymentLog: lastDeploymentLog?.slice(0, 4000),
     fixAttempts:       retryBudget.attemptsByKind(),
+    // Debug-safe project lookup summary — names/status only, no secret values.
+    projectId:               projectLookup?.id,
+    projectSlug:             projectLookup?.slug,
+    deploymentConfigFound:   projectLookup?.hasDeploymentConfig,
+    envVarNamesFound:        projectLookup?.envVarNames,
+    latestDeploymentStatus:  projectLookup?.latestDeploymentStatus,
+    sourceDirectoryChecked:  projectLookup?.sourceDirectoryExists,
   };
 }
 
@@ -132,6 +144,7 @@ type BuildRunParams = {
   log: string[];
   safeFixesApplied: AppliedFix[];
   retryBudget: RetryBudget;
+  projectLookup: ImportProjectLookup | null;
   requiredInputs?: RequiredInput[];
   pendingFix?: ProposedFix;
   verification?: PreviewVerificationResult;
@@ -141,7 +154,7 @@ type BuildRunParams = {
 async function buildRun(params: BuildRunParams): Promise<AiImportAutopilotRun> {
   const {
     projectId, state, summary, autoRun, log, safeFixesApplied,
-    retryBudget, requiredInputs, pendingFix, verification, lastDeploymentLog,
+    retryBudget, projectLookup, requiredInputs, pendingFix, verification, lastDeploymentLog,
   } = params;
 
   const detectedStack = buildDetectedStack(autoRun);
@@ -162,7 +175,7 @@ async function buildRun(params: BuildRunParams): Promise<AiImportAutopilotRun> {
     browserPreviewUrl: verification?.browserPreviewUrl,
     publicUrl:         verification?.publicUrl,
     internalHealthUrl: verification?.internalHealthUrl,
-    hiddenTechnicalDetails: await loadTechnicalDetails(projectId, detectedStack, retryBudget, lastDeploymentLog),
+    hiddenTechnicalDetails: await loadTechnicalDetails(projectId, detectedStack, retryBudget, projectLookup, lastDeploymentLog),
   };
 }
 
@@ -174,14 +187,34 @@ export async function runAiImportAutopilot(input: {
   const safeFixesApplied: AppliedFix[] = [];
   const retryBudget = new RetryBudget();
 
+  // Direct DB read for the project record. This must never be conflated with a
+  // workspace/session permission failure — the caller (server action) is
+  // responsible for gating mutations via requireProjectPermission separately.
+  const projectLookup = await getProjectByIdForImport(projectId);
+  if (!projectLookup) {
+    return {
+      projectId,
+      generatedAt: new Date().toISOString(),
+      state: "blocked",
+      summary: "Project not found.",
+      log: [],
+      detectedStack: { isSardarPreset: false, packageManager: "unknown", framework: [], services: [], evidence: [] },
+      requiredInputs: [],
+      safeFixesApplied: [],
+      checks: [],
+      nextAction: { label: "Project not found", description: "This project record does not exist.", buttonText: "Make This Project Live" },
+      hiddenTechnicalDetails: { fixAttempts: {} },
+    };
+  }
+
   let autoRun = await runAutoImportAnalysis({ projectId });
 
   // ── No source ──────────────────────────────────────────────────────────────
   if (autoRun.issues.some((i) => i.id === "no-source")) {
     return buildRun({
       projectId, state: "blocked",
-      summary: "No project source has been uploaded yet. Upload a ZIP or connect a GitHub repository to get started.",
-      autoRun, log, safeFixesApplied, retryBudget,
+      summary: "Project source files not found. Upload a ZIP or connect a GitHub repository to get started.",
+      autoRun, log, safeFixesApplied, retryBudget, projectLookup,
     });
   }
 
@@ -200,7 +233,7 @@ export async function runAiImportAutopilot(input: {
     return buildRun({
       projectId, state: "waiting_for_user_input",
       summary: `I need ${missingRequired.length} missing secret${missingRequired.length > 1 ? "s" : ""} before I can deploy: ${missingRequired.map((e) => e.name).join(", ")}.`,
-      autoRun, log, safeFixesApplied, retryBudget, requiredInputs,
+      autoRun, log, safeFixesApplied, retryBudget, projectLookup, requiredInputs,
     });
   }
 
@@ -214,7 +247,7 @@ export async function runAiImportAutopilot(input: {
         return buildRun({
           projectId, state: "blocked",
           summary: `I couldn't apply the deployment preset: ${fixRes.error}`,
-          autoRun, log, safeFixesApplied, retryBudget,
+          autoRun, log, safeFixesApplied, retryBudget, projectLookup,
         });
       }
       log.push("I applied the correct deployment preset.");
@@ -231,7 +264,7 @@ export async function runAiImportAutopilot(input: {
         return buildRun({
           projectId, state: "needs_manual_approval",
           summary: `I tried to fix "${fixableIssue.title}" automatically, but it's still failing after several attempts. This needs manual review.`,
-          autoRun, log, safeFixesApplied, retryBudget,
+          autoRun, log, safeFixesApplied, retryBudget, projectLookup,
           pendingFix: {
             id: fixableIssue.fix.id, title: fixableIssue.fix.label,
             plainEnglishSummary: fixableIssue.message, safe: true,
@@ -252,7 +285,7 @@ export async function runAiImportAutopilot(input: {
         return buildRun({
           projectId, state: "blocked",
           summary: `I couldn't apply the fix: ${fixRes.error}`,
-          autoRun, log, safeFixesApplied, retryBudget,
+          autoRun, log, safeFixesApplied, retryBudget, projectLookup,
         });
       }
       log.push("I fixed the routing.");
@@ -266,7 +299,7 @@ export async function runAiImportAutopilot(input: {
         return buildRun({
           projectId, state: "blocked",
           summary: classification?.userMessage ?? `Deployment failed: ${deployResult.error}`,
-          autoRun, log, safeFixesApplied, retryBudget, lastDeploymentLog: logText,
+          autoRun, log, safeFixesApplied, retryBudget, projectLookup, lastDeploymentLog: logText,
         });
       }
       autoRun = await runAutoImportAnalysis({ projectId });
@@ -296,7 +329,7 @@ export async function runAiImportAutopilot(input: {
         return buildRun({
           projectId, state: "blocked",
           summary: classification?.userMessage ?? `Deployment failed: ${deployResult.error}`,
-          autoRun, log, safeFixesApplied, retryBudget, lastDeploymentLog: logText,
+          autoRun, log, safeFixesApplied, retryBudget, projectLookup, lastDeploymentLog: logText,
         });
       }
       log.push("Install completed.");
@@ -317,7 +350,7 @@ export async function runAiImportAutopilot(input: {
         summary: verification.publicUrl
           ? `Preview is live at ${verification.publicUrl}.`
           : "Preview is available through the panel proxy. Add a public domain when ready.",
-        autoRun, log, safeFixesApplied, retryBudget, verification,
+        autoRun, log, safeFixesApplied, retryBudget, projectLookup, verification,
       });
     }
 
@@ -339,20 +372,20 @@ export async function runAiImportAutopilot(input: {
       return buildRun({
         projectId, state: "needs_manual_approval",
         summary: classification?.userMessage ?? `Preview check failed: ${failingInternalCheck.result}`,
-        autoRun, log, safeFixesApplied, retryBudget, verification,
+        autoRun, log, safeFixesApplied, retryBudget, projectLookup, verification,
       });
     }
 
     return buildRun({
       projectId, state: "needs_manual_approval",
       summary: "I've applied all the safe fixes I know about, but the preview still isn't fully passing. This needs manual review.",
-      autoRun, log, safeFixesApplied, retryBudget, verification,
+      autoRun, log, safeFixesApplied, retryBudget, projectLookup, verification,
     });
   }
 
   return buildRun({
     projectId, state: "blocked",
     summary: "I reached the automatic retry limit for this run. Check technical details below, then try again.",
-    autoRun, log, safeFixesApplied, retryBudget,
+    autoRun, log, safeFixesApplied, retryBudget, projectLookup,
   });
 }
