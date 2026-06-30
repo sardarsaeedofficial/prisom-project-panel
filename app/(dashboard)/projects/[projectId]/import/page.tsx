@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { PackageOpen, ChevronDown } from "lucide-react";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
-import { ReplitImportWizard }         from "@/components/projects/replit-import-wizard";
-import { DbMigrationPanel }           from "@/components/projects/db-migration-panel";
-import { SourceIntakePanel }          from "@/components/projects/source-intake-panel";
-import { SmartImportPanel }           from "@/components/projects/smart-import-panel";
-import { AutoImportControlRoom }      from "@/components/projects/auto-import-control-room";
-import { AiImportOperatorPanel }      from "@/components/projects/ai-import-operator-panel";
+import { AiImportAutopilotPanel }     from "@/components/projects/ai-import-autopilot-panel";
 import { AdvancedToolsSection }       from "@/components/projects/advanced-tools-section";
 import { db } from "@/lib/db";
 
@@ -41,8 +35,8 @@ export default async function ProjectImportPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
-          {/* ── Sprint 87: AI Import Operator — primary interface ── */}
-          <AiImportOperatorPanel projectId={projectId} />
+          {/* ── Sprint 88: AI Import Autopilot — primary interface ── */}
+          <AiImportAutopilotPanel projectId={projectId} />
 
           {/* ── Advanced tools — collapsed by default ── */}
           <AdvancedToolsSection

@@ -12,6 +12,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Wrench, PackageOpen } from "lucide-react";
 import { SmartImportPanel }      from "@/components/projects/smart-import-panel";
 import { AutoImportControlRoom } from "@/components/projects/auto-import-control-room";
+import { AiImportOperatorPanel } from "@/components/projects/ai-import-operator-panel";
 import { SourceIntakePanel }     from "@/components/projects/source-intake-panel";
 import { ReplitImportWizard }    from "@/components/projects/replit-import-wizard";
 import { DbMigrationPanel }      from "@/components/projects/db-migration-panel";
@@ -42,7 +43,7 @@ export function AdvancedToolsSection({
           <Wrench className="h-4 w-4" />
           Advanced tools
           <span className="text-xs font-normal opacity-70">
-            (Source Intake, Smart Import, Replit Wizard, DB Migration)
+            (AI Import Operator, Auto Import, Smart Import, Replit Wizard, DB Migration)
           </span>
         </span>
         {open
@@ -53,6 +54,9 @@ export function AdvancedToolsSection({
 
       {open && (
         <div className="px-4 pb-4 space-y-6 border-t pt-4">
+          {/* Sprint 87: AI Import Operator (superseded by Sprint 88 Autopilot above) */}
+          <AiImportOperatorPanel projectId={projectId} />
+
           {/* Sprint 86: Auto Import Control Room */}
           <AutoImportControlRoom projectId={projectId} />
 

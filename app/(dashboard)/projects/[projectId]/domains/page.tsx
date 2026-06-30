@@ -7,7 +7,7 @@ import { DomainManager, type DomainRow } from "@/components/projects/domain-mana
 import { ProjectDomainCenter }            from "@/components/projects/project-domain-center";
 import { DomainReadinessPanel }           from "@/components/projects/domain-readiness-panel";
 import { runDomainHealthReport }          from "@/lib/domains/domain-health-runner";
-import { AutoImportControlRoom }         from "@/components/projects/auto-import-control-room";
+import { AiImportAutopilotPanel }        from "@/components/projects/ai-import-autopilot-panel";
 
 export const metadata: Metadata = { title: "Domains" };
 export const dynamic = "force-dynamic";
@@ -74,8 +74,8 @@ export default async function ProjectDomainsPage({ params }: Props) {
         />
 
         <div className="space-y-8 max-w-2xl">
-          {/* Sprint 86: Auto Import compact card */}
-          <AutoImportControlRoom projectId={projectId} compact />
+          {/* Sprint 88: AI Import Autopilot compact card */}
+          <AiImportAutopilotPanel projectId={projectId} compact />
 
           {/* Sprint 47: Domain Readiness */}
           <DomainReadinessPanel projectId={projectId} primaryDomain={primaryDomain} />

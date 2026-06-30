@@ -36,7 +36,7 @@ import { DeploymentHistoryPanel } from "@/components/projects/deployment-history
 import { ProjectServicesPanel }  from "@/components/projects/project-services-panel";
 import { ReplitImportChecklist }   from "@/components/projects/replit-import-checklist";
 import { SmartImportPanel }        from "@/components/projects/smart-import-panel";
-import { AutoImportControlRoom }   from "@/components/projects/auto-import-control-room";
+import { AiImportAutopilotPanel }  from "@/components/projects/ai-import-autopilot-panel";
 import { ProjectPromotionPanel }   from "@/components/projects/project-promotion-panel";
 import { ProductionRoutingPanel }  from "@/components/projects/production-routing-panel";
 import { AlertTriangle, RefreshCw, Flag, ShoppingCart, Trophy, Container, ShieldCheck, Activity, BookOpen } from "lucide-react";
@@ -724,8 +724,8 @@ export default async function ProjectPublishingPage({ params }: Props) {
             />
           )}
 
-          {/* ── Sprint 86: Auto Import Control Room compact card ── */}
-          <AutoImportControlRoom projectId={projectId} compact />
+          {/* ── Sprint 88: AI Import Autopilot compact card ── */}
+          <AiImportAutopilotPanel projectId={projectId} compact />
 
           {/* ── Sprint 85: Smart Import compact card ── */}
           <SmartImportPanel projectId={projectId} compact />
