@@ -16,6 +16,8 @@
  * returned as a browser-facing link (browserPreviewUrl is always the proxy path).
  */
 
+import { existsSync } from "fs";
+import { db } from "@/lib/db";
 import { requireProjectPermission } from "@/lib/auth/project-membership";
 import {
   verifyAutopilotPreview,
@@ -31,6 +33,8 @@ export type AgentPreviewResult = {
   allPass: boolean;
   /** Set when the panel-level gate itself failed — distinct from an app-level failure. */
   panelGateError?: string;
+  /** True when the configured static output directory does not exist on disk. */
+  staticOutputMissing?: boolean;
 };
 
 function checkToStep(label: string, status: "pass" | "warning" | "blocked", result: string): AgentTimelineStep {
@@ -88,11 +92,30 @@ export async function checkAgentPreview(input: {
     .filter((c) => c.id in PATH_LABELS)
     .map((c) => checkToStep(PATH_LABELS[c.id], c.status, c.result));
 
+  // If the API is healthy but root is failing, check whether this is because
+  // the build output simply isn't on disk yet (vs. a routing config issue).
+  // publicStaticPath is the ABSOLUTE path the preview-proxy route actually
+  // serves from (set by deployProjectAction after a successful publish) —
+  // staticOutputDir is only the relative build-config value, not a real path.
+  let staticOutputMissing: boolean | undefined;
+  const healthCheck = checks.find((c) => c.title === "/api/healthz");
+  const rootCheck    = checks.find((c) => c.title === "/");
+  if (healthCheck?.status === "success" && rootCheck && rootCheck.status !== "success") {
+    const config = await db.projectDeploymentConfig.findUnique({
+      where:  { projectId },
+      select: { staticOutputDir: true, publicStaticPath: true },
+    });
+    if (config?.staticOutputDir) {
+      staticOutputMissing = !config.publicStaticPath || !existsSync(config.publicStaticPath);
+    }
+  }
+
   return {
     checks: checks.length > 0 ? checks : PATHS.map((p) => checkToStep(p, "blocked", "Not checked — no deployment yet.")),
     browserPreviewUrl: verification.browserPreviewUrl,
     internalHealthUrl: verification.internalHealthUrl,
     publicUrl: verification.publicUrl,
     allPass: verification.allPass,
+    staticOutputMissing,
   };
 }

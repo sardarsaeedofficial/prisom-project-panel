@@ -33,6 +33,8 @@ export type AgentFixSafetyLevel = "safe" | "needs_approval";
 
 export type AgentError = {
   kind: string;
+  /** Short headline for the error card, e.g. "Frontend is not being served". */
+  title?: string;
   /** "What happened" — plain English. */
   whatHappened: string;
   /** "Why it happened" — plain English root cause. */

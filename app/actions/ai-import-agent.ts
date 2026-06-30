@@ -49,9 +49,13 @@ import {
 import { runAgentDeploy }              from "@/lib/ai-import-agent/agent-command-runner";
 import { checkAgentPreview }           from "@/lib/ai-import-agent/agent-preview-checker";
 import { applyAgentFix }               from "@/lib/ai-import-agent/agent-fix-runner";
-import { classifyAgentErrorOrFallback } from "@/lib/ai-import-agent/agent-error-classifier";
+import {
+  classifyAgentErrorOrFallback,
+  classifyPreviewChecks,
+}                                       from "@/lib/ai-import-agent/agent-error-classifier";
 import { exportAiImportAgentRunbook }  from "@/lib/ai-import-agent/agent-run-export";
 import type { AgentRun }               from "@/lib/ai-import-agent/agent-run-types";
+import type { AgentPreviewResult }     from "@/lib/ai-import-agent/agent-preview-checker";
 
 type ActionResult<T = void> =
   | { ok: true;  data: T }
@@ -77,6 +81,22 @@ async function saveAndLog(run: AgentRun, projectId: string): Promise<void> {
   if (last && last.status !== "running" && last.status !== "pending") {
     await logAgentStep(projectId, last);
   }
+}
+
+// ── Shared: classify a failed preview check ───────────────────────────────────
+// Structural classification (comparing /api/healthz vs / vs /products) runs
+// FIRST — it catches "API works, frontend doesn't" even when the proxy's HTML
+// error page text doesn't match any single recognizable phrase. Falls back to
+// text-pattern matching only when the structural check finds nothing (e.g.
+// /api/healthz itself is also failing, which is a different problem).
+
+function classifyPreviewFailure(preview: AgentPreviewResult) {
+  const structural = classifyPreviewChecks(preview.checks, preview.staticOutputMissing);
+  if (structural) return structural;
+
+  const failingCheck = preview.checks.find((c) => c.status !== "success");
+  const errText = preview.panelGateError ?? failingCheck?.summary ?? "Preview check failed.";
+  return classifyAgentErrorOrFallback(errText, "Preview");
 }
 
 // ── Shared: deploy + verify preview (used by initial run, fix, and retry) ────
@@ -117,9 +137,10 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
   run.publicUrl  = preview.publicUrl;
 
   if (!preview.allPass) {
-    const failingCheck = preview.checks.find((c) => c.status !== "success");
-    const errText = preview.panelGateError ?? failingCheck?.summary ?? "Preview check failed.";
-    const classified = classifyAgentErrorOrFallback(errText, "Preview");
+    const classified = classifyPreviewFailure(preview);
+    const errText = preview.panelGateError
+      ?? preview.checks.find((c) => c.status !== "success")?.summary
+      ?? "Preview check failed.";
     completeStep(run, "preview", "error", classified.whatHappened, {
       errorMessage: errText,
       fixAvailable: classified.safeFixAvailable,
@@ -233,9 +254,10 @@ async function resumeAgent(run: AgentRun, projectId: string): Promise<AgentRun> 
     run.publicUrl  = preview.publicUrl;
 
     if (!preview.allPass) {
-      const failingCheck = preview.checks.find((c) => c.status !== "success");
-      const errText = preview.panelGateError ?? failingCheck?.summary ?? "Preview check failed.";
-      const classified = classifyAgentErrorOrFallback(errText, "Preview");
+      const classified = classifyPreviewFailure(preview);
+      const errText = preview.panelGateError
+        ?? preview.checks.find((c) => c.status !== "success")?.summary
+        ?? "Preview check failed.";
       completeStep(run, "preview", "error", classified.whatHappened, {
         errorMessage: errText,
         fixAvailable: classified.safeFixAvailable,

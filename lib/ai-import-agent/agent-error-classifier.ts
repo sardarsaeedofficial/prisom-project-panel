@@ -6,12 +6,67 @@
  * Pure function — no async, no DB, no side effects.
  */
 
-import type { AgentError } from "./agent-run-types";
+import type { AgentError, AgentTimelineStep } from "./agent-run-types";
 
 type Pattern = {
   patterns: RegExp[];
   build: () => AgentError;
 };
+
+// ── Structural classification ─────────────────────────────────────────────────
+// Some failures are only visible by comparing MULTIPLE check results, not by
+// pattern-matching a single error string. A 404 HTML error page from the
+// preview proxy never contains a recognizable phrase like "Cannot GET /" — the
+// only reliable signal is "/api/healthz passed but / did not". This must run
+// BEFORE the generic text fallback, otherwise a perfectly fixable "API works,
+// frontend doesn't" condition shows up as an unrecognized error.
+
+const FAILING_STATUSES = new Set(["error", "warning"]);
+
+/**
+ * Classifies preview-check results structurally: if /api/healthz passed but /
+ * did not, the root cause is frontend/static routing — regardless of what the
+ * exact error text says, and regardless of whether /products also failed
+ * (that's a symptom of the same root cause, never the root cause itself).
+ */
+export function classifyPreviewChecks(
+  checks: AgentTimelineStep[],
+  staticOutputMissing?: boolean,
+): AgentError | null {
+  const health = checks.find((c) => c.title === "/api/healthz");
+  const root   = checks.find((c) => c.title === "/");
+
+  const healthOk     = health?.status === "success";
+  const rootFailing  = !!root && FAILING_STATUSES.has(root.status);
+
+  if (!healthOk || !rootFailing) return null;
+
+  if (staticOutputMissing) {
+    return {
+      kind: "frontend_build_output_missing",
+      title: "Frontend build output missing",
+      whatHappened: "Your API is live, but the frontend build output is missing on disk.",
+      why: "The deployment ran, but the static output directory for the built frontend was never published — the build may not have produced files, or the path is misconfigured.",
+      whatICanDo: "I can reapply the deployment preset and rebuild the frontend.",
+      fixSafetyLevel: "safe",
+      safeFixAvailable: true,
+      safeFixId: "repair_static_frontend_routing",
+      technicalReason: `Static output not found at the published path. Root check: ${root?.summary ?? ""}`,
+    };
+  }
+
+  return {
+    kind: "frontend_static_not_served",
+    title: "Frontend is not being served",
+    whatHappened: "Your API is live, but the storefront page is returning 404 instead of the frontend.",
+    why: "The deployment is running, but the preview/proxy route is not serving the built frontend files or SPA fallback.",
+    whatICanDo: "I can repair the deployment config so /api/* goes to the API and all other routes serve the static frontend.",
+    fixSafetyLevel: "safe",
+    safeFixAvailable: true,
+    safeFixId: "repair_static_frontend_routing",
+    technicalReason: `Health check passed but root route failed: ${root?.summary ?? ""}`,
+  };
+}
 
 const PATTERNS: Pattern[] = [
   // ── Panel preview proxy / panel DB unreachable ────────────────────────────
@@ -58,6 +113,30 @@ const PATTERNS: Pattern[] = [
       safeFixAvailable: true,
       safeFixId: "fix-static-frontend-routing",
       technicalReason: "Non-root SPA routes 404 — missing SPA fallback to index.html.",
+    }),
+  },
+
+  // ── Generic 404 + HTML error page fallback ─────────────────────────────────
+  // Last resort for "API works, frontend doesn't" when neither of the more
+  // specific patterns above match — e.g. a proxy-generated HTML error page
+  // that doesn't literally say "Cannot GET" or "SPA route 404". Kept last in
+  // the pattern list so the more specific matches above always win first.
+  // The caller (preview-check classification) should prefer
+  // classifyPreviewChecks() over this when structured check results are
+  // available — this text-only pattern is a fallback for contexts that only
+  // have raw output text, not a checks[] array.
+  {
+    patterns: [/HTTP 404[\s\S]*<!DOCTYPE/i, /<!DOCTYPE[\s\S]*HTTP 404/i],
+    build: () => ({
+      kind: "frontend_static_not_served",
+      title: "Frontend is not being served",
+      whatHappened: "Your API is live, but the storefront page is returning 404 instead of the frontend.",
+      why: "The deployment is running, but the preview/proxy route is not serving the built frontend files or SPA fallback.",
+      whatICanDo: "I can repair the deployment config so /api/* goes to the API and all other routes serve the static frontend.",
+      fixSafetyLevel: "safe",
+      safeFixAvailable: true,
+      safeFixId: "repair_static_frontend_routing",
+      technicalReason: "Root route returned an HTML 404 error page instead of the built frontend.",
     }),
   },
 

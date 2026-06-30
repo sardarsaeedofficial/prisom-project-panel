@@ -140,7 +140,14 @@ function ErrorCard({
 
   return (
     <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 space-y-2.5">
-      <p className="text-sm font-medium">{run.steps[run.steps.length - 1]?.title ?? "Issue found"}</p>
+      <div>
+        {err.safeFixAvailable && (
+          <p className="text-[11px] font-medium text-blue-600 dark:text-blue-400 mb-0.5">Fix available</p>
+        )}
+        <p className="text-sm font-medium">
+          {err.title ?? run.steps[run.steps.length - 1]?.title ?? "Issue found"}
+        </p>
+      </div>
 
       <div className="space-y-1.5 text-xs">
         <p><span className="font-medium text-foreground">What happened: </span><span className="text-muted-foreground">{err.whatHappened}</span></p>

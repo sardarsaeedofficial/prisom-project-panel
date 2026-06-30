@@ -42,11 +42,23 @@ const DELEGATED_FIX_IDS = new Set([
   "fix-route-mode",
 ]);
 
+/**
+ * repair_static_frontend_routing is the Sprint 89 Agent's id for "API works,
+ * frontend doesn't" (see agent-error-classifier.ts classifyPreviewChecks).
+ * It applies the exact same field set as fix-static-frontend-routing
+ * (routeMode/apiPrefix/staticOutputDir/healthPath/install/build/start —
+ * the full Sardar pnpm preset), so it's an alias, not a new implementation.
+ */
+const FIX_ID_ALIASES: Record<string, string> = {
+  repair_static_frontend_routing: "fix-static-frontend-routing",
+};
+
 export async function applyAgentFix(input: {
   projectId: string;
   fixId: string;
 }): Promise<FixRunnerResult> {
-  const { projectId, fixId } = input;
+  const { projectId } = input;
+  const fixId = FIX_ID_ALIASES[input.fixId] ?? input.fixId;
 
   if (fixId === "refresh_panel_pm2_env_and_retry_preview") {
     return refreshPanelEnvAndRetryPreview(projectId);
