@@ -25,7 +25,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
 import { db } from "@/lib/db";
-import { getCurrentWorkspaceId } from "@/lib/current-workspace";
+import { requireProjectPermission } from "@/lib/auth/project-membership";
 import { promises as fsPromises } from "fs";
 import path from "path";
 
@@ -204,19 +204,23 @@ async function handler(
   }
 
   // ── 2. Ownership verification ────────────────────────────────────────────
-  let workspaceId: string;
+  // Uses the same requireProjectPermission() RBAC path as every other project
+  // route (ProjectMember table + workspace-ownership fallback). The previous
+  // inline getCurrentWorkspaceId() check mislabeled ANY failure here — including
+  // ordinary workspace/session resolution issues — as "Panel database is
+  // unreachable", which was misleading for projects that plainly exist and are
+  // accessible. A 503 is now reserved for a genuine thrown error (real DB outage).
+  let auth: Awaited<ReturnType<typeof requireProjectPermission>>;
   try {
-    workspaceId = await getCurrentWorkspaceId();
+    auth = await requireProjectPermission(projectId, "project.view");
   } catch {
     return errHtml(503, "Service unavailable", "Panel database is unreachable.");
   }
-
-  const project = await db.project.findUnique({
-    where:  { id: projectId },
-    select: { id: true, workspaceId: true },
-  });
-  if (!project || project.workspaceId !== workspaceId) {
-    return errHtml(404, "Project not found", "This project does not exist or you do not have access.");
+  if (!auth.ok) {
+    if (auth.code === "NOT_FOUND") {
+      return errHtml(404, "Project not found", "This project does not exist or you do not have access.");
+    }
+    return errHtml(403, "Access denied", "You do not have access to this project.");
   }
 
   // ── 3. Deployment config ─────────────────────────────────────────────────

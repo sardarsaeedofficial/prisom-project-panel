@@ -1,0 +1,486 @@
+"use server";
+
+/**
+ * app/actions/ai-import-agent.ts
+ *
+ * Sprint 89: Server actions + orchestrator for the Live AI Import Agent Console.
+ *
+ * Architecture note on "live" updates: there is no background worker in this
+ * app. startAiImportAgentRunAction runs the whole analyze → preset → deploy →
+ * verify sequence in one call, but persists the run to ProjectOperation.meta
+ * after EVERY step (see agent-run-store.ts). Node serves requests concurrently
+ * on its event loop, so a separate poll (getAiImportAgentRunAction) arriving
+ * while the start action is still mid-flight reads freshly-written DB state —
+ * this is what makes the timeline feel live without a real job queue.
+ *
+ * Safety:
+ *  - project.view required for polling/export
+ *  - deploy.trigger required (fallback: project.edit) for start/fix/retry,
+ *    since these may deploy/redeploy the project
+ *  - No secret values returned to the client
+ *  - Only safe-fix-allowlisted config changes are applied automatically
+ *  - No automatic go-live, no DNS mutation, no DB wipe
+ *  - Only this project's PM2 process is ever touched (via existing deployProjectAction)
+ */
+
+import { revalidatePath }              from "next/cache";
+import { requireProjectPermission }    from "@/lib/auth/project-membership";
+import { writeProjectAuditEvent }      from "@/lib/audit/project-audit";
+import { getAuditRequestContext }      from "@/lib/audit/request-context";
+import { db }                          from "@/lib/db";
+import { getProjectByIdForImport }     from "@/lib/projects/project-lookup-fallback";
+import { runAutoImportAnalysis }       from "@/lib/auto-import/auto-import-orchestrator";
+import { buildAutopilotQuestions }     from "@/lib/ai-import-autopilot/ai-import-autopilot-question-service";
+import {
+  getOrCreateAgentRun,
+  getLatestAgentRun,
+  saveAgentRun,
+  logAgentStep,
+}                                       from "@/lib/ai-import-agent/agent-run-store";
+import {
+  beginStep,
+  addCompletedStep,
+  completeStep,
+  setRunError,
+  clearRunError,
+  setRunStatus,
+  previewOutput,
+}                                       from "@/lib/ai-import-agent/agent-step-builder";
+import { runAgentDeploy }              from "@/lib/ai-import-agent/agent-command-runner";
+import { checkAgentPreview }           from "@/lib/ai-import-agent/agent-preview-checker";
+import { applyAgentFix }               from "@/lib/ai-import-agent/agent-fix-runner";
+import { classifyAgentErrorOrFallback } from "@/lib/ai-import-agent/agent-error-classifier";
+import { exportAiImportAgentRunbook }  from "@/lib/ai-import-agent/agent-run-export";
+import type { AgentRun }               from "@/lib/ai-import-agent/agent-run-types";
+
+type ActionResult<T = void> =
+  | { ok: true;  data: T }
+  | { ok: false; error: string };
+
+async function assertProjectExists(projectId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const project = await getProjectByIdForImport(projectId);
+  if (!project) return { ok: false, error: "Project not found." };
+  return { ok: true };
+}
+
+async function deployOrEditAuth(projectId: string) {
+  const deploy = await requireProjectPermission(projectId, "deploy.trigger");
+  if (deploy.ok) return deploy;
+  return requireProjectPermission(projectId, "project.edit");
+}
+
+// ── Persist + mirror helper ───────────────────────────────────────────────────
+
+async function saveAndLog(run: AgentRun, projectId: string): Promise<void> {
+  await saveAgentRun(run);
+  const last = run.steps[run.steps.length - 1];
+  if (last && last.status !== "running" && last.status !== "pending") {
+    await logAgentStep(projectId, last);
+  }
+}
+
+// ── Shared: deploy + verify preview (used by initial run, fix, and retry) ────
+
+async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<AgentRun> {
+  beginStep(run, "deploy", "Deploy", "Installing dependencies, building, and starting the app…");
+  await saveAndLog(run, projectId);
+
+  const deployResult = await runAgentDeploy(projectId);
+
+  if (!deployResult.ok) {
+    const errText = `${deployResult.output ?? ""}\n${deployResult.error ?? ""}`;
+    const classified = classifyAgentErrorOrFallback(errText, "Deploy");
+    completeStep(run, "deploy", "error", deployResult.error || "Deploy failed", {
+      errorMessage:   deployResult.error,
+      fullOutput:     deployResult.output,
+      outputPreview:  previewOutput(deployResult.output ?? ""),
+      fixAvailable:   classified.safeFixAvailable,
+      fixId:          classified.safeFixId,
+    });
+    setRunError(run, classified);
+    setRunStatus(run, classified.safeFixAvailable ? "fix_available" : "failed", classified.whatHappened);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  completeStep(run, "deploy", "success", "Install, build, and PM2 start completed.", {
+    fullOutput:    deployResult.output,
+    outputPreview: previewOutput(deployResult.output ?? ""),
+  });
+  await saveAndLog(run, projectId);
+
+  beginStep(run, "preview", "Checking preview", "Verifying API health and preview routes…");
+  await saveAndLog(run, projectId);
+
+  const preview = await checkAgentPreview({ projectId });
+  run.previewUrl = preview.browserPreviewUrl;
+  run.publicUrl  = preview.publicUrl;
+
+  if (!preview.allPass) {
+    const failingCheck = preview.checks.find((c) => c.status !== "success");
+    const errText = preview.panelGateError ?? failingCheck?.summary ?? "Preview check failed.";
+    const classified = classifyAgentErrorOrFallback(errText, "Preview");
+    completeStep(run, "preview", "error", classified.whatHappened, {
+      errorMessage: errText,
+      fixAvailable: classified.safeFixAvailable,
+      fixId:        classified.safeFixId,
+    });
+    run.steps.push(...preview.checks);
+    setRunError(run, classified);
+    setRunStatus(run, classified.safeFixAvailable ? "fix_available" : "failed", classified.whatHappened);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  completeStep(run, "preview", "success", "All preview checks passed.");
+  run.steps.push(...preview.checks);
+  setRunStatus(
+    run,
+    "preview_live",
+    preview.publicUrl
+      ? `Preview is live at ${preview.publicUrl}.`
+      : "Preview is live through the panel proxy. Add a public domain when ready.",
+  );
+  await saveAndLog(run, projectId);
+  return run;
+}
+
+// ── Full run: analyze → ask → preset → deploy → verify ───────────────────────
+
+async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun> {
+  const project = await getProjectByIdForImport(projectId);
+  if (!project) {
+    addCompletedStep(run, "project_found", "Project found", "error", "Project not found.", {
+      errorMessage: "Project not found.",
+    });
+    setRunStatus(run, "failed", "Project not found.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+  addCompletedStep(run, "project_found", "Project found", "success", project.name);
+  await saveAndLog(run, projectId);
+
+  const autoRun = await runAutoImportAnalysis({ projectId });
+
+  if (autoRun.issues.some((i) => i.id === "no-source")) {
+    addCompletedStep(run, "source_found", "Source files found", "error", "No source uploaded yet.", {
+      errorMessage: "Project source files not found.",
+    });
+    setRunStatus(run, "failed", "Project source files not found. Upload a ZIP or connect a GitHub repository to get started.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+  addCompletedStep(run, "source_found", "Source files found", "success", "Source files are present.");
+  await saveAndLog(run, projectId);
+
+  const stack = autoRun.detectedStack;
+  const isSardar = stack.packageManager === "pnpm" && (stack.staticOutputPath?.includes("sardar-security") ?? false);
+  addCompletedStep(
+    run, "stack_detected", "Stack detected", "success",
+    isSardar ? "pnpm workspace, Sardar ecommerce preset" : `${stack.packageManager} project, ${stack.framework.join(", ") || "unknown framework"}`,
+  );
+  await saveAndLog(run, projectId);
+
+  if (isSardar) {
+    addCompletedStep(run, "api_detected", "API detected", "success", "artifacts/api-server");
+    await saveAndLog(run, projectId);
+    addCompletedStep(run, "frontend_detected", "Frontend detected", "success", "artifacts/sardar-security");
+    await saveAndLog(run, projectId);
+  }
+
+  const missingRequired = autoRun.missingEnvNames.filter((e) => e.required);
+  if (missingRequired.length > 0) {
+    const names = missingRequired.map((e) => e.name).join(", ");
+    addCompletedStep(run, "secrets_checked", "Required secrets checked", "warning", `Missing: ${names}`);
+    setRunStatus(run, "waiting_for_user", `I need ${missingRequired.length} missing secret${missingRequired.length > 1 ? "s" : ""} before I can deploy: ${names}.`);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+  addCompletedStep(run, "secrets_checked", "Required secrets checked", "success", "All required secrets are configured.");
+  await saveAndLog(run, projectId);
+
+  if (autoRun.issues.some((i) => i.id === "no-deploy-config")) {
+    beginStep(run, "preset_applied", "Deployment preset", "Applying the detected deployment preset…");
+    await saveAndLog(run, projectId);
+    const fixRes = await applyAgentFix({ projectId, fixId: "apply-sardar-preset" });
+    if (!fixRes.ok) {
+      completeStep(run, "preset_applied", "error", fixRes.error, { errorMessage: fixRes.error });
+      setRunStatus(run, "failed", `I couldn't apply the deployment preset: ${fixRes.error}`);
+      await saveAndLog(run, projectId);
+      return run;
+    }
+    completeStep(run, "preset_applied", "success", fixRes.label);
+  } else {
+    addCompletedStep(run, "preset_applied", "Deployment preset", "success", "Using existing deployment config.");
+  }
+  await saveAndLog(run, projectId);
+
+  return runDeployAndPreview(run, projectId);
+}
+
+// ── Resume from the failed step (retry) ──────────────────────────────────────
+
+async function resumeAgent(run: AgentRun, projectId: string): Promise<AgentRun> {
+  clearRunError(run);
+  setRunStatus(run, "retrying", "Retrying…");
+  await saveAndLog(run, projectId);
+
+  if (run.currentStep === "preview") {
+    beginStep(run, "preview", "Checking preview", "Rechecking preview routes…");
+    await saveAndLog(run, projectId);
+    const preview = await checkAgentPreview({ projectId });
+    run.previewUrl = preview.browserPreviewUrl;
+    run.publicUrl  = preview.publicUrl;
+
+    if (!preview.allPass) {
+      const failingCheck = preview.checks.find((c) => c.status !== "success");
+      const errText = preview.panelGateError ?? failingCheck?.summary ?? "Preview check failed.";
+      const classified = classifyAgentErrorOrFallback(errText, "Preview");
+      completeStep(run, "preview", "error", classified.whatHappened, {
+        errorMessage: errText,
+        fixAvailable: classified.safeFixAvailable,
+        fixId:        classified.safeFixId,
+      });
+      run.steps.push(...preview.checks);
+      setRunError(run, classified);
+      setRunStatus(run, classified.safeFixAvailable ? "fix_available" : "failed", classified.whatHappened);
+      await saveAndLog(run, projectId);
+      return run;
+    }
+
+    completeStep(run, "preview", "success", "All preview checks passed.");
+    run.steps.push(...preview.checks);
+    setRunStatus(
+      run, "preview_live",
+      preview.publicUrl ? `Preview is live at ${preview.publicUrl}.` : "Preview is live through the panel proxy. Add a public domain when ready.",
+    );
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  // Any earlier failure (preset/deploy) — redeploy and reverify.
+  return runDeployAndPreview(run, projectId);
+}
+
+// ── Action: startAiImportAgentRunAction ───────────────────────────────────────
+
+export async function startAiImportAgentRunAction(input: {
+  projectId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  try {
+    let run = await getOrCreateAgentRun({ projectId: input.projectId, userId: auth.userId });
+
+    // Only execute if this is a fresh run — avoid double-running a run that's
+    // already mid-flight from a concurrent/duplicate click.
+    if (run.steps.length === 0) {
+      run = await runFullAgent(run, input.projectId);
+    }
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.run",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent run — status: ${run.status}`,
+      metadata:    { status: run.status, stepCount: run.steps.length },
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    revalidatePath(`/projects/${input.projectId}/publishing`);
+    revalidatePath(`/projects/${input.projectId}/preview`);
+
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Agent run failed" };
+  }
+}
+
+// ── Action: getAiImportAgentRunAction ─────────────────────────────────────────
+
+export async function getAiImportAgentRunAction(input: {
+  projectId: string;
+}): Promise<ActionResult<AgentRun | null>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await requireProjectPermission(input.projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  try {
+    const run = await getLatestAgentRun(input.projectId);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Could not load agent run" };
+  }
+}
+
+// ── Action: fixAiImportAgentIssueAction ───────────────────────────────────────
+
+export async function fixAiImportAgentIssueAction(input: {
+  projectId: string;
+  runId: string;
+  fixId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found. Click Make Project Live first." };
+
+  try {
+    setRunStatus(run, "fixing", "Applying fix…");
+    await saveAndLog(run, input.projectId);
+
+    const fixRes = await applyAgentFix({ projectId: input.projectId, fixId: input.fixId });
+    if (!fixRes.ok) {
+      addCompletedStep(run, `fix-${input.fixId}`, "Fix attempt", "error", fixRes.error, { errorMessage: fixRes.error });
+      if (fixRes.agentError) setRunError(run, fixRes.agentError);
+      setRunStatus(run, "fix_available", fixRes.error);
+      await saveAndLog(run, input.projectId);
+      return { ok: true, data: run };
+    }
+
+    addCompletedStep(run, `fix-${input.fixId}`, "Fix applied", "fixed", fixRes.label);
+    clearRunError(run);
+    await saveAndLog(run, input.projectId);
+
+    // refresh_panel_pm2_env_and_retry_preview already retried preview itself —
+    // use that result directly instead of redeploying. Every other fix
+    // changes deployment config, so it needs a real redeploy + recheck.
+    let finalRun: AgentRun;
+    if (input.fixId === "refresh_panel_pm2_env_and_retry_preview" && fixRes.preview) {
+      run.previewUrl = fixRes.preview.browserPreviewUrl;
+      run.publicUrl  = fixRes.preview.publicUrl;
+      run.steps.push(...fixRes.preview.checks);
+      if (fixRes.preview.allPass) {
+        setRunStatus(
+          run, "preview_live",
+          fixRes.preview.publicUrl
+            ? `Preview is live at ${fixRes.preview.publicUrl}.`
+            : "Preview is live through the panel proxy. Add a public domain when ready.",
+        );
+      } else {
+        setRunStatus(run, "fix_available", "Preview is still not passing after the fix.");
+      }
+      await saveAndLog(run, input.projectId);
+      finalRun = run;
+    } else {
+      finalRun = await runDeployAndPreview(run, input.projectId);
+    }
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.fix_applied",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent: fix applied — ${input.fixId}`,
+      metadata:    { fixId: input.fixId, resultStatus: finalRun.status },
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    revalidatePath(`/projects/${input.projectId}/publishing`);
+    revalidatePath(`/projects/${input.projectId}/preview`);
+
+    return { ok: true, data: finalRun };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Fix failed" };
+  }
+}
+
+// ── Action: retryAiImportAgentRunAction ───────────────────────────────────────
+
+export async function retryAiImportAgentRunAction(input: {
+  projectId: string;
+  runId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found. Click Make Project Live first." };
+
+  try {
+    const finalRun = await resumeAgent(run, input.projectId);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.retried",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent retried from step: ${run.currentStep} — result: ${finalRun.status}`,
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    revalidatePath(`/projects/${input.projectId}/publishing`);
+    revalidatePath(`/projects/${input.projectId}/preview`);
+
+    return { ok: true, data: finalRun };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Retry failed" };
+  }
+}
+
+// ── Action: exportAiImportAgentRunAction ──────────────────────────────────────
+
+export async function exportAiImportAgentRunAction(input: {
+  projectId: string;
+  runId: string;
+}): Promise<ActionResult<{ markdown: string; filename: string }>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await requireProjectPermission(input.projectId, "project.view");
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const project = await db.project.findUnique({
+    where:  { id: input.projectId },
+    select: { name: true },
+  });
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  try {
+    const markdown = exportAiImportAgentRunbook(run, project?.name ?? input.projectId);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.runbook_exported",
+      category:    "publishing",
+      result:      "success",
+      summary:     "AI import agent runbook exported as AI_IMPORT_AGENT_RUNBOOK.md",
+      ...ctx,
+    }).catch(() => null);
+
+    return { ok: true, data: { markdown, filename: "AI_IMPORT_AGENT_RUNBOOK.md" } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Export failed" };
+  }
+}

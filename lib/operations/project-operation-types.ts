@@ -15,7 +15,8 @@ export type OperationType =
   | "backup_delete"
   | "patch_apply"
   | "storage_cleanup"
-  | "release_promotion";
+  | "release_promotion"
+  | "ai_import_agent";
 
 export const OPERATION_TYPES: OperationType[] = [
   "deploy",
@@ -26,6 +27,7 @@ export const OPERATION_TYPES: OperationType[] = [
   "patch_apply",
   "storage_cleanup",
   "release_promotion",
+  "ai_import_agent",
 ];
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -67,6 +69,7 @@ export const OPERATION_TYPE_LABELS: Record<OperationType, string> = {
   patch_apply:          "Apply patch",
   storage_cleanup:      "Storage cleanup",
   release_promotion:    "Release promotion",
+  ai_import_agent:      "AI Import Agent",
 };
 
 export const OPERATION_STATUS_LABELS: Record<OperationStatus, string> = {

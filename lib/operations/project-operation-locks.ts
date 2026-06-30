@@ -25,6 +25,7 @@ export const STALE_THRESHOLD_MS: Record<OperationType, number> = {
   patch_apply:          10 * 60 * 1000,   // 10 min
   storage_cleanup:      15 * 60 * 1000,   // 15 min
   release_promotion:    15 * 60 * 1000,   // 15 min
+  ai_import_agent:      20 * 60 * 1000,   // 20 min — install/build can be slow
 };
 
 // ── Compatibility matrix ──────────────────────────────────────────────────────
@@ -92,6 +93,13 @@ export const BLOCKS_IF_RUNNING: Record<OperationType, Set<OperationType>> = {
     "backup_restore",
     "patch_apply",
     "release_promotion",
+  ]),
+  // AI Import Agent runs orchestrate their own "deploy" operations internally
+  // (via deployProjectAction), so it must NOT be added to "deploy"'s block set —
+  // that would make the agent's own internal deploy call block on itself.
+  // Only self-conflicts, to prevent double-clicking "Make Project Live" twice.
+  ai_import_agent: new Set<OperationType>([
+    "ai_import_agent",
   ]),
 };
 

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell";
 import { WorkspaceNav }               from "@/components/projects/workspace-nav";
-import { AiImportAutopilotPanel }     from "@/components/projects/ai-import-autopilot-panel";
+import { AiImportAgentConsole }       from "@/components/projects/ai-import-agent-console";
 import { AdvancedToolsSection }       from "@/components/projects/advanced-tools-section";
 import { db } from "@/lib/db";
 
@@ -35,8 +35,8 @@ export default async function ProjectImportPage({ params }: Props) {
         />
 
         <div className="space-y-6 max-w-3xl">
-          {/* ── Sprint 88: AI Import Autopilot — primary interface ── */}
-          <AiImportAutopilotPanel projectId={projectId} />
+          {/* ── Sprint 89: AI Import Agent Console — primary interface ── */}
+          <AiImportAgentConsole projectId={projectId} />
 
           {/* ── Advanced tools — collapsed by default ── */}
           <AdvancedToolsSection
