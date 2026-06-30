@@ -10,6 +10,7 @@ import type {
   AgentTimelineStep,
   AgentTimelineStepStatus,
   AgentError,
+  AgentChatMessage,
 } from "./agent-run-types";
 
 function nowIso(): string {
@@ -108,4 +109,48 @@ export function previewOutput(output: string, maxChars = 600): string {
   const trimmed = output.trim();
   if (trimmed.length <= maxChars) return trimmed;
   return `…\n${trimmed.slice(-maxChars)}`;
+}
+
+let _msgSeq = 0;
+
+/**
+ * Appends a narrated chat message to the run. Used by the orchestrator to keep
+ * the agent chat column in the console updated as each step runs.
+ * Pure mutation — call saveAgentRun (via saveAndLog) to persist.
+ */
+export function appendChatMessage(
+  run: AgentRun,
+  message: string,
+  options?: { tone?: AgentChatMessage["tone"]; relatedStepId?: string },
+): AgentRun {
+  const msg: AgentChatMessage = {
+    id: `msg-${Date.now()}-${(_msgSeq = (_msgSeq + 1) % 1_000_000)}`,
+    role: "agent",
+    tone: options?.tone,
+    message,
+    createdAt: nowIso(),
+    relatedStepId: options?.relatedStepId,
+  };
+  run.chatMessages.push(msg);
+  run.updatedAt = nowIso();
+  return run;
+}
+
+/**
+ * The chat message shown when a safe fix starts applying. Pure/sync — kept
+ * here (not in the "use server" actions file, which may only export async
+ * functions) so both the server orchestrator and the client console's
+ * optimistic update can share the exact same wording.
+ */
+export function getAgentFixStartMessage(fixId: string): string {
+  if (fixId === "repair_static_frontend_routing" || fixId === "fix-static-frontend-routing") {
+    return "I'm applying the safe frontend routing fix now.";
+  }
+  if (fixId === "apply-sardar-preset" || fixId === "switch-to-pnpm-preset") {
+    return "I'm applying the Sardar/Replit deployment preset now.";
+  }
+  if (fixId === "refresh_panel_pm2_env_and_retry_preview") {
+    return "I'm checking the panel database connection and retrying the preview.";
+  }
+  return "I'm applying the safe fix now.";
 }

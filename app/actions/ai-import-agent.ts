@@ -4,6 +4,8 @@
  * app/actions/ai-import-agent.ts
  *
  * Sprint 89: Server actions + orchestrator for the Live AI Import Agent Console.
+ * Sprint 90: Chat messages woven into every orchestration step so the agent
+ *            chat column in the console fills in live as each phase runs.
  *
  * Architecture note on "live" updates: there is no background worker in this
  * app. startAiImportAgentRunAction runs the whole analyze → preset → deploy →
@@ -30,7 +32,6 @@ import { getAuditRequestContext }      from "@/lib/audit/request-context";
 import { db }                          from "@/lib/db";
 import { getProjectByIdForImport }     from "@/lib/projects/project-lookup-fallback";
 import { runAutoImportAnalysis }       from "@/lib/auto-import/auto-import-orchestrator";
-import { buildAutopilotQuestions }     from "@/lib/ai-import-autopilot/ai-import-autopilot-question-service";
 import {
   getOrCreateAgentRun,
   getLatestAgentRun,
@@ -45,6 +46,8 @@ import {
   clearRunError,
   setRunStatus,
   previewOutput,
+  appendChatMessage,
+  getAgentFixStartMessage,
 }                                       from "@/lib/ai-import-agent/agent-step-builder";
 import { runAgentDeploy }              from "@/lib/ai-import-agent/agent-command-runner";
 import { checkAgentPreview }           from "@/lib/ai-import-agent/agent-preview-checker";
@@ -99,9 +102,22 @@ function classifyPreviewFailure(preview: AgentPreviewResult) {
   return classifyAgentErrorOrFallback(errText, "Preview");
 }
 
+// ── Preview failure chat message ──────────────────────────────────────────────
+
+function previewFailureChatMessage(kind: string, safeFixAvailable: boolean, whatHappened: string): string {
+  if (kind === "frontend_static_not_served" || kind === "frontend_build_output_missing") {
+    return "The API is healthy, but the storefront is returning 404. I can fix the frontend routing.";
+  }
+  if (kind === "panel_preview_proxy_db_unreachable") {
+    return "The preview proxy hit an internal database issue. I can retry the preview check.";
+  }
+  return `Preview check failed: ${whatHappened}`;
+}
+
 // ── Shared: deploy + verify preview (used by initial run, fix, and retry) ────
 
 async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<AgentRun> {
+  appendChatMessage(run, "I'm running the install, build, and PM2 start process now.", { tone: "thinking" });
   beginStep(run, "deploy", "Deploy", "Installing dependencies, building, and starting the app…");
   await saveAndLog(run, projectId);
 
@@ -110,6 +126,7 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
   if (!deployResult.ok) {
     const errText = `${deployResult.output ?? ""}\n${deployResult.error ?? ""}`;
     const classified = classifyAgentErrorOrFallback(errText, "Deploy");
+    appendChatMessage(run, `Deploy failed. ${classified.whatHappened}`, { tone: "error" });
     completeStep(run, "deploy", "error", deployResult.error || "Deploy failed", {
       errorMessage:   deployResult.error,
       fullOutput:     deployResult.output,
@@ -123,12 +140,14 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
     return run;
   }
 
+  appendChatMessage(run, "Deploy completed successfully. Now I'll check the API and storefront preview.", { tone: "success" });
   completeStep(run, "deploy", "success", "Install, build, and PM2 start completed.", {
     fullOutput:    deployResult.output,
     outputPreview: previewOutput(deployResult.output ?? ""),
   });
   await saveAndLog(run, projectId);
 
+  appendChatMessage(run, "I'll check the API and storefront preview now.", { tone: "thinking" });
   beginStep(run, "preview", "Checking preview", "Verifying API health and preview routes…");
   await saveAndLog(run, projectId);
 
@@ -141,6 +160,11 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
     const errText = preview.panelGateError
       ?? preview.checks.find((c) => c.status !== "success")?.summary
       ?? "Preview check failed.";
+    appendChatMessage(
+      run,
+      previewFailureChatMessage(classified.kind, classified.safeFixAvailable, classified.whatHappened),
+      { tone: classified.safeFixAvailable ? "warning" : "error" },
+    );
     completeStep(run, "preview", "error", classified.whatHappened, {
       errorMessage: errText,
       fixAvailable: classified.safeFixAvailable,
@@ -153,6 +177,7 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
     return run;
   }
 
+  appendChatMessage(run, "The preview is live. The project is now working through the panel preview.", { tone: "success" });
   completeStep(run, "preview", "success", "All preview checks passed.");
   run.steps.push(...preview.checks);
   setRunStatus(
@@ -169,8 +194,12 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
 // ── Full run: analyze → ask → preset → deploy → verify ───────────────────────
 
 async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun> {
+  appendChatMessage(run, "I'll read this project, detect the stack, run the correct commands, and verify the preview.", { tone: "thinking" });
+  await saveAndLog(run, projectId);
+
   const project = await getProjectByIdForImport(projectId);
   if (!project) {
+    appendChatMessage(run, "I couldn't find this project. It may have been deleted.", { tone: "error" });
     addCompletedStep(run, "project_found", "Project found", "error", "Project not found.", {
       errorMessage: "Project not found.",
     });
@@ -179,11 +208,13 @@ async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun>
     return run;
   }
   addCompletedStep(run, "project_found", "Project found", "success", project.name);
+  appendChatMessage(run, `I found the project: ${project.name}.`, { tone: "info" });
   await saveAndLog(run, projectId);
 
   const autoRun = await runAutoImportAnalysis({ projectId });
 
   if (autoRun.issues.some((i) => i.id === "no-source")) {
+    appendChatMessage(run, "I can't find any source files for this project. Please upload a ZIP or connect a GitHub repository.", { tone: "error" });
     addCompletedStep(run, "source_found", "Source files found", "error", "No source uploaded yet.", {
       errorMessage: "Project source files not found.",
     });
@@ -192,6 +223,7 @@ async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun>
     return run;
   }
   addCompletedStep(run, "source_found", "Source files found", "success", "Source files are present.");
+  appendChatMessage(run, "The source files are present. I can inspect the app structure.", { tone: "info" });
   await saveAndLog(run, projectId);
 
   const stack = autoRun.detectedStack;
@@ -200,12 +232,23 @@ async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun>
     run, "stack_detected", "Stack detected", "success",
     isSardar ? "pnpm workspace, Sardar ecommerce preset" : `${stack.packageManager} project, ${stack.framework.join(", ") || "unknown framework"}`,
   );
+  if (isSardar) {
+    appendChatMessage(run, "This looks like a pnpm workspace with an API service and a Vite storefront.", { tone: "info" });
+  } else {
+    appendChatMessage(
+      run,
+      `Detected a ${stack.packageManager} project${stack.framework.length ? " using " + stack.framework.join(", ") : ""}.`,
+      { tone: "info" },
+    );
+  }
   await saveAndLog(run, projectId);
 
   if (isSardar) {
     addCompletedStep(run, "api_detected", "API detected", "success", "artifacts/api-server");
+    appendChatMessage(run, "I found the API service in artifacts/api-server.", { tone: "info" });
     await saveAndLog(run, projectId);
     addCompletedStep(run, "frontend_detected", "Frontend detected", "success", "artifacts/sardar-security");
+    appendChatMessage(run, "I found the storefront in artifacts/sardar-security.", { tone: "info" });
     await saveAndLog(run, projectId);
   }
 
@@ -213,26 +256,32 @@ async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun>
   if (missingRequired.length > 0) {
     const names = missingRequired.map((e) => e.name).join(", ");
     addCompletedStep(run, "secrets_checked", "Required secrets checked", "warning", `Missing: ${names}`);
+    appendChatMessage(run, `I need a few secret values before I can make this live: ${names}.`, { tone: "warning" });
     setRunStatus(run, "waiting_for_user", `I need ${missingRequired.length} missing secret${missingRequired.length > 1 ? "s" : ""} before I can deploy: ${names}.`);
     await saveAndLog(run, projectId);
     return run;
   }
   addCompletedStep(run, "secrets_checked", "Required secrets checked", "success", "All required secrets are configured.");
+  appendChatMessage(run, "All required secrets are configured. I can continue.", { tone: "success" });
   await saveAndLog(run, projectId);
 
   if (autoRun.issues.some((i) => i.id === "no-deploy-config")) {
+    appendChatMessage(run, "I'm applying the Sardar/Replit deployment preset so /api goes to the backend and the storefront serves from /.", { tone: "thinking" });
     beginStep(run, "preset_applied", "Deployment preset", "Applying the detected deployment preset…");
     await saveAndLog(run, projectId);
     const fixRes = await applyAgentFix({ projectId, fixId: "apply-sardar-preset" });
     if (!fixRes.ok) {
+      appendChatMessage(run, `I couldn't apply the deployment preset: ${fixRes.error}`, { tone: "error" });
       completeStep(run, "preset_applied", "error", fixRes.error, { errorMessage: fixRes.error });
       setRunStatus(run, "failed", `I couldn't apply the deployment preset: ${fixRes.error}`);
       await saveAndLog(run, projectId);
       return run;
     }
+    appendChatMessage(run, "Deployment preset applied. I can now run the install and build.", { tone: "success" });
     completeStep(run, "preset_applied", "success", fixRes.label);
   } else {
     addCompletedStep(run, "preset_applied", "Deployment preset", "success", "Using existing deployment config.");
+    appendChatMessage(run, "Using the existing deployment configuration.", { tone: "info" });
   }
   await saveAndLog(run, projectId);
 
@@ -243,10 +292,12 @@ async function runFullAgent(run: AgentRun, projectId: string): Promise<AgentRun>
 
 async function resumeAgent(run: AgentRun, projectId: string): Promise<AgentRun> {
   clearRunError(run);
+  appendChatMessage(run, "I'm retrying from where I left off.", { tone: "thinking" });
   setRunStatus(run, "retrying", "Retrying…");
   await saveAndLog(run, projectId);
 
   if (run.currentStep === "preview") {
+    appendChatMessage(run, "I'll recheck the preview now.", { tone: "thinking" });
     beginStep(run, "preview", "Checking preview", "Rechecking preview routes…");
     await saveAndLog(run, projectId);
     const preview = await checkAgentPreview({ projectId });
@@ -258,6 +309,11 @@ async function resumeAgent(run: AgentRun, projectId: string): Promise<AgentRun> 
       const errText = preview.panelGateError
         ?? preview.checks.find((c) => c.status !== "success")?.summary
         ?? "Preview check failed.";
+      appendChatMessage(
+        run,
+        previewFailureChatMessage(classified.kind, classified.safeFixAvailable, classified.whatHappened),
+        { tone: classified.safeFixAvailable ? "warning" : "error" },
+      );
       completeStep(run, "preview", "error", classified.whatHappened, {
         errorMessage: errText,
         fixAvailable: classified.safeFixAvailable,
@@ -270,6 +326,7 @@ async function resumeAgent(run: AgentRun, projectId: string): Promise<AgentRun> 
       return run;
     }
 
+    appendChatMessage(run, "The preview is live. The project is now working through the panel preview.", { tone: "success" });
     completeStep(run, "preview", "success", "All preview checks passed.");
     run.steps.push(...preview.checks);
     setRunStatus(
@@ -363,6 +420,7 @@ export async function fixAiImportAgentIssueAction(input: {
   if (!run) return { ok: false, error: "No agent run found. Click Make Project Live first." };
 
   try {
+    appendChatMessage(run, getAgentFixStartMessage(input.fixId), { tone: "thinking" });
     setRunStatus(run, "fixing", "Applying fix…");
     await saveAndLog(run, input.projectId);
 
@@ -370,12 +428,14 @@ export async function fixAiImportAgentIssueAction(input: {
     if (!fixRes.ok) {
       addCompletedStep(run, `fix-${input.fixId}`, "Fix attempt", "error", fixRes.error, { errorMessage: fixRes.error });
       if (fixRes.agentError) setRunError(run, fixRes.agentError);
+      appendChatMessage(run, `I couldn't apply the fix: ${fixRes.error}`, { tone: "error" });
       setRunStatus(run, "fix_available", fixRes.error);
       await saveAndLog(run, input.projectId);
       return { ok: true, data: run };
     }
 
     addCompletedStep(run, `fix-${input.fixId}`, "Fix applied", "fixed", fixRes.label);
+    appendChatMessage(run, "The fix was applied. I'll redeploy and check preview again.", { tone: "success" });
     clearRunError(run);
     await saveAndLog(run, input.projectId);
 
@@ -388,6 +448,7 @@ export async function fixAiImportAgentIssueAction(input: {
       run.publicUrl  = fixRes.preview.publicUrl;
       run.steps.push(...fixRes.preview.checks);
       if (fixRes.preview.allPass) {
+        appendChatMessage(run, "The preview is live. The project is now working through the panel preview.", { tone: "success" });
         setRunStatus(
           run, "preview_live",
           fixRes.preview.publicUrl

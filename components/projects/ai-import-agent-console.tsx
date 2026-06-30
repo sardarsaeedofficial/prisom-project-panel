@@ -3,15 +3,17 @@
 /**
  * components/projects/ai-import-agent-console.tsx
  *
- * Sprint 89: Replit-style live AI Import Agent console. Polls the persisted
- * AgentRun every 2 seconds while running/fixing/retrying so the timeline
- * fills in step by step instead of showing a static card.
+ * Sprint 89: Replit-style live AI Import Agent console.
+ * Sprint 90: Two-panel layout — Agent Chat (left/top) + Live Actions (right/below).
+ *            Chat fills in live as each orchestration step runs. Fix with Agent
+ *            shows an optimistic message immediately on click.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Zap, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock,
   ChevronDown, ChevronUp, Download, Eye, Wrench, ExternalLink, RefreshCw,
+  Bot, MessageSquare, Activity,
 } from "lucide-react";
 import { Button }   from "@/components/ui/button";
 import { Badge }    from "@/components/ui/badge";
@@ -25,15 +27,19 @@ import {
   retryAiImportAgentRunAction,
   exportAiImportAgentRunAction,
 } from "@/app/actions/ai-import-agent";
+import { getAgentFixStartMessage } from "@/lib/ai-import-agent/agent-step-builder";
 import {
   POLLING_STATUSES,
   type AgentRun,
   type AgentRunStatus,
   type AgentTimelineStep,
   type AgentTimelineStepStatus,
+  type AgentChatMessage,
 } from "@/lib/ai-import-agent/agent-run-types";
 
 const POLL_INTERVAL_MS = 2000;
+
+// ── Status helpers ─────────────────────────────────────────────────────────────
 
 const STATUS_LABEL: Record<AgentRunStatus, string> = {
   idle:              "Not started",
@@ -48,21 +54,25 @@ const STATUS_LABEL: Record<AgentRunStatus, string> = {
 
 function StatusBadge({ status }: { status: AgentRunStatus }) {
   const variant: "success" | "warning" | "destructive" | "secondary" =
-    status === "preview_live"                                          ? "success" :
-    status === "failed"                                                 ? "destructive" :
-    status === "waiting_for_user" || status === "fix_available"         ? "warning" :
+    status === "preview_live"                                        ? "success" :
+    status === "failed"                                              ? "destructive" :
+    status === "waiting_for_user" || status === "fix_available"      ? "warning" :
     "secondary";
   return <Badge variant={variant}>{STATUS_LABEL[status]}</Badge>;
 }
 
+// ── Step icon ──────────────────────────────────────────────────────────────────
+
 function StepIcon({ status }: { status: AgentTimelineStepStatus }) {
   if (status === "success") return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
-  if (status === "fixed")   return <Wrench className="h-4 w-4 text-blue-500 shrink-0" />;
+  if (status === "fixed")   return <Wrench       className="h-4 w-4 text-blue-500 shrink-0" />;
   if (status === "warning") return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
-  if (status === "error")   return <XCircle className="h-4 w-4 text-destructive shrink-0" />;
-  if (status === "running") return <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />;
-  return <Clock className="h-4 w-4 text-muted-foreground shrink-0" />;
+  if (status === "error")   return <XCircle      className="h-4 w-4 text-destructive shrink-0" />;
+  if (status === "running") return <Loader2      className="h-4 w-4 animate-spin text-primary shrink-0" />;
+  return                           <Clock        className="h-4 w-4 text-muted-foreground shrink-0" />;
 }
+
+// ── Misc helpers ───────────────────────────────────────────────────────────────
 
 function isBrowserSafe(url: string): boolean {
   if (url.startsWith("/")) return true;
@@ -84,7 +94,70 @@ function downloadMarkdown(markdown: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-// ── Timeline step row with collapsible output ─────────────────────────────────
+// ── Chat bubble ────────────────────────────────────────────────────────────────
+
+function ChatBubble({ msg }: { msg: AgentChatMessage }) {
+  const tone = msg.tone ?? "info";
+  const textClass =
+    tone === "success"  ? "text-green-700 dark:text-green-400" :
+    tone === "warning"  ? "text-amber-700 dark:text-amber-300" :
+    tone === "error"    ? "text-destructive" :
+    tone === "thinking" ? "text-muted-foreground italic" :
+    "text-foreground";
+
+  return (
+    <div className="flex items-start gap-2.5 py-1.5">
+      <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+        <Bot className="h-3 w-3 text-primary" />
+      </div>
+      <p className={`text-sm leading-relaxed break-words ${textClass}`}>{msg.message}</p>
+    </div>
+  );
+}
+
+// ── Chat panel ─────────────────────────────────────────────────────────────────
+
+function ChatPanel({
+  messages, isWorking,
+}: { messages: AgentChatMessage[]; isWorking: boolean }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
+
+  return (
+    <div className="rounded-md border flex flex-col min-h-[200px]">
+      <div className="px-3 py-2 border-b border-border/50 flex items-center gap-1.5 shrink-0">
+        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Agent</p>
+      </div>
+      <div className="flex-1 px-3 py-2 overflow-y-auto max-h-64 space-y-0.5">
+        {messages.length === 0 && isWorking && (
+          <div className="flex items-start gap-2.5 py-1.5">
+            <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+              <Bot className="h-3 w-3 text-primary" />
+            </div>
+            <p className="text-sm text-muted-foreground italic">Starting…</p>
+          </div>
+        )}
+        {messages.length === 0 && !isWorking && (
+          <p className="text-xs text-muted-foreground py-2">No messages yet.</p>
+        )}
+        {messages.map((msg) => <ChatBubble key={msg.id} msg={msg} />)}
+        {isWorking && messages.length > 0 && (
+          <div className="flex items-center gap-1.5 py-1 pl-7">
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Working…</span>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
+// ── Timeline step row (with collapsible output) ────────────────────────────────
 
 function StepRow({ step }: { step: AgentTimelineStep }) {
   const [open, setOpen] = useState(false);
@@ -123,7 +196,31 @@ function StepRow({ step }: { step: AgentTimelineStep }) {
   );
 }
 
-// ── Error card ─────────────────────────────────────────────────────────────────
+// ── Actions panel ─────────────────────────────────────────────────────────────
+
+function ActionsPanel({ steps, isWorking }: { steps: AgentTimelineStep[]; isWorking: boolean }) {
+  return (
+    <div className="rounded-md border flex flex-col min-h-[200px]">
+      <div className="px-3 py-2 border-b border-border/50 flex items-center gap-1.5 shrink-0">
+        <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Live Actions</p>
+      </div>
+      <div className="flex-1 px-3 overflow-y-auto max-h-64">
+        {steps.length === 0 && isWorking && (
+          <p className="text-xs text-muted-foreground py-3 flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" /> Reading project files…
+          </p>
+        )}
+        {steps.length === 0 && !isWorking && (
+          <p className="text-xs text-muted-foreground py-3">No actions yet.</p>
+        )}
+        {steps.map((step, i) => <StepRow key={`${step.id}-${i}`} step={step} />)}
+      </div>
+    </div>
+  );
+}
+
+// ── Error card ────────────────────────────────────────────────────────────────
 
 function ErrorCard({
   run, onFix, onRetry, fixing, retrying,
@@ -196,22 +293,22 @@ function ErrorCard({
   );
 }
 
-// ── Main console ────────────────────────────────────────────────────────────────
+// ── Main console ───────────────────────────────────────────────────────────────
 
 interface AiImportAgentConsoleProps {
   projectId: string;
 }
 
 export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
-  const [run,        setRun]       = useState<AgentRun | null>(null);
-  const [starting,   setStarting]  = useState(false);
-  const [fixing,     setFixing]    = useState(false);
-  const [retrying,   setRetrying]  = useState(false);
-  const [exporting,  setExporting] = useState(false);
-  const [error,      setError]     = useState<string | null>(null);
+  const [run,       setRun]       = useState<AgentRun | null>(null);
+  const [starting,  setStarting]  = useState(false);
+  const [fixing,    setFixing]    = useState(false);
+  const [retrying,  setRetrying]  = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const runRef    = useRef<AgentRun | null>(null);
-  runRef.current = run;
+  runRef.current  = run;
 
   const poll = useCallback(async () => {
     const res = await getAiImportAgentRunAction({ projectId });
@@ -270,6 +367,21 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     if (!run) return;
     setFixing(true);
     setError(null);
+
+    // Optimistic: show the fix message immediately before the server responds.
+    const optimisticMsg: AgentChatMessage = {
+      id: `optimistic-${Date.now()}`,
+      role: "agent",
+      tone: "thinking",
+      message: getAgentFixStartMessage(fixId),
+      createdAt: new Date().toISOString(),
+    };
+    setRun((prev) => prev ? {
+      ...prev,
+      status: "fixing",
+      chatMessages: [...(prev.chatMessages ?? []), optimisticMsg],
+    } : null);
+
     startPolling();
     const res = await fixAiImportAgentIssueAction({ projectId, runId: run.id, fixId });
     setFixing(false);
@@ -286,6 +398,21 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     if (!run) return;
     setRetrying(true);
     setError(null);
+
+    // Optimistic: show retry message immediately.
+    const optimisticMsg: AgentChatMessage = {
+      id: `optimistic-${Date.now()}`,
+      role: "agent",
+      tone: "thinking",
+      message: "I'm retrying from where I left off.",
+      createdAt: new Date().toISOString(),
+    };
+    setRun((prev) => prev ? {
+      ...prev,
+      status: "retrying",
+      chatMessages: [...(prev.chatMessages ?? []), optimisticMsg],
+    } : null);
+
     startPolling();
     const res = await retryAiImportAgentRunAction({ projectId, runId: run.id });
     setRetrying(false);
@@ -310,8 +437,8 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     }
   }
 
-  const showTimeline = !!run;
   const isWorking = starting || (run ? POLLING_STATUSES.includes(run.status) : false);
+  const showConsole = !!run;
 
   return (
     <Card className="border-primary/20">
@@ -324,7 +451,10 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
             <div>
               <CardTitle className="text-base">AI Import Agent</CardTitle>
               <CardDescription className="mt-0.5 text-xs">
-                One button. I read your project, run the commands, fix errors, and verify preview.
+                {run
+                  ? run.summary
+                  : "One button. I read your project, run the commands, fix errors, and verify preview."
+                }
               </CardDescription>
             </div>
           </div>
@@ -333,8 +463,14 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
       </CardHeader>
 
       <CardContent className="pt-0 space-y-4">
-        {!showTimeline && (
-          <Button size="default" className="w-full sm:w-auto" onClick={makeProjectLive} disabled={starting}>
+        {/* Start button — shown only before any run exists */}
+        {!showConsole && (
+          <Button
+            size="default"
+            className="w-full sm:w-auto"
+            onClick={makeProjectLive}
+            disabled={starting}
+          >
             {starting
               ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Starting…</>
               : <><Zap className="h-4 w-4 mr-2" /> Make Project Live</>
@@ -342,37 +478,45 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
           </Button>
         )}
 
+        {/* Action-level error (not the same as run.lastError) */}
         {error && (
           <div className="text-xs text-destructive bg-destructive/10 rounded px-3 py-2">{error}</div>
         )}
 
-        {run && (
+        {showConsole && (
           <>
-            <div className="rounded-md bg-muted/50 px-4 py-3">
-              <p className="text-sm leading-relaxed">{run.summary}</p>
-              {isWorking && (
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Live progress — updating every {POLL_INTERVAL_MS / 1000}s
-                </p>
-              )}
-            </div>
-
-            {/* ── Timeline ─────────────────────────────────────────────────── */}
-            <div className="rounded-md border px-3">
-              {run.steps.map((step, i) => <StepRow key={`${step.id}-${i}`} step={step} />)}
-              {run.steps.length === 0 && (
-                <p className="text-xs text-muted-foreground py-3 flex items-center gap-1.5">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Reading project files…
-                </p>
-              )}
-            </div>
-
-            {/* ── Error card with Fix with Agent ───────────────────────────── */}
-            {run.lastError && (run.status === "fix_available" || run.status === "failed") && (
-              <ErrorCard run={run} onFix={applyFix} onRetry={retry} fixing={fixing} retrying={retrying} />
+            {/* ── Live indicator ─────────────────────────────────────────── */}
+            {isWorking && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                You can leave this page open while I work. I&apos;ll show every step here.
+              </p>
             )}
 
-            {/* ── Waiting for user (missing secrets) ───────────────────────── */}
+            {/* ── Two-panel: Chat | Actions ──────────────────────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <ChatPanel
+                messages={run.chatMessages ?? []}
+                isWorking={isWorking}
+              />
+              <ActionsPanel
+                steps={run.steps}
+                isWorking={isWorking}
+              />
+            </div>
+
+            {/* ── Error card with Fix with Agent ─────────────────────────── */}
+            {run.lastError && (run.status === "fix_available" || run.status === "failed") && (
+              <ErrorCard
+                run={run}
+                onFix={applyFix}
+                onRetry={retry}
+                fixing={fixing}
+                retrying={retrying}
+              />
+            )}
+
+            {/* ── Waiting for user (missing secrets) ─────────────────────── */}
             {run.status === "waiting_for_user" && (
               <div className="rounded-md border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-950/30 p-3 text-xs">
                 Add the missing values in the Environment tab, then click Retry.
@@ -387,16 +531,26 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
               </div>
             )}
 
-            {/* ── Preview / domain links ───────────────────────────────────── */}
+            {/* ── Preview / domain links ──────────────────────────────────── */}
             {(run.previewUrl || run.publicUrl) && (
               <div className="flex flex-wrap gap-3 text-xs">
                 {run.previewUrl && isBrowserSafe(run.previewUrl) && (
-                  <a href={run.previewUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                  <a
+                    href={run.previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-primary hover:underline"
+                  >
                     <Eye className="h-3.5 w-3.5" /> Panel preview
                   </a>
                 )}
                 {run.publicUrl && isBrowserSafe(run.publicUrl) && (
-                  <a href={run.publicUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-green-600 dark:text-green-400 hover:underline">
+                  <a
+                    href={run.publicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-green-600 dark:text-green-400 hover:underline"
+                  >
                     <CheckCircle2 className="h-3.5 w-3.5" /> Live domain
                   </a>
                 )}
@@ -408,10 +562,19 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
               </p>
             )}
 
-            {/* ── Footer actions ────────────────────────────────────────────── */}
+            {/* ── Footer actions ──────────────────────────────────────────── */}
             <div className="flex items-center gap-2 flex-wrap pt-1">
-              <Button size="sm" variant="ghost" disabled={exporting} onClick={exportRunbook} className="h-8 text-xs">
-                {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={exporting}
+                onClick={exportRunbook}
+                className="h-8 text-xs"
+              >
+                {exporting
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  : <Download className="h-3.5 w-3.5 mr-1.5" />
+                }
                 Export Runbook
               </Button>
               <a
@@ -424,7 +587,7 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
 
             <p className="text-[10px] text-muted-foreground flex items-center gap-1.5">
               <CheckCircle2 className="h-3 w-3 shrink-0" />
-              No secrets shown. Only this project's PM2 process is managed. No automatic go-live.
+              No secrets shown. Only this project&apos;s PM2 process is managed. No automatic go-live.
             </p>
           </>
         )}

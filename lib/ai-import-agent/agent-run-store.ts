@@ -38,7 +38,8 @@ function mapRunStatusToOperationStatus(status: AgentRunStatus): "running" | "suc
 function rowToAgentRun(row: { id: string; meta: unknown; startedAt: Date; updatedAt: Date }): AgentRun | null {
   const meta = row.meta as { run?: AgentRun } | null;
   if (!meta?.run) return null;
-  return { ...meta.run, id: row.id };
+  // chatMessages may be absent on runs written before Sprint 90 — default to [].
+  return { ...meta.run, id: row.id, chatMessages: meta.run.chatMessages ?? [] };
 }
 
 /** Returns the most recent agent run for a project, or null if none exists. */
@@ -82,6 +83,7 @@ export async function getOrCreateAgentRun(input: {
     currentStep: "start",
     summary: "Starting…",
     steps: [],
+    chatMessages: [],
     startedAt: nowIso,
     updatedAt: nowIso,
   };

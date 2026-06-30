@@ -31,6 +31,16 @@ export type AgentTimelineStep = {
 /** Fix safety level shown to the user alongside an error explanation. */
 export type AgentFixSafetyLevel = "safe" | "needs_approval";
 
+/** A single agent-narrated message shown in the chat column of the console. */
+export type AgentChatMessage = {
+  id: string;
+  role: "agent" | "system" | "user";
+  tone?: "thinking" | "success" | "warning" | "error" | "info";
+  message: string;
+  createdAt: string; // ISO
+  relatedStepId?: string;
+};
+
 export type AgentError = {
   kind: string;
   /** Short headline for the error card, e.g. "Frontend is not being served". */
@@ -66,6 +76,7 @@ export type AgentRun = {
   currentStep: string;
   summary: string;
   steps: AgentTimelineStep[];
+  chatMessages: AgentChatMessage[];
   lastError?: AgentError;
   previewUrl?: string;
   publicUrl?: string;
