@@ -5,7 +5,8 @@ import { DashboardShell, PageHeader } from "@/components/layout/dashboard-shell"
 import { ProjectCard } from "@/components/projects/project-card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { getProjects, toProjectViewModel } from "@/lib/data/projects";
+import { getProjects, toProjectViewModel, type ProjectListItem } from "@/lib/data/projects";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Projects" };
@@ -25,16 +26,41 @@ const FILTERS = [
   { key: "error", label: "Error" },
 ];
 
+// Shared include so the Tier-2 fallback query produces the same shape as getProjects().
+const PROJECT_INCLUDE = {
+  githubRepository: true,
+  domains:          { where: { isPrimary: true }, take: 1 },
+  deployments:      { orderBy: { createdAt: "desc" } as const, take: 1 },
+  environments:     true,
+  _count:           { select: { logs: true, tasks: true, features: true, commits: true } },
+} as const;
+
 export default async function ProjectsPage({ searchParams }: Props) {
   const { status: statusParam } = await searchParams;
 
-  let allProjects: Awaited<ReturnType<typeof getProjects>> = [];
+  let allProjects: ProjectListItem[] = [];
   let dbError: string | null = null;
 
+  // ── Tier 1: session-aware, workspace-scoped query ─────────────────────────
   try {
     allProjects = await getProjects();
-  } catch {
-    dbError = "Could not connect to the database.";
+  } catch (err) {
+    console.error("[projects] workspace-scoped project load failed", err);
+
+    // ── Tier 2: direct DB query (no session/workspace dependency) ──────────
+    if (!process.env.DATABASE_URL) {
+      dbError = "DATABASE_URL is missing from the panel environment.";
+    } else {
+      try {
+        allProjects = await db.project.findMany({
+          include: PROJECT_INCLUDE,
+          orderBy: { updatedAt: "desc" },
+        }) as ProjectListItem[];
+      } catch (fallbackErr) {
+        console.error("[projects] direct DB fallback also failed", fallbackErr);
+        dbError = "Projects failed to load. Check server logs.";
+      }
+    }
   }
 
   const nonArchivedProjects = allProjects.filter((p) => p.status !== "ARCHIVED");
@@ -90,10 +116,12 @@ export default async function ProjectsPage({ searchParams }: Props) {
         <div className="flex flex-col items-center justify-center py-16 text-center border rounded-lg bg-muted/20">
           <Database className="h-10 w-10 text-muted-foreground mb-3" />
           <p className="text-sm font-medium text-muted-foreground">{dbError}</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Set DATABASE_URL in .env and run{" "}
-            <code className="font-mono bg-muted px-1 py-0.5 rounded">npm run db:push &amp;&amp; npm run db:seed</code>
-          </p>
+          {!process.env.DATABASE_URL && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Set DATABASE_URL in .env and run{" "}
+              <code className="font-mono bg-muted px-1 py-0.5 rounded">npm run db:push &amp;&amp; npm run db:seed</code>
+            </p>
+          )}
         </div>
       )}
 
