@@ -11,6 +11,8 @@ import type {
   AgentTimelineStepStatus,
   AgentError,
   AgentChatMessage,
+  AgentPhase,
+  AgentRunStatus,
 } from "./agent-run-types";
 
 function nowIso(): string {
@@ -97,7 +99,24 @@ export function clearRunError(run: AgentRun): AgentRun {
   return run;
 }
 
-export function setRunStatus(run: AgentRun, status: AgentRun["status"], summary?: string): AgentRun {
+export function setRunStatus(run: AgentRun, status: AgentRunStatus, summary?: string): AgentRun {
+  run.status = status;
+  if (summary) run.summary = summary;
+  run.updatedAt = nowIso();
+  return run;
+}
+
+/**
+ * Sprint 92: Sets both the run status and the next phase the step executor
+ * should pick up on its next call.
+ */
+export function setRunPhase(
+  run: AgentRun,
+  phase: AgentPhase | undefined,
+  status: AgentRunStatus,
+  summary?: string,
+): AgentRun {
+  run.nextPhase = phase;
   run.status = status;
   if (summary) run.summary = summary;
   run.updatedAt = nowIso();
@@ -154,6 +173,9 @@ export function getAgentFixStartMessage(fixId: string): string {
   }
   if (fixId === "refresh_panel_pm2_env_and_retry_preview") {
     return "I'm checking the panel database connection and retrying the preview.";
+  }
+  if (fixId === "retry-deploy") {
+    return "I'm queueing a fresh deploy now.";
   }
   return "I'm applying the safe fix now.";
 }

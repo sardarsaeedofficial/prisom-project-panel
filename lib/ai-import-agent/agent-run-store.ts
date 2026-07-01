@@ -1,45 +1,64 @@
 /**
  * lib/ai-import-agent/agent-run-store.ts
  *
- * Sprint 89: Persists AgentRun state so progress survives a page refresh and
- * a separate polling request can observe live progress while a run is
- * in-flight (Node serves concurrent requests on the same event loop — a
- * long-running synchronous action that awaits DB/IO between steps yields
- * naturally, so a poll arriving mid-run sees freshly written state).
- *
- * Storage: ProjectOperation (operationType: "ai_import_agent"), with the full
- * AgentRun (including steps[]) serialized into the `meta` Json field. No
- * Prisma schema changes — meta already exists for exactly this purpose.
- *
- * Each completed/errored step is also mirrored into ProjectLog so the run is
- * visible from the existing Logs page, not only this console (per spec: "Do
- * not hide logs only in Operations").
- *
- * This intentionally does NOT use startProjectOperation()'s cross-type lock
- * matrix — an agent run orchestrates its own internal "deploy" operation via
- * deployProjectAction(), and locking "ai_import_agent" against "deploy" would
- * make the agent's own internal deploy call block on itself. Only a simple
- * one-running-run-per-project guard is enforced here directly.
+ * Sprint 89: Persists AgentRun state so progress survives a page refresh.
+ * Sprint 92: Normalizes legacy status values on read; initial run has
+ *            status="queued" + nextPhase="analyze" for the step executor.
  */
 
 import { db }                  from "@/lib/db";
 import { LogLevel, LogSource } from "@prisma/client";
 import { markStaleOperations } from "@/lib/operations/project-operation-cleanup";
 import type { AgentRun, AgentTimelineStep, AgentRunStatus } from "./agent-run-types";
+import { STATUS_TIMEOUT_MS, ACTIVE_STATUSES } from "./agent-run-types";
 
 const OPERATION_TYPE = "ai_import_agent";
 
 function mapRunStatusToOperationStatus(status: AgentRunStatus): "running" | "success" | "failed" {
   if (status === "preview_live") return "success";
-  if (status === "failed") return "failed";
-  return "running"; // running | fixing | retrying | waiting_for_user | fix_available | idle
+  if (status === "failed" || status === "timed_out") return "failed";
+  return "running";
+}
+
+/** Normalize Sprint 89/90 legacy status strings to Sprint 92 canonical values. */
+function normalizeStatus(raw: string): AgentRunStatus {
+  switch (raw) {
+    case "idle":             return "not_started";
+    case "waiting_for_user": return "waiting_for_user_input";
+    case "fix_available":    return "waiting_for_fix_approval";
+    default: return raw as AgentRunStatus;
+  }
 }
 
 function rowToAgentRun(row: { id: string; meta: unknown; startedAt: Date; updatedAt: Date }): AgentRun | null {
   const meta = row.meta as { run?: AgentRun } | null;
   if (!meta?.run) return null;
-  // chatMessages may be absent on runs written before Sprint 90 — default to [].
-  return { ...meta.run, id: row.id, chatMessages: meta.run.chatMessages ?? [] };
+  const raw = meta.run;
+
+  const status = normalizeStatus(raw.status as string);
+
+  // Legacy runs without nextPhase that are still active get a safe default
+  // so the step executor can resume without hanging.
+  let nextPhase = raw.nextPhase;
+  if (!nextPhase && ACTIVE_STATUSES.includes(status)) {
+    nextPhase = raw.currentStep === "preview" ? "check_preview" : "deploy";
+  }
+
+  return {
+    ...raw,
+    id:           row.id,
+    status,
+    nextPhase,
+    chatMessages: raw.chatMessages ?? [],
+    attemptCount: raw.attemptCount ?? 0,
+  };
+}
+
+/** Returns true if the run has been stuck in an in-flight status past its timeout. */
+export function isRunTimedOut(run: AgentRun): boolean {
+  const timeout = STATUS_TIMEOUT_MS[run.status];
+  if (!timeout) return false;
+  return Date.now() - new Date(run.updatedAt).getTime() > timeout;
 }
 
 /** Returns the most recent agent run for a project, or null if none exists. */
@@ -77,15 +96,17 @@ export async function getOrCreateAgentRun(input: {
 
   const nowIso = new Date().toISOString();
   const run: AgentRun = {
-    id: "", // filled in after create
+    id:           "",
     projectId,
-    status: "running",
-    currentStep: "start",
-    summary: "Starting…",
-    steps: [],
+    status:       "queued",
+    currentStep:  "start",
+    summary:      "Queued…",
+    steps:        [],
     chatMessages: [],
-    startedAt: nowIso,
-    updatedAt: nowIso,
+    nextPhase:    "analyze",
+    attemptCount: 0,
+    startedAt:    nowIso,
+    updatedAt:    nowIso,
   };
 
   const row = await db.projectOperation.create({
@@ -113,7 +134,11 @@ export async function saveAgentRun(run: AgentRun): Promise<void> {
       status:      mapRunStatusToOperationStatus(run.status),
       meta:        { run } as object,
       lastError:   run.lastError?.whatHappened?.slice(0, 1000) ?? null,
-      completedAt: run.status === "preview_live" || run.status === "failed" ? new Date() : null,
+      completedAt: (
+        run.status === "preview_live" ||
+        run.status === "failed"       ||
+        run.status === "timed_out"
+      ) ? new Date() : null,
     },
   }).catch(() => null); // non-fatal — the in-memory run is still returned to the caller
 }

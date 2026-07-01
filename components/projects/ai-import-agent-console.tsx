@@ -7,6 +7,9 @@
  * Sprint 90: Two-panel layout — Agent Chat (left/top) + Live Actions (right/below).
  *            Chat fills in live as each orchestration step runs. Fix with Agent
  *            shows an optimistic message immediately on click.
+ * Sprint 92: Poll loop replaced with step-executor calls — each tick calls
+ *            runNextAiImportAgentStepAction which both advances the machine
+ *            AND returns the latest run state. Watchdog (timed_out) UI added.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -23,13 +26,16 @@ import {
 import {
   startAiImportAgentRunAction,
   getAiImportAgentRunAction,
+  runNextAiImportAgentStepAction,
   fixAiImportAgentIssueAction,
   retryAiImportAgentRunAction,
   exportAiImportAgentRunAction,
 } from "@/app/actions/ai-import-agent";
 import { getAgentFixStartMessage } from "@/lib/ai-import-agent/agent-step-builder";
 import {
-  POLLING_STATUSES,
+  ACTIVE_STATUSES,
+  WAITING_STATUSES,
+  TERMINAL_STATUSES,
   type AgentRun,
   type AgentRunStatus,
   type AgentTimelineStep,
@@ -41,24 +47,40 @@ const POLL_INTERVAL_MS = 2000;
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<AgentRunStatus, string> = {
-  idle:              "Not started",
-  running:           "Working…",
-  waiting_for_user:  "Needs your input",
-  fix_available:     "Fix available",
-  fixing:            "Applying fix…",
-  retrying:          "Retrying…",
-  preview_live:      "Preview live",
-  failed:            "Failed",
+const STATUS_LABEL: Partial<Record<AgentRunStatus, string>> & { default: string } = {
+  // Sprint 92 canonical
+  not_started:               "Not started",
+  queued:                    "Queued…",
+  running:                   "Working…",
+  deploying:                 "Deploying…",
+  verifying:                 "Verifying…",
+  fixing:                    "Applying fix…",
+  waiting_for_user_input:    "Needs your input",
+  waiting_for_fix_approval:  "Fix available",
+  preview_live:              "Preview live",
+  failed:                    "Failed",
+  timed_out:                 "Timed out",
+  blocked:                   "Blocked",
+  // Legacy
+  idle:                      "Not started",
+  waiting_for_user:          "Needs your input",
+  fix_available:             "Fix available",
+  retrying:                  "Retrying…",
+  default:                   "Working…",
 };
+
+function getStatusLabel(status: AgentRunStatus): string {
+  return (STATUS_LABEL as Record<string, string>)[status] ?? STATUS_LABEL.default;
+}
 
 function StatusBadge({ status }: { status: AgentRunStatus }) {
   const variant: "success" | "warning" | "destructive" | "secondary" =
-    status === "preview_live"                                        ? "success" :
-    status === "failed"                                              ? "destructive" :
-    status === "waiting_for_user" || status === "fix_available"      ? "warning" :
+    status === "preview_live"                                                            ? "success" :
+    status === "failed" || status === "timed_out" || status === "blocked"               ? "destructive" :
+    status === "waiting_for_user_input" || status === "waiting_for_fix_approval" ||
+    status === "waiting_for_user"       || status === "fix_available"                   ? "warning" :
     "secondary";
-  return <Badge variant={variant}>{STATUS_LABEL[status]}</Badge>;
+  return <Badge variant={variant}>{getStatusLabel(status)}</Badge>;
 }
 
 // ── Step icon ──────────────────────────────────────────────────────────────────
@@ -310,9 +332,27 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
   const runRef    = useRef<AgentRun | null>(null);
   runRef.current  = run;
 
+  /**
+   * Sprint 92: each tick calls the step executor, which advances the machine
+   * by one phase AND returns the updated run. Falls back to a read-only poll
+   * when the run has no runId yet or is in a terminal/waiting state.
+   */
   const poll = useCallback(async () => {
-    const res = await getAiImportAgentRunAction({ projectId });
-    if (res.ok && res.data) setRun(res.data);
+    const current = runRef.current;
+    if (!current) return;
+
+    // For active runs: call step executor so it can advance the machine.
+    // For waiting/terminal: read-only poll to pick up user-driven changes.
+    if (ACTIVE_STATUSES.includes(current.status)) {
+      const res = await runNextAiImportAgentStepAction({
+        projectId,
+        runId: current.id,
+      });
+      if (res.ok) setRun(res.data);
+    } else {
+      const res = await getAiImportAgentRunAction({ projectId });
+      if (res.ok && res.data) setRun(res.data);
+    }
   }, [projectId]);
 
   const stopPolling = useCallback(() => {
@@ -326,11 +366,13 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     stopPolling();
     pollTimer.current = setInterval(() => {
       const current = runRef.current;
-      if (!current || POLLING_STATUSES.includes(current.status)) {
-        void poll();
-      } else {
+      // Stop auto-polling once the run is terminal (timed_out, failed,
+      // preview_live) — the user must take an explicit action to continue.
+      if (current && TERMINAL_STATUSES.includes(current.status)) {
         stopPolling();
+        return;
       }
+      void poll();
     }, POLL_INTERVAL_MS);
   }, [poll, stopPolling]);
 
@@ -342,7 +384,9 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
       const res = await getAiImportAgentRunAction({ projectId });
       if (res.ok && res.data) {
         setRun(res.data);
-        if (POLLING_STATUSES.includes(res.data.status)) startPolling();
+        // Start polling for active or waiting states; terminal states need
+        // a user action (retry/fix) to continue.
+        if (!TERMINAL_STATUSES.includes(res.data.status)) startPolling();
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -351,14 +395,13 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
   async function makeProjectLive() {
     setStarting(true);
     setError(null);
-    startPolling(); // begin polling immediately — the run row is created before the long work starts
     const res = await startAiImportAgentRunAction({ projectId });
     setStarting(false);
     if (res.ok) {
       setRun(res.data);
-      if (!POLLING_STATUSES.includes(res.data.status)) stopPolling();
+      // Sprint 92: run is now queued; start polling so step executor fires.
+      startPolling();
     } else {
-      stopPolling();
       setError(res.error);
     }
   }
@@ -382,14 +425,13 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
       chatMessages: [...(prev.chatMessages ?? []), optimisticMsg],
     } : null);
 
-    startPolling();
     const res = await fixAiImportAgentIssueAction({ projectId, runId: run.id, fixId });
     setFixing(false);
     if (res.ok) {
       setRun(res.data);
-      if (!POLLING_STATUSES.includes(res.data.status)) stopPolling();
+      // Fix is now queued; resume polling so step executor picks it up.
+      startPolling();
     } else {
-      stopPolling();
       setError(res.error);
     }
   }
@@ -413,14 +455,13 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
       chatMessages: [...(prev.chatMessages ?? []), optimisticMsg],
     } : null);
 
-    startPolling();
     const res = await retryAiImportAgentRunAction({ projectId, runId: run.id });
     setRetrying(false);
     if (res.ok) {
       setRun(res.data);
-      if (!POLLING_STATUSES.includes(res.data.status)) stopPolling();
+      // Retry is queued; resume polling so step executor picks it up.
+      startPolling();
     } else {
-      stopPolling();
       setError(res.error);
     }
   }
@@ -437,7 +478,7 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     }
   }
 
-  const isWorking = starting || (run ? POLLING_STATUSES.includes(run.status) : false);
+  const isWorking = starting || (run ? ACTIVE_STATUSES.includes(run.status) : false);
   const showConsole = !!run;
 
   return (
@@ -506,7 +547,11 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
             </div>
 
             {/* ── Error card with Fix with Agent ─────────────────────────── */}
-            {run.lastError && (run.status === "fix_available" || run.status === "failed") && (
+            {run.lastError && (
+              run.status === "failed" ||
+              run.status === "waiting_for_fix_approval" ||
+              run.status === "fix_available"
+            ) && (
               <ErrorCard
                 run={run}
                 onFix={applyFix}
@@ -516,8 +561,25 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
               />
             )}
 
+            {/* ── Timed out — run was stuck, watchdog caught it ───────────── */}
+            {run.status === "timed_out" && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs space-y-2">
+                <p className="font-medium text-destructive">The last action stopped responding.</p>
+                <p className="text-muted-foreground">
+                  The agent timed out while waiting for a response. Click Retry to resume safely — no
+                  duplicate deploys will run.
+                </p>
+                <Button size="sm" variant="outline" disabled={retrying} onClick={retry} className="h-8">
+                  {retrying
+                    ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Resuming…</>
+                    : <><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Retry</>
+                  }
+                </Button>
+              </div>
+            )}
+
             {/* ── Waiting for user (missing secrets) ─────────────────────── */}
-            {run.status === "waiting_for_user" && (
+            {(run.status === "waiting_for_user_input" || run.status === "waiting_for_user") && (
               <div className="rounded-md border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-950/30 p-3 text-xs">
                 Add the missing values in the Environment tab, then click Retry.
                 <div className="mt-2">
