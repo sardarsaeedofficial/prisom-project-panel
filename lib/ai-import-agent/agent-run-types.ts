@@ -107,6 +107,20 @@ export type AiImportPlan = {
   stopReason?: string;
 };
 
+/**
+ * Metadata recorded when the AI provider is called, so the UI can show
+ * concrete proof that Claude was invoked (not just "connected").
+ */
+export type AiPlanMeta = {
+  provider: string;
+  modelLabel: string;
+  exactModel?: string;
+  requestedAt: string;   // ISO — when we sent the request
+  respondedAt?: string;  // ISO — when Claude responded
+  success: boolean;
+  error?: string;        // safe-redacted reason if failed
+};
+
 /** A file patch proposed by the AI that requires user approval before applying. */
 export type PendingPatch = {
   actionId: string;
@@ -168,6 +182,8 @@ export type AgentRun = {
   iterationCount?: number;
   /** Sprint 93: file patch pending user approval. */
   pendingPatch?: PendingPatch;
+  /** Sprint 95: proof that Claude was actually called in this run. */
+  aiPlanMeta?: AiPlanMeta;
 };
 
 // ── Status groups ─────────────────────────────────────────────────────────────

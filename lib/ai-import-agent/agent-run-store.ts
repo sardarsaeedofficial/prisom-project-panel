@@ -91,6 +91,18 @@ export async function saveAgentRun(run: AgentRun): Promise<void> {
 }
 
 /**
+ * Force-closes ALL running ai_import_agent operations for a project so the
+ * active operation banner clears immediately regardless of how many orphan rows
+ * exist. Called on Stop and Clear to guarantee the banner disappears.
+ */
+export async function forceCloseAllActiveAgentOperations(projectId: string): Promise<void> {
+  await db.projectOperation.updateMany({
+    where: { projectId, operationType: OPERATION_TYPE, status: "running" },
+    data:  { status: "failed", completedAt: new Date(), lastError: "Agent stopped by user." },
+  }).catch(() => null);
+}
+
+/**
  * Returns the most recent agent run for a project, or null if none exists.
  *
  * Sprint 94: auto-detects timed-out runs and saves them immediately so the

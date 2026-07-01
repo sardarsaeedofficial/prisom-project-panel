@@ -43,6 +43,7 @@ import {
   saveAgentRun,
   logAgentStep,
   isRunTimedOut,
+  forceCloseAllActiveAgentOperations,
 }                                       from "@/lib/ai-import-agent/agent-run-store";
 import {
   beginStep,
@@ -73,7 +74,7 @@ import {
 import { buildImportAiContext }        from "@/lib/ai-import-agent/agent-ai-context-builder";
 import { planWithAi, isAiProviderAvailable } from "@/lib/ai-import-agent/agent-ai-planner";
 import { executeAiAction }             from "@/lib/ai-import-agent/agent-ai-patch-executor";
-import type { AgentRun }               from "@/lib/ai-import-agent/agent-run-types";
+import type { AgentRun, AiPlanMeta }   from "@/lib/ai-import-agent/agent-run-types";
 import {
   IN_FLIGHT_STATUSES,
   TERMINAL_STATUSES,
@@ -490,13 +491,14 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
 
 async function executePlanWithAiPhase(run: AgentRun, projectId: string): Promise<AgentRun> {
   run.iterationCount = (run.iterationCount ?? 0) + 1;
-  setRunPhase(run, "plan_with_ai", "planning", "Consulting AI assistant for a fix plan…");
+  const { modelLabel, exactModel } = getAiModelInfo();
+  setRunPhase(run, "plan_with_ai", "planning", `Consulting ${modelLabel} for a fix plan…`);
   appendChatMessage(
     run,
-    `I'm asking Sonnet to inspect the build output problem (iteration ${run.iterationCount}/${MAX_AI_ITERATIONS}).`,
+    `I'm asking ${modelLabel} to inspect the build output problem (iteration ${run.iterationCount}/${MAX_AI_ITERATIONS}).`,
     { tone: "thinking" },
   );
-  beginStep(run, `ai-plan-${run.iterationCount}`, "AI Planning", "Building context and calling Sonnet…");
+  beginStep(run, `ai-plan-${run.iterationCount}`, "AI Planning", `Building context and calling ${modelLabel}…`);
   await saveAndLog(run, projectId);
 
   // Get the most recent preview result from run state for context
@@ -517,21 +519,38 @@ async function executePlanWithAiPhase(run: AgentRun, projectId: string): Promise
     return run;
   }
 
+  // Record proof-of-call metadata BEFORE the request so the UI shows "Calling..."
+  const requestedAt = new Date().toISOString();
+  run.aiPlanMeta = {
+    provider:    "anthropic",
+    modelLabel,
+    exactModel,
+    requestedAt,
+    success:     false, // updated below on success
+  };
   appendChatMessage(
     run,
-    "Claude Sonnet is inspecting your package.json, build logs, and output directories.",
+    `Calling ${modelLabel}…`,
     { tone: "thinking" },
   );
+  appendChatMessage(
+    run,
+    `${modelLabel} is inspecting your package.json, build logs, and output directories.`,
+    { tone: "thinking" },
+  );
+  await saveAndLog(run, projectId);
 
   const planResult = await planWithAi(contextResult.context);
 
   if (!planResult.ok) {
+    const safeError = planResult.error.slice(0, 200);
+    run.aiPlanMeta = { ...run.aiPlanMeta, respondedAt: new Date().toISOString(), success: false, error: safeError };
     if (planResult.code === "NO_API_KEY") {
-      appendChatMessage(run, "AI provider not configured — rule-based import only.", { tone: "warning" });
+      appendChatMessage(run, `${modelLabel} call failed: API key not configured.`, { tone: "warning" });
       completeStep(run, `ai-plan-${run.iterationCount}`, "warning", "AI provider not configured.", {});
       setRunPhase(run, undefined, "failed", "AI provider not configured — manual review required.");
     } else {
-      appendChatMessage(run, `Sonnet returned an error: ${planResult.error}`, { tone: "error" });
+      appendChatMessage(run, `${modelLabel} call failed: ${safeError}`, { tone: "error" });
       completeStep(run, `ai-plan-${run.iterationCount}`, "error", planResult.error, { errorMessage: planResult.error });
       setRunPhase(run, undefined, "failed", planResult.error);
     }
@@ -539,11 +558,14 @@ async function executePlanWithAiPhase(run: AgentRun, projectId: string): Promise
     return run;
   }
 
+  run.aiPlanMeta = { ...run.aiPlanMeta, respondedAt: new Date().toISOString(), success: true };
+
   const { plan } = planResult;
   run.aiPlan = plan;
   run.aiPlanActionIndex = 0;
 
-  appendChatMessage(run, `Sonnet says: ${plan.summary}`, { tone: "info" });
+  appendChatMessage(run, `${modelLabel} returned a fix plan.`, { tone: "success" });
+  appendChatMessage(run, `${modelLabel} says: ${plan.summary}`, { tone: "info" });
   appendChatMessage(run, `Diagnosis: ${plan.diagnosis}`, { tone: "thinking" });
 
   if (plan.stopReason) {
@@ -994,6 +1016,9 @@ export async function stopAiImportAgentRunAction(input: {
     run.summary = "Agent stopped by user.";
     run.updatedAt = new Date().toISOString();
     await saveAgentRun(run);
+    // Force-close ALL active ai_import_agent operations so the banner clears
+    // immediately, even if there are orphan "running" rows from previous starts.
+    await forceCloseAllActiveAgentOperations(input.projectId);
 
     const ctx = await getAuditRequestContext();
     void writeProjectAuditEvent({
@@ -1029,7 +1054,37 @@ export async function resumeAiImportAgentRunAction(input: {
   const run = await getLatestAgentRun(input.projectId);
   if (!run) return { ok: false, error: "No agent run found." };
 
+  // If the run hasn't been touched in > 60 min, the saved chat/phase state is
+  // too stale to continue — start fresh so the banner shows a new operation.
+  const RESUME_STALE_MS = 60 * 60_000;
+  const isStaleForResume = Date.now() - new Date(run.updatedAt).getTime() > RESUME_STALE_MS;
+
   try {
+    if (isStaleForResume) {
+      // Close all orphan "running" ops, then create a clean new run
+      await forceCloseAllActiveAgentOperations(input.projectId);
+      const freshRun = await getOrCreateAgentRun({ projectId: input.projectId, userId: auth.userId });
+      appendChatMessage(freshRun, "The previous run was stale, so I started a fresh run.", { tone: "thinking" });
+      setRunPhase(freshRun, "analyze", "queued", "Starting fresh run…");
+      await saveAndLog(freshRun, input.projectId);
+
+      const ctx0 = await getAuditRequestContext();
+      void writeProjectAuditEvent({
+        projectId:   input.projectId,
+        actorUserId: auth.userId,
+        actorRole:   auth.role,
+        action:      "ai_import_agent.resumed",
+        category:    "publishing",
+        result:      "success",
+        summary:     "AI import agent: stale run detected — started fresh",
+        metadata:    { stale: true },
+        ...ctx0,
+      }).catch(() => null);
+
+      revalidatePath(`/projects/${input.projectId}/import`);
+      return { ok: true, data: freshRun };
+    }
+
     const resumePhase =
       run.nextPhase ??
       (run.currentStep === "preview" ? "check_preview" : "deploy");
@@ -1082,6 +1137,8 @@ export async function clearStaleAiImportAgentRunAction(input: {
     run.nextPhase = undefined;
     run.updatedAt = new Date().toISOString();
     await saveAgentRun(run);
+    // Force-close ALL active ai_import_agent operations including any orphan rows
+    await forceCloseAllActiveAgentOperations(input.projectId);
 
     const ctx = await getAuditRequestContext();
     void writeProjectAuditEvent({

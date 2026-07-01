@@ -50,6 +50,7 @@ import {
   type AgentChatMessage,
   type AiImportPlan,
   type PendingPatch,
+  type AiPlanMeta,
 } from "@/lib/ai-import-agent/agent-run-types";
 
 const POLL_INTERVAL_MS = 2_000;
@@ -330,7 +331,63 @@ function StatusPanel({
             <p className="text-xs text-muted-foreground">{modelLabel}</p>
           </div>
         )}
+
+        {/* Claude call proof — only shown if Claude was actually invoked */}
+        {run.aiPlanMeta && (
+          <div>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+              AI call
+            </p>
+            <AiPlanMetaBadge meta={run.aiPlanMeta} />
+          </div>
+        )}
+        {!run.aiPlanMeta && (run.status === "planning" || run.nextPhase === "plan_with_ai") && (
+          <div>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+              AI call
+            </p>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+              Waiting to call {modelLabel}
+            </p>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+// ── AI Plan Meta badge (proof Claude was called) ──────────────────────────────
+
+function AiPlanMetaBadge({ meta }: { meta: AiPlanMeta }) {
+  const durationMs = meta.respondedAt
+    ? new Date(meta.respondedAt).getTime() - new Date(meta.requestedAt).getTime()
+    : null;
+  const durationSec = durationMs !== null ? (durationMs / 1000).toFixed(1) : null;
+
+  return (
+    <div className="space-y-0.5">
+      <p className={`text-xs flex items-center gap-1.5 ${meta.success ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+        {meta.success
+          ? <CheckCircle2 className="h-3 w-3 shrink-0" />
+          : <XCircle className="h-3 w-3 shrink-0" />
+        }
+        {meta.success ? `${meta.modelLabel} returned a plan` : `${meta.modelLabel} call failed`}
+      </p>
+      {meta.respondedAt && durationSec && (
+        <p className="text-[10px] text-muted-foreground pl-4">responded in {durationSec}s</p>
+      )}
+      {!meta.respondedAt && (
+        <p className="text-[10px] text-muted-foreground pl-4 flex items-center gap-1">
+          <Loader2 className="h-2.5 w-2.5 animate-spin" /> waiting for response…
+        </p>
+      )}
+      {meta.error && (
+        <p className="text-[10px] text-destructive pl-4 break-words">{meta.error}</p>
+      )}
+      {meta.exactModel && (
+        <p className="text-[10px] text-muted-foreground pl-4 font-mono">{meta.exactModel}</p>
+      )}
     </div>
   );
 }
