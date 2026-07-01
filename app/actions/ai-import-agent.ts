@@ -903,10 +903,155 @@ export async function getAiImportAgentRunAction(input: {
 }
 
 // ── Action: checkAiProviderStatusAction ───────────────────────────────────────
-// Returns whether ANTHROPIC_API_KEY is configured — never returns the key itself.
+// Returns AI availability and the friendly model label.
+// Never returns the API key or any secret.
 
-export async function checkAiProviderStatusAction(): Promise<ActionResult<{ available: boolean }>> {
-  return { ok: true, data: { available: isAiProviderAvailable() } };
+function getAiModelInfo(): { available: boolean; modelLabel: string; exactModel: string } {
+  const modelId = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
+  const modelLabel =
+    modelId.includes("sonnet") ? "Claude Sonnet" :
+    modelId.includes("haiku")  ? "Claude Haiku"  :
+    modelId.includes("opus")   ? "Claude Opus"   :
+    "Claude";
+  return { available: isAiProviderAvailable(), modelLabel, exactModel: modelId };
+}
+
+export async function checkAiProviderStatusAction(): Promise<ActionResult<{
+  available: boolean;
+  modelLabel: string;
+  exactModel: string;
+}>> {
+  return { ok: true, data: getAiModelInfo() };
+}
+
+// ── Action: stopAiImportAgentRunAction ────────────────────────────────────────
+// Pauses the run — polling stops and no new phases execute.
+// The run can be resumed from the same nextPhase via resumeAiImportAgentRunAction.
+
+export async function stopAiImportAgentRunAction(input: {
+  projectId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  try {
+    appendChatMessage(run, "I stopped the agent run. You can resume from the last safe step.", { tone: "info" });
+    run.status  = "stopped";
+    run.summary = "Agent stopped by user.";
+    run.updatedAt = new Date().toISOString();
+    await saveAgentRun(run);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.stopped",
+      category:    "publishing",
+      result:      "success",
+      summary:     "AI import agent stopped by user.",
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Stop failed" };
+  }
+}
+
+// ── Action: resumeAiImportAgentRunAction ──────────────────────────────────────
+// Resumes a stopped or timed-out run from the last saved nextPhase.
+
+export async function resumeAiImportAgentRunAction(input: {
+  projectId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  try {
+    const resumePhase =
+      run.nextPhase ??
+      (run.currentStep === "preview" ? "check_preview" : "deploy");
+
+    clearRunError(run);
+    appendChatMessage(run, "I'm resuming from the last safe step.", { tone: "thinking" });
+    setRunPhase(run, resumePhase, "queued", "Resuming…");
+    await saveAndLog(run, input.projectId);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.resumed",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent resumed from phase: ${resumePhase}`,
+      metadata:    { resumePhase },
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Resume failed" };
+  }
+}
+
+// ── Action: clearStaleAiImportAgentRunAction ──────────────────────────────────
+// Marks the current run as timed_out so the banner clears and the user can
+// start a fresh run. This is destructive — resume is not possible after clear.
+
+export async function clearStaleAiImportAgentRunAction(input: {
+  projectId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  try {
+    appendChatMessage(run, "I cleared the stale run. Start a fresh run when ready.", { tone: "info" });
+    run.status    = "timed_out";
+    run.summary   = "Agent run cleared.";
+    run.nextPhase = undefined;
+    run.updatedAt = new Date().toISOString();
+    await saveAgentRun(run);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.cleared",
+      category:    "publishing",
+      result:      "success",
+      summary:     "Stale AI import agent run cleared by user.",
+      ...ctx,
+    }).catch(() => null);
+
+    revalidatePath(`/projects/${input.projectId}/import`);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Clear failed" };
+  }
 }
 
 // ── Action: approveAiImportAgentPatchAction ───────────────────────────────────

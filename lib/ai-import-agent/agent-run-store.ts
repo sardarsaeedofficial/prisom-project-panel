@@ -4,6 +4,8 @@
  * Sprint 89: Persists AgentRun state so progress survives a page refresh.
  * Sprint 92: Normalizes legacy status values on read; initial run has
  *            status="queued" + nextPhase="analyze" for the step executor.
+ * Sprint 94: Auto-marks timed-out runs on load so the operation banner never
+ *            shows a run that has been stuck for hours. Handles "stopped".
  */
 
 import { db }                  from "@/lib/db";
@@ -16,7 +18,7 @@ const OPERATION_TYPE = "ai_import_agent";
 
 function mapRunStatusToOperationStatus(status: AgentRunStatus): "running" | "success" | "failed" {
   if (status === "preview_live") return "success";
-  if (status === "failed" || status === "timed_out") return "failed";
+  if (status === "failed" || status === "timed_out" || status === "stopped" || status === "blocked") return "failed";
   return "running";
 }
 
@@ -61,7 +63,39 @@ export function isRunTimedOut(run: AgentRun): boolean {
   return Date.now() - new Date(run.updatedAt).getTime() > timeout;
 }
 
-/** Returns the most recent agent run for a project, or null if none exists. */
+/**
+ * Persists the full run (including its steps[]) back to the operation row.
+ *
+ * Sets completedAt for all terminal statuses (including "stopped") so the
+ * active operations banner clears immediately on stop/timeout. Explicitly
+ * sets completedAt=null for non-terminal statuses so Resume works (re-opens
+ * the operation and makes the banner active again).
+ */
+export async function saveAgentRun(run: AgentRun): Promise<void> {
+  const isTerminal =
+    run.status === "preview_live" ||
+    run.status === "failed"       ||
+    run.status === "timed_out"    ||
+    run.status === "stopped"      ||
+    run.status === "blocked";
+
+  await db.projectOperation.update({
+    where: { id: run.id },
+    data: {
+      status:      mapRunStatusToOperationStatus(run.status),
+      meta:        { run } as object,
+      lastError:   run.lastError?.whatHappened?.slice(0, 1000) ?? null,
+      completedAt: isTerminal ? new Date() : null,
+    },
+  }).catch(() => null); // non-fatal — the in-memory run is still returned to the caller
+}
+
+/**
+ * Returns the most recent agent run for a project, or null if none exists.
+ *
+ * Sprint 94: auto-detects timed-out runs and saves them immediately so the
+ * operation banner disappears — no need to wait for a UI poll to fire.
+ */
 export async function getLatestAgentRun(projectId: string): Promise<AgentRun | null> {
   const row = await db.projectOperation.findFirst({
     where:   { projectId, operationType: OPERATION_TYPE },
@@ -69,7 +103,36 @@ export async function getLatestAgentRun(projectId: string): Promise<AgentRun | n
     select:  { id: true, meta: true, startedAt: true, updatedAt: true },
   });
   if (!row) return null;
-  return rowToAgentRun(row);
+  const run = rowToAgentRun(row);
+  if (!run) return null;
+
+  // Auto-mark timed-out runs on load so the banner clears and the UI shows
+  // the correct "timed out" state even if no user is actively polling.
+  if (isRunTimedOut(run)) {
+    const staleStatus = run.status;
+    const staleMinutes = Math.round((Date.now() - new Date(run.updatedAt).getTime()) / 60_000);
+
+    run.status    = "timed_out";
+    run.nextPhase = undefined;
+    run.summary   = "Agent run timed out.";
+
+    if (!run.lastError) {
+      run.lastError = {
+        kind:             "timeout",
+        title:            "Agent run timed out",
+        whatHappened:     `The agent stopped making progress while ${staleStatus}.`,
+        why:              "A step may have hung, or the page was closed before the agent finished.",
+        whatICanDo:       "Click Resume to retry from the last safe step, or Start Fresh to clear.",
+        fixSafetyLevel:   "safe",
+        safeFixAvailable: false,
+        technicalReason:  `Status "${staleStatus}" with no update for ${staleMinutes} minute(s).`,
+      };
+    }
+    run.updatedAt = new Date().toISOString();
+    await saveAgentRun(run);
+  }
+
+  return run;
 }
 
 /**
@@ -124,23 +187,6 @@ export async function getOrCreateAgentRun(input: {
 
   run.id = row.id;
   return run;
-}
-
-/** Persists the full run (including its steps[]) back to the operation row. */
-export async function saveAgentRun(run: AgentRun): Promise<void> {
-  await db.projectOperation.update({
-    where: { id: run.id },
-    data: {
-      status:      mapRunStatusToOperationStatus(run.status),
-      meta:        { run } as object,
-      lastError:   run.lastError?.whatHappened?.slice(0, 1000) ?? null,
-      completedAt: (
-        run.status === "preview_live" ||
-        run.status === "failed"       ||
-        run.status === "timed_out"
-      ) ? new Date() : null,
-    },
-  }).catch(() => null); // non-fatal — the in-memory run is still returned to the caller
 }
 
 /** Mirrors a completed timeline step into ProjectLog so it shows on the Logs page too. */

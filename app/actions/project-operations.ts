@@ -40,6 +40,9 @@ export async function listActiveOperationsAction(
   if (!auth.ok) return { ok: false, error: auth.error, code: auth.code };
 
   try {
+    // Sprint 94: mark any stale operations before returning the list so the
+    // banner never shows an ai_import_agent run that stopped hours ago.
+    await markStaleOperations(projectId).catch(() => null);
     const ops = await getActiveProjectOperations(projectId);
     return { ok: true, data: ops };
   } catch (err) {

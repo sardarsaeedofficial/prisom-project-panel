@@ -133,6 +133,7 @@ export type AgentRunStatus =
   | "preview_live"
   | "failed"
   | "timed_out"                 // watchdog caught a stale in-flight run
+  | "stopped"                   // Sprint 94: user clicked Stop Agent — can Resume
   | "blocked"
   // Legacy values stored in DB by Sprint 89/90 — normalized on read
   | "idle"
@@ -190,7 +191,7 @@ export const WAITING_STATUSES: AgentRunStatus[] = [
 
 /** Statuses where the run is permanently stopped. */
 export const TERMINAL_STATUSES: AgentRunStatus[] = [
-  "preview_live", "failed", "timed_out", "not_started", "idle", "blocked",
+  "preview_live", "failed", "timed_out", "stopped", "not_started", "idle", "blocked",
 ];
 
 /** Backwards-compat alias — used by Sprint 89/90 polling logic. */
@@ -212,10 +213,10 @@ export const STOPPED_STATUSES: AgentRunStatus[] = [
  * or slow Sonnet calls.
  */
 export const STATUS_TIMEOUT_MS: Partial<Record<AgentRunStatus, number>> = {
-  deploying: 300_000,  // 5 min
-  verifying: 120_000,  // 2 min
-  fixing:    600_000,  // 10 min
-  planning:  120_000,  // 2 min for AI call
-  running:   300_000,  // 5 min
-  retrying:  300_000,  // 5 min (legacy)
+  deploying: 5  * 60_000,   // 5 min
+  verifying: 2  * 60_000,   // 2 min
+  fixing:    2  * 60_000,   // 2 min  (was 10 — builds run in release snapshot, much faster)
+  planning:  2  * 60_000,   // 2 min for AI call
+  running:   5  * 60_000,   // 5 min
+  retrying:  5  * 60_000,   // 5 min (legacy)
 };
