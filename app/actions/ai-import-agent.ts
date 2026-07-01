@@ -57,6 +57,13 @@ import {
   classifyPreviewChecks,
 }                                       from "@/lib/ai-import-agent/agent-error-classifier";
 import { exportAiImportAgentRunbook }  from "@/lib/ai-import-agent/agent-run-export";
+import {
+  findLatestReleasePath,
+  checkIndexHtmlAt,
+  findIndexHtml,
+  runBuildInRelease,
+  FRONTEND_INDEX_HTML_CANDIDATE_DIRS,
+}                                       from "@/lib/ai-import-agent/agent-output-inspector";
 import type { AgentRun }               from "@/lib/ai-import-agent/agent-run-types";
 import type { AgentPreviewResult }     from "@/lib/ai-import-agent/agent-preview-checker";
 
@@ -105,7 +112,10 @@ function classifyPreviewFailure(preview: AgentPreviewResult) {
 // ── Preview failure chat message ──────────────────────────────────────────────
 
 function previewFailureChatMessage(kind: string, safeFixAvailable: boolean, whatHappened: string): string {
-  if (kind === "frontend_static_not_served" || kind === "frontend_build_output_missing") {
+  if (kind === "frontend_build_output_missing") {
+    return "The API is healthy, but the frontend build output is missing on disk. I'll inspect the release and fix the output path.";
+  }
+  if (kind === "frontend_static_not_served") {
     return "The API is healthy, but the storefront is returning 404. I can fix the frontend routing.";
   }
   if (kind === "panel_preview_proxy_db_unreachable") {
@@ -189,6 +199,200 @@ async function runDeployAndPreview(run: AgentRun, projectId: string): Promise<Ag
   );
   await saveAndLog(run, projectId);
   return run;
+}
+
+// ── Fix: inspect release directory for frontend build output ─────────────────
+// Used when staticOutputMissing is true: API is live but publicStaticPath is
+// null or absent on disk. Rather than re-applying the preset blindly, we
+// inspect the most-recent release snapshot to find where the build actually
+// placed index.html, update staticOutputDir if needed, then redeploy.
+
+async function fixFrontendBuildOutputMissing(
+  run: AgentRun,
+  projectId: string,
+): Promise<AgentRun> {
+  const project = await getProjectByIdForImport(projectId);
+  if (!project) {
+    appendChatMessage(run, "I couldn't find the project.", { tone: "error" });
+    setRunStatus(run, "failed", "Project not found.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  const config = await db.projectDeploymentConfig.findUnique({
+    where:  { projectId },
+    select: { staticOutputDir: true, buildCommand: true },
+  });
+
+  if (!config) {
+    appendChatMessage(run, "No deployment config found — I can't inspect without it.", { tone: "error" });
+    setRunStatus(run, "failed", "No deployment config found.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  // ── A: find the latest release snapshot ───────────────────────────────────
+  appendChatMessage(run, "I'm locating the latest release directory to inspect the build output.", { tone: "thinking" });
+  beginStep(run, "inspect_release", "Inspect release", "Looking for the latest release snapshot…");
+  await saveAndLog(run, projectId);
+
+  const releasePath = findLatestReleasePath(project.slug);
+  if (!releasePath) {
+    const errMsg = "No release directory found — this project hasn't been deployed yet.";
+    appendChatMessage(run, errMsg, { tone: "error" });
+    completeStep(run, "inspect_release", "error", errMsg, { errorMessage: errMsg });
+    setRunError(run, {
+      kind: "frontend_build_output_never_produced",
+      title: "No release directory found",
+      whatHappened: errMsg,
+      why: "The project has no release snapshots yet.",
+      whatICanDo: "Run a full deploy first via 'Make Project Live', then try again.",
+      fixSafetyLevel: "needs_approval",
+      safeFixAvailable: false,
+      technicalReason: `No entries found in storage/releases/${project.slug}/`,
+    });
+    setRunStatus(run, "failed", errMsg);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  appendChatMessage(run, "Found the latest release snapshot.", { tone: "info" });
+
+  // ── B: check the configured staticOutputDir first ─────────────────────────
+  const expectedDir = config.staticOutputDir ?? "artifacts/sardar-security/dist/public";
+  let found = checkIndexHtmlAt(releasePath, expectedDir)
+    ? { absolutePath: "", relativeDir: expectedDir }  // absolutePath unused below
+    : null;
+
+  if (found) {
+    appendChatMessage(
+      run,
+      `Found index.html at the expected path: ${expectedDir}. The config path is correct.`,
+      { tone: "success" },
+    );
+    completeStep(run, "inspect_release", "success", `Found index.html at ${expectedDir}.`);
+  } else {
+    // ── C: search candidate paths ──────────────────────────────────────────
+    appendChatMessage(
+      run,
+      `index.html not found at ${expectedDir}. Searching other candidate paths…`,
+      { tone: "thinking" },
+    );
+    found = findIndexHtml(releasePath);
+
+    if (found) {
+      appendChatMessage(
+        run,
+        `Found index.html at ${found.relativeDir} instead. I'll update the config path.`,
+        { tone: "success" },
+      );
+      completeStep(run, "inspect_release", "success", `Found index.html at ${found.relativeDir}.`);
+    } else {
+      // ── D: attempt one build run ─────────────────────────────────────────
+      appendChatMessage(run, "No build output found in the release. I'll run the build command to generate it.", { tone: "thinking" });
+      completeStep(run, "inspect_release", "warning", "No build output found — attempting build.");
+      await saveAndLog(run, projectId);
+
+      if (!config.buildCommand) {
+        const errMsg = "No build command is configured — I can't generate the build output automatically.";
+        appendChatMessage(run, errMsg, { tone: "error" });
+        setRunError(run, {
+          kind: "frontend_build_output_never_produced",
+          title: "No build command configured",
+          whatHappened: errMsg,
+          why: "The deployment config has no build command.",
+          whatICanDo: "Configure a build command (e.g. pnpm run build) in deployment settings.",
+          fixSafetyLevel: "needs_approval",
+          safeFixAvailable: false,
+          technicalReason: "config.buildCommand is null or empty.",
+        });
+        setRunStatus(run, "failed", errMsg);
+        await saveAndLog(run, projectId);
+        return run;
+      }
+
+      appendChatMessage(run, `Running: ${config.buildCommand}`, { tone: "thinking" });
+      beginStep(run, "build_attempt", "Build frontend", `Running ${config.buildCommand}…`);
+      await saveAndLog(run, projectId);
+
+      const buildResult = await runBuildInRelease(releasePath, config.buildCommand);
+
+      if (!buildResult.ok) {
+        const errMsg = "The build command failed — the frontend output was never produced.";
+        appendChatMessage(run, errMsg, { tone: "error" });
+        completeStep(run, "build_attempt", "error", errMsg, {
+          errorMessage: errMsg,
+          fullOutput:    buildResult.output,
+          outputPreview: previewOutput(buildResult.output),
+        });
+        setRunError(run, {
+          kind: "frontend_build_output_never_produced",
+          title: "Frontend build failed",
+          whatHappened: errMsg,
+          why: "The build command exited with a non-zero code.",
+          whatICanDo: "Check the build output below for errors, fix the source code, and try again.",
+          fixSafetyLevel: "needs_approval",
+          safeFixAvailable: false,
+          technicalReason: buildResult.output.slice(0, 500),
+        });
+        setRunStatus(run, "failed", errMsg);
+        await saveAndLog(run, projectId);
+        return run;
+      }
+
+      completeStep(run, "build_attempt", "success", "Build completed successfully.");
+      await saveAndLog(run, projectId);
+
+      found = findIndexHtml(releasePath);
+      if (!found) {
+        const errMsg = "The build succeeded but produced no index.html in any known output directory.";
+        appendChatMessage(run, errMsg, { tone: "error" });
+        setRunError(run, {
+          kind: "frontend_build_output_never_produced",
+          title: "Build produced no output",
+          whatHappened: errMsg,
+          why: "The build command exited with code 0 but wrote no index.html to any candidate path.",
+          whatICanDo: "Check the Vite/webpack outDir setting in the frontend package.json.",
+          fixSafetyLevel: "needs_approval",
+          safeFixAvailable: false,
+          technicalReason: `Searched: ${FRONTEND_INDEX_HTML_CANDIDATE_DIRS.join(", ")}`,
+        });
+        setRunStatus(run, "failed", errMsg);
+        await saveAndLog(run, projectId);
+        return run;
+      }
+
+      appendChatMessage(
+        run,
+        `Build produced output at ${found.relativeDir}. I'll update the config.`,
+        { tone: "success" },
+      );
+    }
+  }
+
+  await saveAndLog(run, projectId);
+
+  // ── E: update staticOutputDir in DB if the discovered path differs ─────────
+  if (found.relativeDir !== config.staticOutputDir) {
+    appendChatMessage(
+      run,
+      `Updating staticOutputDir from "${config.staticOutputDir ?? "(none)"}" to "${found.relativeDir}".`,
+      { tone: "thinking" },
+    );
+    await db.projectDeploymentConfig.update({
+      where: { projectId },
+      data:  { staticOutputDir: found.relativeDir },
+    });
+    addCompletedStep(run, "config_updated", "Config updated", "fixed", `staticOutputDir → ${found.relativeDir}`);
+  } else {
+    addCompletedStep(run, "config_verified", "Config verified", "success", `staticOutputDir is already correct: ${found.relativeDir}`);
+  }
+
+  appendChatMessage(run, "Config is correct. I'll now redeploy and check the preview.", { tone: "success" });
+  clearRunError(run);
+  await saveAndLog(run, projectId);
+
+  return runDeployAndPreview(run, projectId);
 }
 
 // ── Full run: analyze → ask → preset → deploy → verify ───────────────────────
@@ -424,44 +628,50 @@ export async function fixAiImportAgentIssueAction(input: {
     setRunStatus(run, "fixing", "Applying fix…");
     await saveAndLog(run, input.projectId);
 
-    const fixRes = await applyAgentFix({ projectId: input.projectId, fixId: input.fixId });
-    if (!fixRes.ok) {
-      addCompletedStep(run, `fix-${input.fixId}`, "Fix attempt", "error", fixRes.error, { errorMessage: fixRes.error });
-      if (fixRes.agentError) setRunError(run, fixRes.agentError);
-      appendChatMessage(run, `I couldn't apply the fix: ${fixRes.error}`, { tone: "error" });
-      setRunStatus(run, "fix_available", fixRes.error);
-      await saveAndLog(run, input.projectId);
-      return { ok: true, data: run };
-    }
-
-    addCompletedStep(run, `fix-${input.fixId}`, "Fix applied", "fixed", fixRes.label);
-    appendChatMessage(run, "The fix was applied. I'll redeploy and check preview again.", { tone: "success" });
-    clearRunError(run);
-    await saveAndLog(run, input.projectId);
-
-    // refresh_panel_pm2_env_and_retry_preview already retried preview itself —
-    // use that result directly instead of redeploying. Every other fix
-    // changes deployment config, so it needs a real redeploy + recheck.
     let finalRun: AgentRun;
-    if (input.fixId === "refresh_panel_pm2_env_and_retry_preview" && fixRes.preview) {
-      run.previewUrl = fixRes.preview.browserPreviewUrl;
-      run.publicUrl  = fixRes.preview.publicUrl;
-      run.steps.push(...fixRes.preview.checks);
-      if (fixRes.preview.allPass) {
-        appendChatMessage(run, "The preview is live. The project is now working through the panel preview.", { tone: "success" });
-        setRunStatus(
-          run, "preview_live",
-          fixRes.preview.publicUrl
-            ? `Preview is live at ${fixRes.preview.publicUrl}.`
-            : "Preview is live through the panel proxy. Add a public domain when ready.",
-        );
-      } else {
-        setRunStatus(run, "fix_available", "Preview is still not passing after the fix.");
-      }
-      await saveAndLog(run, input.projectId);
-      finalRun = run;
+
+    if (input.fixId === "inspect_and_fix_frontend_build_output") {
+      // Filesystem-inspection fix — handled entirely by its own helper.
+      finalRun = await fixFrontendBuildOutputMissing(run, input.projectId);
     } else {
-      finalRun = await runDeployAndPreview(run, input.projectId);
+      const fixRes = await applyAgentFix({ projectId: input.projectId, fixId: input.fixId });
+      if (!fixRes.ok) {
+        addCompletedStep(run, `fix-${input.fixId}`, "Fix attempt", "error", fixRes.error, { errorMessage: fixRes.error });
+        if (fixRes.agentError) setRunError(run, fixRes.agentError);
+        appendChatMessage(run, `I couldn't apply the fix: ${fixRes.error}`, { tone: "error" });
+        setRunStatus(run, "fix_available", fixRes.error);
+        await saveAndLog(run, input.projectId);
+        return { ok: true, data: run };
+      }
+
+      addCompletedStep(run, `fix-${input.fixId}`, "Fix applied", "fixed", fixRes.label);
+      appendChatMessage(run, "The fix was applied. I'll redeploy and check preview again.", { tone: "success" });
+      clearRunError(run);
+      await saveAndLog(run, input.projectId);
+
+      // refresh_panel_pm2_env_and_retry_preview already retried preview itself —
+      // use that result directly instead of redeploying. Every other fix
+      // changes deployment config, so it needs a real redeploy + recheck.
+      if (input.fixId === "refresh_panel_pm2_env_and_retry_preview" && fixRes.preview) {
+        run.previewUrl = fixRes.preview.browserPreviewUrl;
+        run.publicUrl  = fixRes.preview.publicUrl;
+        run.steps.push(...fixRes.preview.checks);
+        if (fixRes.preview.allPass) {
+          appendChatMessage(run, "The preview is live. The project is now working through the panel preview.", { tone: "success" });
+          setRunStatus(
+            run, "preview_live",
+            fixRes.preview.publicUrl
+              ? `Preview is live at ${fixRes.preview.publicUrl}.`
+              : "Preview is live through the panel proxy. Add a public domain when ready.",
+          );
+        } else {
+          setRunStatus(run, "fix_available", "Preview is still not passing after the fix.");
+        }
+        await saveAndLog(run, input.projectId);
+        finalRun = run;
+      } else {
+        finalRun = await runDeployAndPreview(run, input.projectId);
+      }
     }
 
     const ctx = await getAuditRequestContext();

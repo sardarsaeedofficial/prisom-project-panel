@@ -47,10 +47,10 @@ export function classifyPreviewChecks(
       title: "Frontend build output missing",
       whatHappened: "Your API is live, but the frontend build output is missing on disk.",
       why: "The deployment ran, but the static output directory for the built frontend was never published — the build may not have produced files, or the path is misconfigured.",
-      whatICanDo: "I can reapply the deployment preset and rebuild the frontend.",
+      whatICanDo: "I'll inspect the release directory for the built frontend and update the output path config, then redeploy.",
       fixSafetyLevel: "safe",
       safeFixAvailable: true,
-      safeFixId: "repair_static_frontend_routing",
+      safeFixId: "inspect_and_fix_frontend_build_output",
       technicalReason: `Static output not found at the published path. Root check: ${root?.summary ?? ""}`,
     };
   }

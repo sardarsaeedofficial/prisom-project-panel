@@ -143,6 +143,9 @@ export function appendChatMessage(
  * optimistic update can share the exact same wording.
  */
 export function getAgentFixStartMessage(fixId: string): string {
+  if (fixId === "inspect_and_fix_frontend_build_output") {
+    return "I'm inspecting the release directory for the built frontend output now.";
+  }
   if (fixId === "repair_static_frontend_routing" || fixId === "fix-static-frontend-routing") {
     return "I'm applying the safe frontend routing fix now.";
   }
