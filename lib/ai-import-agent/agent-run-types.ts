@@ -4,6 +4,7 @@
  * Sprint 89: Types for the Replit-style Live AI Import Agent Console.
  * Sprint 92: Durable step-machine model — each step runs in its own action
  *            call so no single request can hang forever.
+ * Sprint 93: Real AI planning — Sonnet inspects the project and proposes fixes.
  */
 
 export type AgentTimelineStepStatus =
@@ -60,28 +61,78 @@ export type AgentError = {
 /**
  * Which phase the step executor should run on the next call.
  * Sprint 92 — replaces the monolithic "run full agent in one request" design.
+ * Sprint 93 — adds AI planning phases.
  */
 export type AgentPhase =
-  | "analyze"         // detect stack, check secrets
-  | "apply_preset"    // apply Sardar/pnpm preset if needed
-  | "deploy"          // install + build + PM2 start
-  | "check_preview"   // HTTP health + root check
-  | "apply_fix"       // apply pendingFixId (may include build inspection)
-  | "verify_preview"; // post-fix preview recheck
+  | "analyze"          // detect stack, check secrets
+  | "apply_preset"     // apply Sardar/pnpm preset if needed
+  | "deploy"           // install + build + PM2 start
+  | "check_preview"    // HTTP health + root check
+  | "apply_fix"        // apply pendingFixId (may include build inspection)
+  | "verify_preview"   // post-fix preview recheck
+  | "plan_with_ai"     // Sprint 93: ask Sonnet for a fix plan
+  | "apply_ai_action"; // Sprint 93: execute one action from the AI plan
+
+// ── Sprint 93: AI plan types ──────────────────────────────────────────────────
+
+export type AiImportPlanAction = {
+  id: string;
+  kind:
+    | "update_deployment_config"
+    | "edit_file"
+    | "run_command"
+    | "inspect_file"
+    | "ask_user"
+    | "manual_blocker";
+  title: string;
+  reason: string;
+  safety: "safe" | "needs_approval" | "blocked";
+  /** For run_command */
+  command?: string;
+  /** For edit_file / inspect_file */
+  filePath?: string;
+  /** For edit_file — complete new file content */
+  proposedContent?: string;
+  /** For edit_file — unified diff (display only) */
+  unifiedDiff?: string;
+  /** For update_deployment_config — subset of ProjectDeploymentConfig fields */
+  configPatch?: Record<string, string | number | boolean | null>;
+};
+
+export type AiImportPlan = {
+  summary: string;
+  confidence: "low" | "medium" | "high";
+  diagnosis: string;
+  recommendedActions: AiImportPlanAction[];
+  stopReason?: string;
+};
+
+/** A file patch proposed by the AI that requires user approval before applying. */
+export type PendingPatch = {
+  actionId: string;
+  filePath: string;
+  reason: string;
+  proposedContent: string;
+  unifiedDiff?: string;
+  /** Index in aiPlan.recommendedActions — advance to index+1 after approve/reject. */
+  actionIndex: number;
+};
 
 export type AgentRunStatus =
   // Sprint 92 canonical values
   | "not_started"
-  | "queued"                   // ready for next step executor call
-  | "running"                  // executing an analysis step
-  | "deploying"                // executing the deploy step
-  | "verifying"                // executing a preview check
-  | "fixing"                   // executing a fix step
-  | "waiting_for_user_input"   // missing secrets — user must act
-  | "waiting_for_fix_approval" // fix available — user must click
+  | "queued"                    // ready for next step executor call
+  | "running"                   // executing an analysis step
+  | "deploying"                 // executing the deploy step
+  | "verifying"                 // executing a preview check
+  | "fixing"                    // executing a fix step
+  | "planning"                  // Sprint 93: asking Sonnet for a plan
+  | "waiting_for_user_input"    // missing secrets — user must act
+  | "waiting_for_fix_approval"  // deterministic fix available — user must click
+  | "waiting_for_patch_approval"// Sprint 93: AI proposed file edit — user must approve
   | "preview_live"
   | "failed"
-  | "timed_out"                // watchdog caught a stale in-flight run
+  | "timed_out"                 // watchdog caught a stale in-flight run
   | "blocked"
   // Legacy values stored in DB by Sprint 89/90 — normalized on read
   | "idle"
@@ -108,24 +159,32 @@ export type AgentRun = {
   pendingFixId?: string;
   /** Sprint 92: how many fix/retry attempts have run — guards against infinite loops. */
   attemptCount?: number;
+  /** Sprint 93: current AI plan from Sonnet. */
+  aiPlan?: AiImportPlan;
+  /** Sprint 93: which action in aiPlan.recommendedActions to execute next. */
+  aiPlanActionIndex?: number;
+  /** Sprint 93: how many times we've called plan_with_ai — guards against planning loops. */
+  iterationCount?: number;
+  /** Sprint 93: file patch pending user approval. */
+  pendingPatch?: PendingPatch;
 };
 
 // ── Status groups ─────────────────────────────────────────────────────────────
 
 /** Statuses where the UI should call runNextAiImportAgentStepAction. */
 export const ACTIVE_STATUSES: AgentRunStatus[] = [
-  "queued", "running", "deploying", "verifying", "fixing",
+  "queued", "running", "deploying", "verifying", "fixing", "planning",
   "retrying", // legacy
 ];
 
 /** Statuses where a step is already executing — return current run without re-starting. */
 export const IN_FLIGHT_STATUSES: AgentRunStatus[] = [
-  "running", "deploying", "verifying", "fixing",
+  "running", "deploying", "verifying", "fixing", "planning",
 ];
 
 /** Statuses where the UI waits for a user action before the agent can continue. */
 export const WAITING_STATUSES: AgentRunStatus[] = [
-  "waiting_for_user_input", "waiting_for_fix_approval",
+  "waiting_for_user_input", "waiting_for_fix_approval", "waiting_for_patch_approval",
   "waiting_for_user", "fix_available", // legacy
 ];
 
@@ -149,13 +208,14 @@ export const STOPPED_STATUSES: AgentRunStatus[] = [
  * If a run has been in one of these statuses longer than the threshold
  * without a DB update, the watchdog marks it timed_out.
  *
- * "fixing" is 600 s because apply_fix can include an 8-minute build run
- * (runBuildInRelease timeout = 480 s + overhead).
+ * "fixing" and "planning" are 600 s because they may include 8-minute builds
+ * or slow Sonnet calls.
  */
 export const STATUS_TIMEOUT_MS: Partial<Record<AgentRunStatus, number>> = {
   deploying: 300_000,  // 5 min
   verifying: 120_000,  // 2 min
   fixing:    600_000,  // 10 min
+  planning:  120_000,  // 2 min for AI call
   running:   300_000,  // 5 min
   retrying:  300_000,  // 5 min (legacy)
 };

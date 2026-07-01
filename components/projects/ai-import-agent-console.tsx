@@ -10,13 +10,15 @@
  * Sprint 92: Poll loop replaced with step-executor calls — each tick calls
  *            runNextAiImportAgentStepAction which both advances the machine
  *            AND returns the latest run state. Watchdog (timed_out) UI added.
+ * Sprint 93: AI status badge, PlanCard, PatchApprovalCard.
+ *            Approve/Reject patch actions. AI provider badge.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Zap, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock,
   ChevronDown, ChevronUp, Download, Eye, Wrench, ExternalLink, RefreshCw,
-  Bot, MessageSquare, Activity,
+  Bot, MessageSquare, Activity, Sparkles, WifiOff, FileCode, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import { Button }   from "@/components/ui/button";
 import { Badge }    from "@/components/ui/badge";
@@ -30,6 +32,9 @@ import {
   fixAiImportAgentIssueAction,
   retryAiImportAgentRunAction,
   exportAiImportAgentRunAction,
+  approveAiImportAgentPatchAction,
+  rejectAiImportAgentPatchAction,
+  checkAiProviderStatusAction,
 } from "@/app/actions/ai-import-agent";
 import { getAgentFixStartMessage } from "@/lib/ai-import-agent/agent-step-builder";
 import {
@@ -41,6 +46,8 @@ import {
   type AgentTimelineStep,
   type AgentTimelineStepStatus,
   type AgentChatMessage,
+  type AiImportPlan,
+  type PendingPatch,
 } from "@/lib/ai-import-agent/agent-run-types";
 
 const POLL_INTERVAL_MS = 2000;
@@ -49,24 +56,29 @@ const POLL_INTERVAL_MS = 2000;
 
 const STATUS_LABEL: Partial<Record<AgentRunStatus, string>> & { default: string } = {
   // Sprint 92 canonical
-  not_started:               "Not started",
-  queued:                    "Queued…",
-  running:                   "Working…",
-  deploying:                 "Deploying…",
-  verifying:                 "Verifying…",
-  fixing:                    "Applying fix…",
-  waiting_for_user_input:    "Needs your input",
-  waiting_for_fix_approval:  "Fix available",
-  preview_live:              "Preview live",
-  failed:                    "Failed",
-  timed_out:                 "Timed out",
-  blocked:                   "Blocked",
+  not_started:                "Not started",
+  queued:                     "Queued…",
+  running:                    "Working…",
+  deploying:                  "Deploying…",
+  verifying:                  "Verifying…",
+  fixing:                     "Applying fix…",
+  // Sprint 93
+  planning:                   "Planning with AI…",
+  waiting_for_patch_approval: "Awaiting patch approval",
+  // Waiting
+  waiting_for_user_input:     "Needs your input",
+  waiting_for_fix_approval:   "Fix available",
+  // Terminal
+  preview_live:               "Preview live",
+  failed:                     "Failed",
+  timed_out:                  "Timed out",
+  blocked:                    "Blocked",
   // Legacy
-  idle:                      "Not started",
-  waiting_for_user:          "Needs your input",
-  fix_available:             "Fix available",
-  retrying:                  "Retrying…",
-  default:                   "Working…",
+  idle:                       "Not started",
+  waiting_for_user:           "Needs your input",
+  fix_available:              "Fix available",
+  retrying:                   "Retrying…",
+  default:                    "Working…",
 };
 
 function getStatusLabel(status: AgentRunStatus): string {
@@ -75,12 +87,28 @@ function getStatusLabel(status: AgentRunStatus): string {
 
 function StatusBadge({ status }: { status: AgentRunStatus }) {
   const variant: "success" | "warning" | "destructive" | "secondary" =
-    status === "preview_live"                                                            ? "success" :
-    status === "failed" || status === "timed_out" || status === "blocked"               ? "destructive" :
-    status === "waiting_for_user_input" || status === "waiting_for_fix_approval" ||
-    status === "waiting_for_user"       || status === "fix_available"                   ? "warning" :
+    status === "preview_live"                                                                          ? "success" :
+    status === "failed" || status === "timed_out" || status === "blocked"                             ? "destructive" :
+    status === "waiting_for_user_input"  || status === "waiting_for_fix_approval"   ||
+    status === "waiting_for_patch_approval" ||
+    status === "waiting_for_user"        || status === "fix_available"                                ? "warning" :
     "secondary";
   return <Badge variant={variant}>{getStatusLabel(status)}</Badge>;
+}
+
+// ── AI provider badge (Sprint 93) ──────────────────────────────────────────────
+
+function AiStatusBadge({ available }: { available: boolean | null }) {
+  if (available === null) return null;
+  return available ? (
+    <span className="inline-flex items-center gap-1 text-[11px] text-green-600 dark:text-green-400">
+      <Sparkles className="h-3 w-3" /> Sonnet connected
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+      <WifiOff className="h-3 w-3" /> AI provider not configured — rule-based fixes only
+    </span>
+  );
 }
 
 // ── Step icon ──────────────────────────────────────────────────────────────────
@@ -91,6 +119,7 @@ function StepIcon({ status }: { status: AgentTimelineStepStatus }) {
   if (status === "warning") return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />;
   if (status === "error")   return <XCircle      className="h-4 w-4 text-destructive shrink-0" />;
   if (status === "running") return <Loader2      className="h-4 w-4 animate-spin text-primary shrink-0" />;
+  if (status === "skipped") return <ChevronDown  className="h-4 w-4 text-muted-foreground shrink-0" />;
   return                           <Clock        className="h-4 w-4 text-muted-foreground shrink-0" />;
 }
 
@@ -242,6 +271,173 @@ function ActionsPanel({ steps, isWorking }: { steps: AgentTimelineStep[]; isWork
   );
 }
 
+// ── AI Plan card (Sprint 93) ──────────────────────────────────────────────────
+
+function PlanCard({ plan }: { plan: AiImportPlan }) {
+  const [open, setOpen] = useState(true);
+
+  const confidenceColor =
+    plan.confidence === "high"   ? "text-green-600 dark:text-green-400" :
+    plan.confidence === "medium" ? "text-amber-600 dark:text-amber-400" :
+    "text-muted-foreground";
+
+  return (
+    <div className="rounded-md border border-primary/20 bg-primary/5 p-4 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Sparkles className="h-4 w-4 text-primary shrink-0" />
+          <p className="text-sm font-medium">AI Fix Plan</p>
+        </div>
+        <span className={`text-[11px] font-medium ${confidenceColor}`}>
+          {plan.confidence} confidence
+        </span>
+      </div>
+
+      <p className="text-xs text-foreground">{plan.summary}</p>
+      <p className="text-xs text-muted-foreground">{plan.diagnosis}</p>
+
+      {plan.recommendedActions.length > 0 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((s) => !s)}
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+          >
+            {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {open ? "Hide" : "Show"} {plan.recommendedActions.length} action{plan.recommendedActions.length !== 1 ? "s" : ""}
+          </button>
+
+          {open && (
+            <ol className="space-y-1.5">
+              {plan.recommendedActions.map((action, i) => (
+                <li key={action.id} className="flex items-start gap-2 text-xs">
+                  <span className="shrink-0 h-4 w-4 rounded-full bg-primary/15 text-primary text-[10px] flex items-center justify-center font-medium">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <span className="font-medium">{action.title}</span>
+                    {action.filePath && (
+                      <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                        ({action.filePath})
+                      </span>
+                    )}
+                    <p className="text-muted-foreground mt-0.5">{action.reason}</p>
+                  </div>
+                  <Badge
+                    variant={action.safety === "safe" ? "secondary" : action.safety === "needs_approval" ? "warning" : "destructive"}
+                    className="shrink-0 text-[10px]"
+                  >
+                    {action.kind === "edit_file" ? "needs approval" : action.safety}
+                  </Badge>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
+      )}
+
+      {plan.stopReason && (
+        <p className="text-xs text-destructive">Blocked: {plan.stopReason}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Patch approval card (Sprint 93) ───────────────────────────────────────────
+
+function PatchApprovalCard({
+  patch,
+  onApprove,
+  onReject,
+  approving,
+  rejecting,
+}: {
+  patch: PendingPatch;
+  onApprove: () => void;
+  onReject: () => void;
+  approving: boolean;
+  rejecting: boolean;
+}) {
+  const [showDiff, setShowDiff] = useState(false);
+  const [showFull, setShowFull] = useState(false);
+
+  return (
+    <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-4 space-y-3">
+      <div className="flex items-start gap-2">
+        <FileCode className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium">AI proposes a file change</p>
+          <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all">{patch.filePath}</p>
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">{patch.reason}</p>
+
+      {patch.unifiedDiff && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDiff((s) => !s)}
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+          >
+            {showDiff ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showDiff ? "Hide diff" : "Show diff"}
+          </button>
+          {showDiff && (
+            <pre className="text-[10px] font-mono whitespace-pre-wrap break-words bg-muted/70 rounded p-2 max-h-64 overflow-y-auto">
+              {patch.unifiedDiff}
+            </pre>
+          )}
+        </>
+      )}
+
+      {patch.proposedContent && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowFull((s) => !s)}
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+          >
+            {showFull ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showFull ? "Hide" : "Show"} full file content
+          </button>
+          {showFull && (
+            <pre className="text-[10px] font-mono whitespace-pre-wrap break-words bg-muted/70 rounded p-2 max-h-64 overflow-y-auto">
+              {patch.proposedContent}
+            </pre>
+          )}
+        </>
+      )}
+
+      <div className="flex items-center gap-2 pt-1">
+        <Button
+          size="sm"
+          disabled={approving || rejecting}
+          onClick={onApprove}
+          className="h-8"
+        >
+          {approving
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Applying…</>
+            : <><ThumbsUp className="h-3.5 w-3.5 mr-1.5" /> Approve patch</>
+          }
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={approving || rejecting}
+          onClick={onReject}
+          className="h-8"
+        >
+          {rejecting
+            ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Skipping…</>
+            : <><ThumbsDown className="h-3.5 w-3.5 mr-1.5" /> Reject</>
+          }
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Error card ────────────────────────────────────────────────────────────────
 
 function ErrorCard({
@@ -322,15 +518,25 @@ interface AiImportAgentConsoleProps {
 }
 
 export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
-  const [run,       setRun]       = useState<AgentRun | null>(null);
-  const [starting,  setStarting]  = useState(false);
-  const [fixing,    setFixing]    = useState(false);
-  const [retrying,  setRetrying]  = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
+  const [run,             setRun]             = useState<AgentRun | null>(null);
+  const [starting,        setStarting]        = useState(false);
+  const [fixing,          setFixing]          = useState(false);
+  const [retrying,        setRetrying]        = useState(false);
+  const [exporting,       setExporting]       = useState(false);
+  const [approvingPatch,  setApprovingPatch]  = useState(false);
+  const [rejectingPatch,  setRejectingPatch]  = useState(false);
+  const [aiAvailable,     setAiAvailable]     = useState<boolean | null>(null);
+  const [error,           setError]           = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const runRef    = useRef<AgentRun | null>(null);
   runRef.current  = run;
+
+  // Fetch AI provider status once on mount
+  useEffect(() => {
+    void checkAiProviderStatusAction().then((res) => {
+      if (res.ok) setAiAvailable(res.data.available);
+    });
+  }, []);
 
   /**
    * Sprint 92: each tick calls the step executor, which advances the machine
@@ -399,7 +605,6 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setStarting(false);
     if (res.ok) {
       setRun(res.data);
-      // Sprint 92: run is now queued; start polling so step executor fires.
       startPolling();
     } else {
       setError(res.error);
@@ -411,7 +616,6 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setFixing(true);
     setError(null);
 
-    // Optimistic: show the fix message immediately before the server responds.
     const optimisticMsg: AgentChatMessage = {
       id: `optimistic-${Date.now()}`,
       role: "agent",
@@ -429,7 +633,6 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setFixing(false);
     if (res.ok) {
       setRun(res.data);
-      // Fix is now queued; resume polling so step executor picks it up.
       startPolling();
     } else {
       setError(res.error);
@@ -441,7 +644,6 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setRetrying(true);
     setError(null);
 
-    // Optimistic: show retry message immediately.
     const optimisticMsg: AgentChatMessage = {
       id: `optimistic-${Date.now()}`,
       role: "agent",
@@ -459,7 +661,6 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setRetrying(false);
     if (res.ok) {
       setRun(res.data);
-      // Retry is queued; resume polling so step executor picks it up.
       startPolling();
     } else {
       setError(res.error);
@@ -473,6 +674,36 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
     setExporting(false);
     if (res.ok) {
       downloadMarkdown(res.data.markdown, res.data.filename);
+    } else {
+      setError(res.error);
+    }
+  }
+
+  // Sprint 93: approve AI-proposed patch
+  async function approvePatch() {
+    if (!run) return;
+    setApprovingPatch(true);
+    setError(null);
+    const res = await approveAiImportAgentPatchAction({ projectId, runId: run.id });
+    setApprovingPatch(false);
+    if (res.ok) {
+      setRun(res.data);
+      startPolling();
+    } else {
+      setError(res.error);
+    }
+  }
+
+  // Sprint 93: reject AI-proposed patch
+  async function rejectPatch() {
+    if (!run) return;
+    setRejectingPatch(true);
+    setError(null);
+    const res = await rejectAiImportAgentPatchAction({ projectId, runId: run.id });
+    setRejectingPatch(false);
+    if (res.ok) {
+      setRun(res.data);
+      startPolling();
     } else {
       setError(res.error);
     }
@@ -499,7 +730,10 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
               </CardDescription>
             </div>
           </div>
-          {run && <StatusBadge status={run.status} />}
+          <div className="flex flex-col items-end gap-1.5">
+            {run && <StatusBadge status={run.status} />}
+            <AiStatusBadge available={aiAvailable} />
+          </div>
         </div>
       </CardHeader>
 
@@ -545,6 +779,22 @@ export function AiImportAgentConsole({ projectId }: AiImportAgentConsoleProps) {
                 isWorking={isWorking}
               />
             </div>
+
+            {/* ── Sprint 93: AI plan card ────────────────────────────────── */}
+            {run.aiPlan && (
+              <PlanCard plan={run.aiPlan} />
+            )}
+
+            {/* ── Sprint 93: Patch approval card ────────────────────────── */}
+            {run.pendingPatch && run.status === "waiting_for_patch_approval" && (
+              <PatchApprovalCard
+                patch={run.pendingPatch}
+                onApprove={approvePatch}
+                onReject={rejectPatch}
+                approving={approvingPatch}
+                rejecting={rejectingPatch}
+              />
+            )}
 
             {/* ── Error card with Fix with Agent ─────────────────────────── */}
             {run.lastError && (

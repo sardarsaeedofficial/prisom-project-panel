@@ -6,18 +6,25 @@
  * Sprint 89: Server actions + orchestrator for the Live AI Import Agent Console.
  * Sprint 90: Chat messages woven into every orchestration step.
  * Sprint 92: Durable step-machine model.
+ * Sprint 93: Real AI planning — Sonnet inspects the project and proposes fixes.
  *
- *   startAiImportAgentRunAction  → creates run (status=queued) and returns immediately.
- *   runNextAiImportAgentStepAction → executes ONE phase per call; UI calls this
- *     every 2 s to advance the machine and get live state.
- *   fixAiImportAgentIssueAction  → stores pendingFixId + queues apply_fix, returns
- *     immediately so the button never hangs.
- *   retryAiImportAgentRunAction  → queues next appropriate phase, returns immediately.
+ * Step executor (called by UI every 2 s):
+ *   runNextAiImportAgentStepAction → advances one phase per call
+ *
+ * Phases (Sprint 93 additions):
+ *   plan_with_ai     — builds context, calls Sonnet, stores AiImportPlan
+ *   apply_ai_action  — executes one action from the plan (or pauses for approval)
+ *
+ * New actions:
+ *   approveAiImportAgentPatchAction — writes AI-proposed file, continues
+ *   rejectAiImportAgentPatchAction  — skips file edit, continues
+ *   checkAiProviderStatusAction     — returns whether ANTHROPIC_API_KEY is set
  *
  * Safety:
- *  - deploy.trigger required for start/fix/retry
+ *  - deploy.trigger required for start/fix/retry/approve/reject
  *  - No secrets returned to the client
  *  - Only safe-allowlisted config changes applied automatically
+ *  - File edits ALWAYS require user approval
  *  - Only this project's PM2 process is managed
  *  - No automatic go-live, no DNS mutation, no DB wipe
  */
@@ -29,6 +36,7 @@ import { getAuditRequestContext }      from "@/lib/audit/request-context";
 import { db }                          from "@/lib/db";
 import { getProjectByIdForImport }     from "@/lib/projects/project-lookup-fallback";
 import { runAutoImportAnalysis }       from "@/lib/auto-import/auto-import-orchestrator";
+import { writeProjectTextFile }        from "@/lib/projects/file-manager";
 import {
   getOrCreateAgentRun,
   getLatestAgentRun,
@@ -42,7 +50,6 @@ import {
   completeStep,
   setRunError,
   clearRunError,
-  setRunStatus,
   setRunPhase,
   previewOutput,
   appendChatMessage,
@@ -63,6 +70,9 @@ import {
   runBuildInRelease,
   FRONTEND_INDEX_HTML_CANDIDATE_DIRS,
 }                                       from "@/lib/ai-import-agent/agent-output-inspector";
+import { buildImportAiContext }        from "@/lib/ai-import-agent/agent-ai-context-builder";
+import { planWithAi, isAiProviderAvailable } from "@/lib/ai-import-agent/agent-ai-planner";
+import { executeAiAction }             from "@/lib/ai-import-agent/agent-ai-patch-executor";
 import type { AgentRun }               from "@/lib/ai-import-agent/agent-run-types";
 import {
   IN_FLIGHT_STATUSES,
@@ -71,7 +81,9 @@ import {
 }                                       from "@/lib/ai-import-agent/agent-run-types";
 import type { AgentPreviewResult }     from "@/lib/ai-import-agent/agent-preview-checker";
 
-const MAX_FIX_ATTEMPTS = 2;
+const MAX_FIX_ATTEMPTS       = 2;
+const MAX_AI_ITERATIONS      = 3;   // max plan_with_ai cycles before giving up
+const MAX_DEPLOY_AFTER_AI    = 3;   // max deploy attempts in AI-driven loop
 
 type ActionResult<T = void> =
   | { ok: true;  data: T }
@@ -242,13 +254,22 @@ async function executeDeployPhase(run: AgentRun, projectId: string): Promise<Age
       fixId:         classified.safeFixId,
     });
     setRunError(run, classified);
-    setRunPhase(
-      run,
-      undefined,
-      classified.safeFixAvailable ? "waiting_for_fix_approval" : "failed",
-      classified.whatHappened,
-    );
-    if (classified.safeFixId) run.pendingFixId = classified.safeFixId;
+
+    // Sprint 93: if no deterministic fix, ask Sonnet for a plan
+    if (classified.safeFixAvailable) {
+      setRunPhase(run, undefined, "waiting_for_fix_approval", classified.whatHappened);
+      if (classified.safeFixId) run.pendingFixId = classified.safeFixId;
+    } else {
+      const deployCount = (run.attemptCount ?? 0);
+      if (deployCount < MAX_DEPLOY_AFTER_AI && isAiProviderAvailable()) {
+        appendChatMessage(run, "I'm asking the AI assistant to inspect the deployment failure.", { tone: "thinking" });
+        run.aiPlan = undefined;
+        run.aiPlanActionIndex = undefined;
+        setRunPhase(run, "plan_with_ai", "queued", "Consulting AI for a fix plan…");
+      } else {
+        setRunPhase(run, undefined, "failed", classified.whatHappened);
+      }
+    }
     await saveAndLog(run, projectId);
     return run;
   }
@@ -290,13 +311,40 @@ async function executeCheckPreviewPhase(run: AgentRun, projectId: string): Promi
     });
     run.steps.push(...preview.checks);
     setRunError(run, classified);
-    setRunPhase(
-      run,
-      undefined,
-      classified.safeFixAvailable ? "waiting_for_fix_approval" : "failed",
-      classified.whatHappened,
-    );
-    if (classified.safeFixId) run.pendingFixId = classified.safeFixId;
+
+    if (classified.safeFixAvailable) {
+      // Deterministic fix exists — show to user for approval
+      setRunPhase(run, undefined, "waiting_for_fix_approval", classified.whatHappened);
+      if (classified.safeFixId) run.pendingFixId = classified.safeFixId;
+    } else {
+      // No deterministic fix — Sprint 93: escalate to AI if available
+      const iterCount = run.iterationCount ?? 0;
+      if (iterCount < MAX_AI_ITERATIONS && isAiProviderAvailable()) {
+        appendChatMessage(
+          run,
+          "I'm asking the AI assistant to inspect the build output problem.",
+          { tone: "thinking" },
+        );
+        run.aiPlan = undefined;
+        run.aiPlanActionIndex = undefined;
+        setRunPhase(run, "plan_with_ai", "queued", "Consulting AI for a fix plan…");
+      } else if (!isAiProviderAvailable()) {
+        appendChatMessage(
+          run,
+          "AI provider not configured — rule-based import only. Manual review required.",
+          { tone: "warning" },
+        );
+        setRunPhase(run, undefined, "failed", classified.whatHappened);
+      } else {
+        appendChatMessage(
+          run,
+          `I could not make this live automatically after ${iterCount} AI planning iterations. Here is the exact blocker and what needs manual review.`,
+          { tone: "error" },
+        );
+        setRunPhase(run, undefined, "failed", `${classified.whatHappened} (AI iterations exhausted)`);
+      }
+    }
+
     await saveAndLog(run, projectId);
     return run;
   }
@@ -317,7 +365,6 @@ async function executeCheckPreviewPhase(run: AgentRun, projectId: string): Promi
 }
 
 async function executeVerifyPreviewPhase(run: AgentRun, projectId: string): Promise<AgentRun> {
-  // Same logic as check_preview — reuses the same helper
   return executeCheckPreviewPhase(run, projectId);
 }
 
@@ -337,12 +384,10 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
   setRunPhase(run, "apply_fix", "fixing", `Applying fix (attempt ${attemptCount})…`);
   await saveAndLog(run, projectId);
 
-  // ── Special case: filesystem inspection fix ────────────────────────────────
   if (fixId === "inspect_and_fix_frontend_build_output") {
     return executeInspectOutputFix(run, projectId);
   }
 
-  // ── Special case: PM2 env refresh — retries preview itself ────────────────
   if (fixId === "refresh_panel_pm2_env_and_retry_preview") {
     const fixRes = await applyAgentFix({ projectId, fixId });
     if (!fixRes.ok) {
@@ -374,13 +419,11 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
       await saveAndLog(run, projectId);
       return run;
     }
-    // Fall through to verify_preview
     setRunPhase(run, "verify_preview", "queued", "Fix applied — verifying preview.");
     await saveAndLog(run, projectId);
     return run;
   }
 
-  // ── All other delegated fixes ─────────────────────────────────────────────
   const fixRes = await applyAgentFix({ projectId, fixId });
   if (!fixRes.ok) {
     addCompletedStep(run, `fix-${fixId}`, "Fix attempt", "error", fixRes.error, { errorMessage: fixRes.error });
@@ -399,10 +442,170 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
   return run;
 }
 
+// ── Sprint 93: AI planning phase ──────────────────────────────────────────────
+
+async function executePlanWithAiPhase(run: AgentRun, projectId: string): Promise<AgentRun> {
+  run.iterationCount = (run.iterationCount ?? 0) + 1;
+  setRunPhase(run, "plan_with_ai", "planning", "Consulting AI assistant for a fix plan…");
+  appendChatMessage(
+    run,
+    `I'm asking Sonnet to inspect the build output problem (iteration ${run.iterationCount}/${MAX_AI_ITERATIONS}).`,
+    { tone: "thinking" },
+  );
+  beginStep(run, `ai-plan-${run.iterationCount}`, "AI Planning", "Building context and calling Sonnet…");
+  await saveAndLog(run, projectId);
+
+  // Get the most recent preview result from run state for context
+  const lastPreviewError = run.lastError;
+  const lastDeployLog = run.steps.find((s) => s.id === "deploy")?.fullOutput;
+
+  const contextResult = await buildImportAiContext({
+    projectId,
+    errorKind:  lastPreviewError?.kind,
+    deployLog:  lastDeployLog,
+  });
+
+  if (!contextResult.ok) {
+    appendChatMessage(run, `I couldn't build the AI context: ${contextResult.error}`, { tone: "error" });
+    completeStep(run, `ai-plan-${run.iterationCount}`, "error", contextResult.error, { errorMessage: contextResult.error });
+    setRunPhase(run, undefined, "failed", contextResult.error);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  appendChatMessage(run, "Sending project context to Sonnet…", { tone: "thinking" });
+
+  const planResult = await planWithAi(contextResult.context);
+
+  if (!planResult.ok) {
+    if (planResult.code === "NO_API_KEY") {
+      appendChatMessage(run, "AI provider not configured — rule-based import only.", { tone: "warning" });
+      completeStep(run, `ai-plan-${run.iterationCount}`, "warning", "AI provider not configured.", {});
+      setRunPhase(run, undefined, "failed", "AI provider not configured — manual review required.");
+    } else {
+      appendChatMessage(run, `Sonnet returned an error: ${planResult.error}`, { tone: "error" });
+      completeStep(run, `ai-plan-${run.iterationCount}`, "error", planResult.error, { errorMessage: planResult.error });
+      setRunPhase(run, undefined, "failed", planResult.error);
+    }
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  const { plan } = planResult;
+  run.aiPlan = plan;
+  run.aiPlanActionIndex = 0;
+
+  appendChatMessage(run, `Sonnet says: ${plan.summary}`, { tone: "info" });
+  appendChatMessage(run, `Diagnosis: ${plan.diagnosis}`, { tone: "thinking" });
+
+  if (plan.stopReason) {
+    appendChatMessage(run, `Sonnet says it cannot fix this automatically: ${plan.stopReason}`, { tone: "error" });
+    completeStep(run, `ai-plan-${run.iterationCount}`, "warning", plan.stopReason);
+    setRunPhase(run, undefined, "failed", `AI blocked: ${plan.stopReason}`);
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  if (plan.recommendedActions.length === 0) {
+    appendChatMessage(run, "Sonnet has no more actions to suggest.", { tone: "warning" });
+    completeStep(run, `ai-plan-${run.iterationCount}`, "warning", "No actions recommended.");
+    setRunPhase(run, undefined, "failed", "AI returned no actionable fixes.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  completeStep(run, `ai-plan-${run.iterationCount}`, "success",
+    `${plan.recommendedActions.length} action(s) recommended (confidence: ${plan.confidence})`);
+  setRunPhase(run, "apply_ai_action", "queued", "AI plan ready — applying first action.");
+  await saveAndLog(run, projectId);
+  return run;
+}
+
+// ── Sprint 93: AI action execution phase ─────────────────────────────────────
+
+async function executeApplyAiActionPhase(run: AgentRun, projectId: string): Promise<AgentRun> {
+  const plan = run.aiPlan;
+  if (!plan) {
+    setRunPhase(run, "plan_with_ai", "queued", "No plan found — re-planning.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  const actionIndex = run.aiPlanActionIndex ?? 0;
+  const action = plan.recommendedActions[actionIndex];
+
+  if (!action) {
+    // All actions done — trigger a deploy to apply changes, then verify
+    appendChatMessage(run, "All AI-recommended actions have been applied. Deploying and checking preview.", { tone: "thinking" });
+    run.aiPlan = undefined;
+    run.aiPlanActionIndex = undefined;
+    setRunPhase(run, "deploy", "queued", "AI actions applied — deploying next.");
+    await saveAndLog(run, projectId);
+    return run;
+  }
+
+  setRunPhase(run, "apply_ai_action", "running", `Executing AI action: ${action.title}`);
+  appendChatMessage(run, `Sonnet recommends: ${action.title}. Reason: ${action.reason}`, { tone: "thinking" });
+  beginStep(run, `ai-action-${actionIndex}`, action.title, action.reason ?? action.title);
+  await saveAndLog(run, projectId);
+
+  const result = await executeAiAction(projectId, action, actionIndex);
+
+  switch (result.outcome) {
+    case "done": {
+      appendChatMessage(run, result.message, { tone: "success" });
+      completeStep(run, `ai-action-${actionIndex}`, "fixed", result.message, {
+        outputPreview: result.output ? previewOutput(result.output) : undefined,
+        fullOutput:    result.output,
+      });
+      run.aiPlanActionIndex = actionIndex + 1;
+      setRunPhase(run, "apply_ai_action", "queued", "Action done — next action queued.");
+      await saveAndLog(run, projectId);
+      return run;
+    }
+
+    case "needs_approval": {
+      appendChatMessage(
+        run,
+        `Sonnet recommends changing ${result.pendingPatch.filePath}. Please approve this patch.`,
+        { tone: "warning" },
+      );
+      completeStep(run, `ai-action-${actionIndex}`, "warning", "Awaiting patch approval.");
+      run.pendingPatch = { ...result.pendingPatch, actionIndex };
+      setRunPhase(run, undefined, "waiting_for_patch_approval", `Patch pending approval: ${result.pendingPatch.filePath}`);
+      await saveAndLog(run, projectId);
+      return run;
+    }
+
+    case "needs_input": {
+      appendChatMessage(run, `I need your input: ${result.message}`, { tone: "warning" });
+      completeStep(run, `ai-action-${actionIndex}`, "warning", result.message);
+      setRunPhase(run, undefined, "waiting_for_user_input", result.message);
+      await saveAndLog(run, projectId);
+      return run;
+    }
+
+    case "blocked": {
+      appendChatMessage(run, `This fix requires manual action: ${result.message}`, { tone: "error" });
+      completeStep(run, `ai-action-${actionIndex}`, "error", result.message, { errorMessage: result.message });
+      setRunPhase(run, undefined, "failed", `Manual action required: ${result.message}`);
+      await saveAndLog(run, projectId);
+      return run;
+    }
+
+    case "error": {
+      appendChatMessage(run, `Action failed: ${result.message}`, { tone: "error" });
+      completeStep(run, `ai-action-${actionIndex}`, "error", result.message, { errorMessage: result.message });
+      // Skip this action and try the next one
+      run.aiPlanActionIndex = actionIndex + 1;
+      setRunPhase(run, "apply_ai_action", "queued", "Action failed — trying next action.");
+      await saveAndLog(run, projectId);
+      return run;
+    }
+  }
+}
+
 // ── inspect_and_fix_frontend_build_output ────────────────────────────────────
-// Runs inside executeApplyFixPhase when the fixId matches. Inspects the latest
-// release snapshot for index.html (possibly running the build once), updates
-// staticOutputDir in DB, then queues a deploy.
 
 async function executeInspectOutputFix(run: AgentRun, projectId: string): Promise<AgentRun> {
   const project = await getProjectByIdForImport(projectId);
@@ -425,7 +628,6 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
     return run;
   }
 
-  // ── A: find the latest release snapshot ───────────────────────────────────
   appendChatMessage(run, "I'm checking the expected frontend output folder.", { tone: "thinking" });
   beginStep(run, "inspect_release", "Inspect release", "Looking for the latest release snapshot…");
   await saveAndLog(run, projectId);
@@ -452,7 +654,6 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
 
   appendChatMessage(run, "Found the latest release snapshot.", { tone: "info" });
 
-  // ── B: check expected staticOutputDir ─────────────────────────────────────
   const expectedDir = config.staticOutputDir ?? "artifacts/sardar-security/dist/public";
   let found = checkIndexHtmlAt(releasePath, expectedDir)
     ? { relativeDir: expectedDir }
@@ -462,15 +663,13 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
     appendChatMessage(run, `Found index.html at the expected path: ${expectedDir}.`, { tone: "success" });
     completeStep(run, "inspect_release", "success", `Found index.html at ${expectedDir}.`);
   } else {
-    // ── C: search candidate paths ──────────────────────────────────────────
-    appendChatMessage(run, `I did not find index.html there. I'm searching common build output folders.`, { tone: "thinking" });
+    appendChatMessage(run, "I did not find index.html there. I'm searching common build output folders.", { tone: "thinking" });
     found = findIndexHtml(releasePath);
 
     if (found) {
       appendChatMessage(run, `Found index.html at ${found.relativeDir}. I'll update the config path.`, { tone: "success" });
       completeStep(run, "inspect_release", "success", `Found index.html at ${found.relativeDir}.`);
     } else {
-      // ── D: run build once ─────────────────────────────────────────────────
       appendChatMessage(run, "I'm rebuilding the frontend now.", { tone: "thinking" });
       completeStep(run, "inspect_release", "warning", "No build output found — attempting build.");
       await saveAndLog(run, projectId);
@@ -517,7 +716,16 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
           safeFixAvailable: false,
           technicalReason: buildResult.output.slice(0, 500),
         });
-        setRunPhase(run, undefined, "failed", errMsg);
+        // Sprint 93: escalate to AI if build output is consistently missing
+        const iterCount = run.iterationCount ?? 0;
+        if (iterCount < MAX_AI_ITERATIONS && isAiProviderAvailable()) {
+          appendChatMessage(run, "I'm asking the AI assistant to inspect the Vite build config.", { tone: "thinking" });
+          run.aiPlan = undefined;
+          run.aiPlanActionIndex = undefined;
+          setRunPhase(run, "plan_with_ai", "queued", "Build failed — consulting AI.");
+        } else {
+          setRunPhase(run, undefined, "failed", errMsg);
+        }
         await saveAndLog(run, projectId);
         return run;
       }
@@ -540,7 +748,15 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
           safeFixAvailable: false,
           technicalReason: `Searched: ${FRONTEND_INDEX_HTML_CANDIDATE_DIRS.join(", ")}`,
         });
-        setRunPhase(run, undefined, "failed", errMsg);
+        const iterCount = run.iterationCount ?? 0;
+        if (iterCount < MAX_AI_ITERATIONS && isAiProviderAvailable()) {
+          appendChatMessage(run, "I'm asking Sonnet to inspect the Vite config and output directory.", { tone: "thinking" });
+          run.aiPlan = undefined;
+          run.aiPlanActionIndex = undefined;
+          setRunPhase(run, "plan_with_ai", "queued", "No output found — consulting AI.");
+        } else {
+          setRunPhase(run, undefined, "failed", errMsg);
+        }
         await saveAndLog(run, projectId);
         return run;
       }
@@ -551,7 +767,6 @@ async function executeInspectOutputFix(run: AgentRun, projectId: string): Promis
 
   await saveAndLog(run, projectId);
 
-  // ── E: update staticOutputDir if it differs ───────────────────────────────
   if (found.relativeDir !== config.staticOutputDir) {
     appendChatMessage(
       run,
@@ -587,7 +802,6 @@ export async function runNextAiImportAgentStepAction(input: {
   if (!run) return { ok: false, error: "No agent run found." };
 
   try {
-    // ── Watchdog: mark stale in-flight runs as timed_out ─────────────────────
     if (isRunTimedOut(run)) {
       appendChatMessage(
         run,
@@ -600,30 +814,29 @@ export async function runNextAiImportAgentStepAction(input: {
       return { ok: true, data: run };
     }
 
-    // ── In-flight: a step is executing in another request ─────────────────────
     if (IN_FLIGHT_STATUSES.includes(run.status)) {
       return { ok: true, data: run };
     }
 
-    // ── Terminal or waiting: return as-is ─────────────────────────────────────
     if (TERMINAL_STATUSES.includes(run.status) || WAITING_STATUSES.includes(run.status)) {
       return { ok: true, data: run };
     }
 
-    // ── queued: execute next phase ────────────────────────────────────────────
     if (!run.nextPhase) {
       return { ok: true, data: run };
     }
 
     let finalRun: AgentRun;
     switch (run.nextPhase) {
-      case "analyze":        finalRun = await executeAnalyzePhase(run, input.projectId);       break;
-      case "apply_preset":   finalRun = await executeApplyPresetPhase(run, input.projectId);   break;
-      case "deploy":         finalRun = await executeDeployPhase(run, input.projectId);        break;
-      case "check_preview":  finalRun = await executeCheckPreviewPhase(run, input.projectId);  break;
-      case "apply_fix":      finalRun = await executeApplyFixPhase(run, input.projectId);      break;
-      case "verify_preview": finalRun = await executeVerifyPreviewPhase(run, input.projectId); break;
-      default:               finalRun = run; break;
+      case "analyze":          finalRun = await executeAnalyzePhase(run, input.projectId);       break;
+      case "apply_preset":     finalRun = await executeApplyPresetPhase(run, input.projectId);   break;
+      case "deploy":           finalRun = await executeDeployPhase(run, input.projectId);        break;
+      case "check_preview":    finalRun = await executeCheckPreviewPhase(run, input.projectId);  break;
+      case "apply_fix":        finalRun = await executeApplyFixPhase(run, input.projectId);      break;
+      case "verify_preview":   finalRun = await executeVerifyPreviewPhase(run, input.projectId); break;
+      case "plan_with_ai":     finalRun = await executePlanWithAiPhase(run, input.projectId);    break;
+      case "apply_ai_action":  finalRun = await executeApplyAiActionPhase(run, input.projectId); break;
+      default:                 finalRun = run; break;
     }
 
     revalidatePath(`/projects/${input.projectId}/import`);
@@ -634,8 +847,6 @@ export async function runNextAiImportAgentStepAction(input: {
 }
 
 // ── Action: startAiImportAgentRunAction ───────────────────────────────────────
-// Creates the run row and returns immediately. The UI drives execution via
-// runNextAiImportAgentStepAction.
 
 export async function startAiImportAgentRunAction(input: {
   projectId: string;
@@ -691,9 +902,122 @@ export async function getAiImportAgentRunAction(input: {
   }
 }
 
+// ── Action: checkAiProviderStatusAction ───────────────────────────────────────
+// Returns whether ANTHROPIC_API_KEY is configured — never returns the key itself.
+
+export async function checkAiProviderStatusAction(): Promise<ActionResult<{ available: boolean }>> {
+  return { ok: true, data: { available: isAiProviderAvailable() } };
+}
+
+// ── Action: approveAiImportAgentPatchAction ───────────────────────────────────
+// Writes the AI-proposed file to disk, then resumes execution.
+
+export async function approveAiImportAgentPatchAction(input: {
+  projectId: string;
+  runId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  const patch = run.pendingPatch;
+  if (!patch) return { ok: false, error: "No pending patch to approve." };
+
+  try {
+    const writeResult = await writeProjectTextFile(input.projectId, patch.filePath, patch.proposedContent);
+    if (!writeResult.ok) {
+      appendChatMessage(run, `Could not write ${patch.filePath}: ${writeResult.error}`, { tone: "error" });
+      addCompletedStep(run, `patch-${patch.actionId}`, `Write ${patch.filePath}`, "error", writeResult.error, {
+        errorMessage: writeResult.error,
+      });
+      run.pendingPatch = undefined;
+      setRunPhase(run, undefined, "failed", writeResult.error);
+      await saveAndLog(run, input.projectId);
+      return { ok: true, data: run };
+    }
+
+    appendChatMessage(run, `Patch applied to ${patch.filePath}. Continuing with the plan.`, { tone: "success" });
+    addCompletedStep(run, `patch-${patch.actionId}`, `Write ${patch.filePath}`, "fixed",
+      `Updated ${patch.filePath} (${writeResult.data.size} bytes)`);
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.patch_approved",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent patch approved: ${patch.filePath}`,
+      metadata:    { filePath: patch.filePath, actionId: patch.actionId },
+      ...ctx,
+    }).catch(() => null);
+
+    run.pendingPatch = undefined;
+    run.aiPlanActionIndex = patch.actionIndex + 1;
+    clearRunError(run);
+    setRunPhase(run, "apply_ai_action", "queued", "Patch applied — continuing plan.");
+    await saveAndLog(run, input.projectId);
+    revalidatePath(`/projects/${input.projectId}/import`);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Patch application failed" };
+  }
+}
+
+// ── Action: rejectAiImportAgentPatchAction ────────────────────────────────────
+// Skips the file edit and advances to the next action in the plan.
+
+export async function rejectAiImportAgentPatchAction(input: {
+  projectId: string;
+  runId: string;
+}): Promise<ActionResult<AgentRun>> {
+  const exists = await assertProjectExists(input.projectId);
+  if (!exists.ok) return { ok: false, error: exists.error };
+
+  const auth = await deployOrEditAuth(input.projectId);
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const run = await getLatestAgentRun(input.projectId);
+  if (!run) return { ok: false, error: "No agent run found." };
+
+  const patch = run.pendingPatch;
+  if (!patch) return { ok: false, error: "No pending patch to reject." };
+
+  try {
+    appendChatMessage(run, `Patch for ${patch.filePath} rejected. Skipping to the next action.`, { tone: "info" });
+    addCompletedStep(run, `patch-${patch.actionId}`, `Write ${patch.filePath}`, "skipped", "Rejected by user.");
+
+    const ctx = await getAuditRequestContext();
+    void writeProjectAuditEvent({
+      projectId:   input.projectId,
+      actorUserId: auth.userId,
+      actorRole:   auth.role,
+      action:      "ai_import_agent.patch_rejected",
+      category:    "publishing",
+      result:      "success",
+      summary:     `AI import agent patch rejected: ${patch.filePath}`,
+      metadata:    { filePath: patch.filePath, actionId: patch.actionId },
+      ...ctx,
+    }).catch(() => null);
+
+    run.pendingPatch = undefined;
+    run.aiPlanActionIndex = patch.actionIndex + 1;
+    setRunPhase(run, "apply_ai_action", "queued", "Patch skipped — continuing plan.");
+    await saveAndLog(run, input.projectId);
+    revalidatePath(`/projects/${input.projectId}/import`);
+    return { ok: true, data: run };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message.slice(0, 300) : "Patch rejection failed" };
+  }
+}
+
 // ── Action: fixAiImportAgentIssueAction ───────────────────────────────────────
-// Stores the fix and queues apply_fix — returns immediately so the button
-// never hangs. The step executor runs the actual fix on the next poll.
 
 export async function fixAiImportAgentIssueAction(input: {
   projectId: string;
@@ -736,7 +1060,6 @@ export async function fixAiImportAgentIssueAction(input: {
 }
 
 // ── Action: retryAiImportAgentRunAction ───────────────────────────────────────
-// Queues the appropriate recovery phase and returns immediately.
 
 export async function retryAiImportAgentRunAction(input: {
   projectId: string;
@@ -754,8 +1077,6 @@ export async function retryAiImportAgentRunAction(input: {
   try {
     clearRunError(run);
     appendChatMessage(run, "I'm retrying from where I left off.", { tone: "thinking" });
-
-    // Resume from the most sensible phase based on what failed last
     const retryPhase = run.currentStep === "preview" ? "check_preview" : "deploy";
     setRunPhase(run, retryPhase, "queued", "Retrying…");
     await saveAndLog(run, input.projectId);
