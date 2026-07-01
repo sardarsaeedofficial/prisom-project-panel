@@ -162,6 +162,9 @@ export function appendChatMessage(
  * optimistic update can share the exact same wording.
  */
 export function getAgentFixStartMessage(fixId: string): string {
+  if (fixId === "plan_with_ai") {
+    return "Automatic fixes did not work. Asking Claude Sonnet to inspect the project files and build logs now.";
+  }
   if (fixId === "inspect_and_fix_frontend_build_output") {
     return "I'm inspecting the release directory for the built frontend output now.";
   }

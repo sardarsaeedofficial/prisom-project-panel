@@ -312,23 +312,37 @@ async function executeCheckPreviewPhase(run: AgentRun, projectId: string): Promi
     run.steps.push(...preview.checks);
     setRunError(run, classified);
 
-    if (classified.safeFixAvailable) {
-      // Deterministic fix exists — show to user for approval
+    // Hotfix: never re-offer the same deterministic fix after MAX_FIX_ATTEMPTS
+    const attemptsExhausted = (run.attemptCount ?? 0) >= MAX_FIX_ATTEMPTS;
+
+    if (classified.safeFixAvailable && !attemptsExhausted) {
+      // Deterministic fix available and still within attempt budget
       setRunPhase(run, undefined, "waiting_for_fix_approval", classified.whatHappened);
       if (classified.safeFixId) run.pendingFixId = classified.safeFixId;
     } else {
-      // No deterministic fix — Sprint 93: escalate to AI if available
+      // No deterministic fix, or attempts exhausted — escalate to AI or fail
       const iterCount = run.iterationCount ?? 0;
-      if (iterCount < MAX_AI_ITERATIONS && isAiProviderAvailable()) {
-        appendChatMessage(
-          run,
-          "I'm asking the AI assistant to inspect the build output problem.",
-          { tone: "thinking" },
-        );
+      if (isAiProviderAvailable() && iterCount < MAX_AI_ITERATIONS) {
+        const msg = attemptsExhausted
+          ? "The automatic fix was tried twice and did not solve the issue. I'm asking Claude Sonnet to inspect the project files and build logs now."
+          : "I'm asking the AI assistant to inspect the build output problem.";
+        appendChatMessage(run, msg, { tone: "thinking" });
         run.aiPlan = undefined;
         run.aiPlanActionIndex = undefined;
-        setRunPhase(run, "plan_with_ai", "queued", "Consulting AI for a fix plan…");
+        setRunPhase(run, "plan_with_ai", "queued", "Consulting Claude Sonnet for a fix plan…");
       } else if (!isAiProviderAvailable()) {
+        if (attemptsExhausted) {
+          setRunError(run, {
+            kind: "deterministic_fix_exhausted",
+            title: "Automatic fix did not work",
+            whatHappened: `The rule-based fix was tried ${MAX_FIX_ATTEMPTS} times but the preview is still not live.`,
+            why: "AI provider (ANTHROPIC_API_KEY) is not configured.",
+            whatICanDo: "Configure ANTHROPIC_API_KEY to enable Claude Sonnet planning, or review the build output manually.",
+            fixSafetyLevel: "safe",
+            safeFixAvailable: false,
+            technicalReason: `attemptCount=${run.attemptCount ?? 0} >= MAX_FIX_ATTEMPTS=${MAX_FIX_ATTEMPTS}`,
+          });
+        }
         appendChatMessage(
           run,
           "AI provider not configured — rule-based import only. Manual review required.",
@@ -374,9 +388,39 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
   run.attemptCount = attemptCount;
 
   if (attemptCount > MAX_FIX_ATTEMPTS) {
-    const msg = `Maximum fix attempts (${MAX_FIX_ATTEMPTS}) reached. Manual review required.`;
-    appendChatMessage(run, msg, { tone: "error" });
-    setRunPhase(run, undefined, "failed", msg);
+    const iterCount = run.iterationCount ?? 0;
+    if (isAiProviderAvailable() && iterCount < MAX_AI_ITERATIONS) {
+      // Escalate to Claude Sonnet planning instead of stopping
+      appendChatMessage(
+        run,
+        "The automatic fix was tried twice and did not solve the issue. I'm asking Claude Sonnet to inspect the project files and build logs now.",
+        { tone: "thinking" },
+      );
+      run.aiPlan = undefined;
+      run.aiPlanActionIndex = undefined;
+      setRunPhase(run, "plan_with_ai", "queued", "Consulting Claude Sonnet for a fix plan…");
+    } else {
+      const reason = !isAiProviderAvailable()
+        ? "Configure ANTHROPIC_API_KEY to enable Claude Sonnet planning."
+        : "AI planning iterations also exhausted.";
+      const msg = `Maximum fix attempts (${MAX_FIX_ATTEMPTS}) reached. ${reason}`;
+      appendChatMessage(run, msg, { tone: "error" });
+      setRunError(run, {
+        kind: "deterministic_fix_exhausted",
+        title: "Automatic fix did not work",
+        whatHappened: `The rule-based fix was tried ${MAX_FIX_ATTEMPTS} times but the preview is still not live.`,
+        why: !isAiProviderAvailable()
+          ? "AI provider (ANTHROPIC_API_KEY) is not configured."
+          : "AI planning iterations are also exhausted.",
+        whatICanDo: !isAiProviderAvailable()
+          ? "Configure ANTHROPIC_API_KEY to enable Claude Sonnet planning, or review the build output manually."
+          : "Manual review of build output and deployment config is required.",
+        fixSafetyLevel: "safe",
+        safeFixAvailable: false,
+        technicalReason: `attemptCount=${attemptCount} > MAX_FIX_ATTEMPTS=${MAX_FIX_ATTEMPTS}`,
+      });
+      setRunPhase(run, undefined, "failed", msg);
+    }
     await saveAndLog(run, projectId);
     return run;
   }
@@ -473,7 +517,11 @@ async function executePlanWithAiPhase(run: AgentRun, projectId: string): Promise
     return run;
   }
 
-  appendChatMessage(run, "Sending project context to Sonnet…", { tone: "thinking" });
+  appendChatMessage(
+    run,
+    "Claude Sonnet is inspecting your package.json, build logs, and output directories.",
+    { tone: "thinking" },
+  );
 
   const planResult = await planWithAi(contextResult.context);
 
@@ -1179,6 +1227,35 @@ export async function fixAiImportAgentIssueAction(input: {
   if (!run) return { ok: false, error: "No agent run found. Click Make Project Live first." };
 
   try {
+    // Special case: "plan_with_ai" bypasses the apply_fix phase entirely
+    if (input.fixId === "plan_with_ai") {
+      appendChatMessage(
+        run,
+        "Automatic fixes did not work. Asking Claude Sonnet to inspect the project files, build logs, and output folders.",
+        { tone: "thinking" },
+      );
+      run.aiPlan = undefined;
+      run.aiPlanActionIndex = undefined;
+      setRunPhase(run, "plan_with_ai", "queued", "Consulting Claude Sonnet for a fix plan…");
+      await saveAndLog(run, input.projectId);
+
+      const ctx0 = await getAuditRequestContext();
+      void writeProjectAuditEvent({
+        projectId:   input.projectId,
+        actorUserId: auth.userId,
+        actorRole:   auth.role,
+        action:      "ai_import_agent.fix_queued",
+        category:    "publishing",
+        result:      "success",
+        summary:     "AI import agent: escalated to Claude Sonnet planning",
+        metadata:    { fixId: "plan_with_ai" },
+        ...ctx0,
+      }).catch(() => null);
+
+      revalidatePath(`/projects/${input.projectId}/import`);
+      return { ok: true, data: run };
+    }
+
     run.pendingFixId = input.fixId;
     appendChatMessage(run, getAgentFixStartMessage(input.fixId), { tone: "thinking" });
     setRunPhase(run, "apply_fix", "queued", "Fix queued…");
