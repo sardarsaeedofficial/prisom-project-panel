@@ -69,6 +69,31 @@ export function classifyPreviewChecks(
 }
 
 const PATTERNS: Pattern[] = [
+  // ── Invalid pnpm workspace command ────────────────────────────────────────
+  // Matches "Invalid build command: pnpm sub-command "-r" is not allowed.
+  // Allowed: install, ci, build, start, run" and similar.
+  // Must run BEFORE the generic install/build-step-failed patterns so this
+  // more specific match always wins.
+  {
+    patterns: [
+      /Invalid (build|install|start) command:/i,
+      /pnpm sub-command .* is not allowed/i,
+      /sub-command "--filter" is not allowed/i,
+      /Allowed: install, ci, build, start, run/i,
+    ],
+    build: () => ({
+      kind: "invalid_pnpm_workspace_command",
+      title: "Deployment command is not allowed",
+      whatHappened: "The deploy command uses pnpm workspace syntax that this panel blocks for safety.",
+      why: "The command validator only allows safe install/build/start commands, so the deployment stopped before the app could rebuild.",
+      whatICanDo: "I can replace the deploy commands with the safe Sardar pnpm preset and redeploy.",
+      fixSafetyLevel: "safe" as const,
+      safeFixAvailable: true,
+      safeFixId: "normalize_pnpm_deploy_commands",
+      technicalReason: "pnpm workspace syntax (e.g., -r, --filter) is not on the command allowlist.",
+    }),
+  },
+
   // ── Panel preview proxy / panel DB unreachable ────────────────────────────
   // This is a PANEL-level failure (the proxy's own auth/workspace lookup),
   // not the imported app itself. The app may be running fine.

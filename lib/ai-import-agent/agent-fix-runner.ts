@@ -51,6 +51,8 @@ const DELEGATED_FIX_IDS = new Set([
  */
 const FIX_ID_ALIASES: Record<string, string> = {
   repair_static_frontend_routing: "fix-static-frontend-routing",
+  // Normalize any blocked pnpm workspace command → full Sardar safe preset
+  normalize_pnpm_deploy_commands: "apply-sardar-preset",
 };
 
 export async function applyAgentFix(input: {

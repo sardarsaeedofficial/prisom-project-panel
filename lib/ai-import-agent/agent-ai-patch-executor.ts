@@ -28,6 +28,29 @@ const ALLOWED_CONFIG_FIELDS = new Set([
   "installCommand", "buildCommand", "startCommand",
 ]);
 
+// ── Safe command guard (Step 4 — Sprint hotfix) ───────────────────────────────
+// Claude can sometimes suggest pnpm workspace syntax (pnpm -r, pnpm --filter,
+// npm run ..., yarn ...) that the command validator rejects at runtime.
+// Normalize to the known-safe Sardar preset values before writing to DB.
+
+const UNSAFE_CMD_PATTERNS = [
+  /pnpm\s+-r\b/,
+  /pnpm\s+--filter\b/,
+  /pnpm\s+--workspace\b/,
+  /^\s*npm\s+/,
+  /^\s*yarn\s+/,
+];
+
+const SAFE_SARDAR_COMMANDS: Record<string, string> = {
+  installCommand: "pnpm install",
+  buildCommand:   "pnpm run build",
+  startCommand:   "pnpm start",
+};
+
+function isUnsafeCommand(cmd: string): boolean {
+  return UNSAFE_CMD_PATTERNS.some((p) => p.test(cmd));
+}
+
 // ── Result types ──────────────────────────────────────────────────────────────
 
 export type ActionExecuteResult =
@@ -90,6 +113,19 @@ async function executeConfigUpdate(
     return { outcome: "error", message: "No allowed config fields in configPatch." };
   }
 
+  // Normalize any command field that uses workspace syntax Claude might have generated.
+  const commandFields = ["installCommand", "buildCommand", "startCommand"] as const;
+  const normalizedFields: string[] = [];
+  for (const field of commandFields) {
+    if (field in safePatch && typeof safePatch[field] === "string") {
+      const cmd = safePatch[field] as string;
+      if (isUnsafeCommand(cmd) && SAFE_SARDAR_COMMANDS[field]) {
+        safePatch[field] = SAFE_SARDAR_COMMANDS[field];
+        normalizedFields.push(field);
+      }
+    }
+  }
+
   try {
     await db.projectDeploymentConfig.update({
       where: { projectId },
@@ -100,7 +136,11 @@ async function executeConfigUpdate(
       .map(([k, v]) => `${k} = ${v === null ? "(cleared)" : String(v)}`)
       .join(", ");
 
-    return { outcome: "done", message: `Updated deployment config: ${changes}` };
+    const normNote = normalizedFields.length > 0
+      ? ` (Claude suggested a command that is not allowed, so I converted ${normalizedFields.join(", ")} to the safe deploy preset.)`
+      : "";
+
+    return { outcome: "done", message: `Updated deployment config: ${changes}${normNote}` };
   } catch (e) {
     const msg = e instanceof Error ? e.message.slice(0, 200) : "DB update failed";
     return { outcome: "error", message: msg };

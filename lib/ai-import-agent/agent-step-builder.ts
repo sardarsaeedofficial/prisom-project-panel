@@ -165,6 +165,9 @@ export function getAgentFixStartMessage(fixId: string): string {
   if (fixId === "plan_with_ai") {
     return "Automatic fixes did not work. Asking Claude Sonnet to inspect the project files and build logs now.";
   }
+  if (fixId === "normalize_pnpm_deploy_commands") {
+    return "I'm replacing the invalid pnpm workspace command with the safe Sardar pnpm deploy preset.";
+  }
   if (fixId === "inspect_and_fix_frontend_build_output") {
     return "I'm inspecting the release directory for the built frontend output now.";
   }

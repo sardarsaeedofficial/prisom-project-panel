@@ -246,7 +246,10 @@ async function executeDeployPhase(run: AgentRun, projectId: string): Promise<Age
   if (!deployResult.ok) {
     const errText = `${deployResult.output ?? ""}\n${deployResult.error ?? ""}`;
     const classified = classifyAgentErrorOrFallback(errText, "Deploy");
-    appendChatMessage(run, `Deploy failed. ${classified.whatHappened}`, { tone: "error" });
+    const deployFailMsg = classified.kind === "invalid_pnpm_workspace_command"
+      ? "The deploy command is using pnpm workspace syntax that is blocked by the safe command runner. I can replace it with the safe Sardar deploy preset."
+      : `Deploy failed. ${classified.whatHappened}`;
+    appendChatMessage(run, deployFailMsg, { tone: "error" });
     completeStep(run, "deploy", "error", deployResult.error || "Deploy failed", {
       errorMessage:  deployResult.error,
       fullOutput:    deployResult.output,
@@ -480,7 +483,10 @@ async function executeApplyFixPhase(run: AgentRun, projectId: string): Promise<A
   }
 
   addCompletedStep(run, `fix-${fixId}`, "Fix applied", "fixed", fixRes.label);
-  appendChatMessage(run, "The fix was applied. I'll redeploy and check preview again.", { tone: "success" });
+  const postFixMsg = fixId === "normalize_pnpm_deploy_commands"
+    ? "Deployment commands updated. I'll redeploy and check the preview again."
+    : "The fix was applied. I'll redeploy and check preview again.";
+  appendChatMessage(run, postFixMsg, { tone: "success" });
   clearRunError(run);
   setRunPhase(run, "deploy", "queued", "Fix applied — deploying next.");
   await saveAndLog(run, projectId);
