@@ -34,11 +34,11 @@ export default async function ProjectImportPage({ params }: Props) {
           description="One click to make your project live. I'll detect the stack, ask for what's missing, and handle the rest."
         />
 
-        <div className="space-y-6 max-w-3xl">
-          {/* ── Sprint 89: AI Import Agent Console — primary interface ── */}
-          <AiImportAgentConsole projectId={projectId} />
+        {/* Sprint 95: full-width workspace — no max-w constraint */}
+        <AiImportAgentConsole projectId={projectId} />
 
-          {/* ── Advanced tools — collapsed by default ── */}
+        {/* Advanced tools below, constrained */}
+        <div className="max-w-3xl mt-6">
           <AdvancedToolsSection
             projectId={projectId}
             projectSlug={project.slug}
